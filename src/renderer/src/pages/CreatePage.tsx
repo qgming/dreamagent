@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, GripVertical, MessageSquarePlus } from 'luci
 import type { Beat } from '@shared/project-types'
 import { cn } from '@/lib/utils'
 import { arrayMove } from '@/lib/project-utils'
+import { MentionEditor } from '@/components/EntityMentionEditor'
 import {
   getOrderedBeats,
   getOrderedEntities,
@@ -158,6 +159,10 @@ function CreateBeatEditor({
   beat: Beat
   onChange: (patch: Partial<Pick<Beat, 'title' | 'content'>>) => void
 }): React.JSX.Element {
+  const setSelectedEntityId = useProjectStore((s) => s.setSelectedEntityId)
+  const setSelectedBeatId = useProjectStore((s) => s.setSelectedBeatId)
+  const setProjectView = useProjectStore((s) => s.setProjectView)
+
   const [title, setTitle] = useState(beat.title)
   const [content, setContent] = useState(beat.content)
   const onChangeRef = useRef(onChange)
@@ -180,16 +185,28 @@ function CreateBeatEditor({
   }, [title, content, beat.title, beat.content])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col px-5 py-4">
-      <input
-        className="mb-3 h-10 bg-transparent text-lg font-medium outline-none"
-        onChange={(e) => setTitle(e.target.value)}
-        value={title}
-      />
-      <textarea
-        className="min-h-0 flex-1 resize-none bg-transparent text-sm leading-7 outline-none placeholder:text-muted-foreground app-scrollbar"
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="在此书写当前节点……"
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="px-5 pt-4">
+        <input
+          className="mb-2 h-10 w-full bg-transparent text-lg font-medium outline-none"
+          onChange={(e) => setTitle(e.target.value)}
+          value={title}
+        />
+      </div>
+      <MentionEditor
+        excludeId={beat.id}
+        onChange={setContent}
+        onOpenBeat={(id) => {
+          setSelectedBeatId(id)
+          setProjectView('beats')
+        }}
+        onOpenEntity={(id) => {
+          setSelectedEntityId(id)
+          setProjectView('entities')
+        }}
+        padClassName="px-5 py-2"
+        placeholder="在此书写当前节点……输入 @ 关联实体或节点"
+        sourceType="beat"
         value={content}
       />
     </div>

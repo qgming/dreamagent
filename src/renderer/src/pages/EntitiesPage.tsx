@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
   GripVertical,
   MoreHorizontal,
@@ -6,7 +6,9 @@ import {
   Plus,
   Trash2
 } from 'lucide-react'
-import type { Entity } from '@shared/project-types'
+import type { Beat, Entity } from '@shared/project-types'
+import { extractRefIds } from '@shared/mentions'
+import { MentionEditor } from '@/components/EntityMentionEditor'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -15,17 +17,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import { BACKLINK_CHIP } from '@/lib/mention-styles'
 import { cn } from '@/lib/utils'
+import { confirmDelete } from '@/components/ui/confirm-dialog'
 import { arrayMove } from '@/lib/project-utils'
-import { getOrderedEntities, useProjectStore } from '@/stores/project-store'
+import {
+  getOrderedBeats,
+  getOrderedEntities,
+  useProjectStore
+} from '@/stores/project-store'
 
-/** 与节点页一致的顶栏高度 */
 const TOOLBAR_CLASS =
   'flex h-11 shrink-0 items-center gap-2 border-b border-border px-3'
 
-/**
- * 实体管理页：对齐节点页 — 拖拽排序 / 更多菜单 / 名称-uuid 文件 / 无类型
- */
 export function EntitiesPage(): React.JSX.Element {
   const snapshot = useProjectStore((s) => s.snapshot)
   const selectedEntityId = useProjectStore((s) => s.selectedEntityId)
@@ -42,13 +46,18 @@ export function EntitiesPage(): React.JSX.Element {
 
   const handleReorder = (from: number, to: number): void => {
     if (!snapshot || from === to) return
-    const next = arrayMove(snapshot.index.entities.order, from, to)
-    void reorderEntities(next)
+    void reorderEntities(arrayMove(snapshot.index.entities.order, from, to))
   }
 
   const handleDelete = (entity: Entity): void => {
-    if (!window.confirm(`删除实体「${entity.name}」？`)) return
-    void deleteEntity(entity.id)
+    void (async () => {
+      const ok = await confirmDelete({
+        title: '删除实体',
+        description: `确定删除实体「${entity.name || '未命名实体'}」？\n正文中的双链将断为普通 @ 文本，此操作不可恢复。`
+      })
+      if (!ok) return
+      void deleteEntity(entity.id)
+    })()
   }
 
   if (!snapshot) {
@@ -148,7 +157,6 @@ function EntityListRow({
         setDragging(true)
         e.dataTransfer.effectAllowed = 'move'
         e.dataTransfer.setData('text/plain', String(index))
-        e.dataTransfer.setData('application/x-dreamagent-entity', entity.id)
       }}
       onDrop={(e: DragEvent) => {
         e.preventDefault()
@@ -164,7 +172,6 @@ function EntityListRow({
       <button className="min-w-0 flex-1 truncate text-left" onClick={onSelect} type="button">
         {entity.name || '未命名实体'}
       </button>
-
       <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(
@@ -198,40 +205,59 @@ function EntityEditor({
   onChange
 }: {
   entity: Entity
-  onChange: (patch: Partial<Pick<Entity, 'name' | 'content' | 'aliases'>>) => void
+  onChange: (patch: Partial<Pick<Entity, 'name' | 'content'>>) => void
 }): React.JSX.Element {
+  const snapshot = useProjectStore((s) => s.snapshot)
+  const setSelectedBeatId = useProjectStore((s) => s.setSelectedBeatId)
+  const setSelectedEntityId = useProjectStore((s) => s.setSelectedEntityId)
+  const setProjectView = useProjectStore((s) => s.setProjectView)
+
   const [name, setName] = useState(entity.name)
   const [content, setContent] = useState(entity.content)
-  const [aliases, setAliases] = useState(entity.aliases.join('，'))
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
 
   useEffect(() => {
     setName(entity.name)
     setContent(entity.content)
-    setAliases(entity.aliases.join('，'))
-  }, [entity.id, entity.name, entity.content, entity.aliases])
+  }, [entity.id, entity.name, entity.content])
 
   useEffect(() => {
-    const parsedAliases = aliases
-      .split(/[,，、]/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-    const sameAliases =
-      parsedAliases.length === entity.aliases.length &&
-      parsedAliases.every((a, i) => a === entity.aliases[i])
-
-    if (name === entity.name && content === entity.content && sameAliases) return
-
+    if (name === entity.name && content === entity.content) return
     const timer = window.setTimeout(() => {
-      onChangeRef.current({
-        name,
-        content,
-        aliases: parsedAliases
-      })
+      onChangeRef.current({ name, content })
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [name, content, aliases, entity.name, entity.content, entity.aliases])
+  }, [name, content, entity.name, entity.content])
+
+  const linkedBeats = useMemo((): Beat[] => {
+    if (!snapshot) return []
+    const map = new Map<string, Beat>()
+    for (const id of extractRefIds(content, 'beat')) {
+      const b = snapshot.beats[id]
+      if (b) map.set(id, b)
+    }
+    for (const b of getOrderedBeats(snapshot)) {
+      if (extractRefIds(b.content ?? '', 'entity').includes(entity.id)) map.set(b.id, b)
+    }
+    return [...map.values()]
+  }, [snapshot, content, entity.id])
+
+  const linkedEntities = useMemo((): Entity[] => {
+    if (!snapshot) return []
+    const map = new Map<string, Entity>()
+    for (const id of extractRefIds(content, 'entity', entity.id)) {
+      const e = snapshot.entities[id]
+      if (e) map.set(id, e)
+    }
+    for (const e of getOrderedEntities(snapshot)) {
+      if (e.id === entity.id) continue
+      if (extractRefIds(e.content ?? '', 'entity').includes(entity.id)) map.set(e.id, e)
+    }
+    return [...map.values()]
+  }, [snapshot, content, entity.id])
+
+  const hasLinks = linkedBeats.length > 0 || linkedEntities.length > 0
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -243,26 +269,68 @@ function EntityEditor({
           value={name}
         />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 app-scrollbar">
-        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-          别名（逗号分隔，用于 @ 匹配）
-          <input
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none ring-ring focus:ring-2"
-            onChange={(e) => setAliases(e.target.value)}
-            placeholder="魔藤，藤蔓，幼体"
-            value={aliases}
-          />
-        </label>
-        <label className="flex min-h-0 flex-1 flex-col gap-1.5 text-xs text-muted-foreground">
-          设定 / 简介
-          <textarea
-            className="min-h-[200px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none ring-ring focus:ring-2"
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="一句话或一段设定……"
-            value={content}
-          />
-        </label>
-      </div>
+
+      <MentionEditor
+        excludeId={entity.id}
+        onChange={setContent}
+        onOpenBeat={(id) => {
+          setSelectedBeatId(id)
+          setProjectView('beats')
+        }}
+        onOpenEntity={(id) => {
+          setSelectedEntityId(id)
+          setProjectView('entities')
+        }}
+        placeholder="写下实体设定……输入 @ 可关联实体或节点"
+        sourceType="entity"
+        value={content}
+      />
+
+      {hasLinks ? (
+        <div className="shrink-0 space-y-2 border-t border-border px-4 py-2">
+          {linkedBeats.length > 0 ? (
+            <div>
+              <p className="mb-1 text-[10px] font-medium text-muted-foreground">
+                关联节点 · {linkedBeats.length}
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {linkedBeats.map((b) => (
+                  <button
+                    className={BACKLINK_CHIP.cross}
+                    key={b.id}
+                    onClick={() => {
+                      setSelectedBeatId(b.id)
+                      setProjectView('beats')
+                    }}
+                    type="button"
+                  >
+                    <span className="truncate">@{b.title || '未命名节点'}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {linkedEntities.length > 0 ? (
+            <div>
+              <p className="mb-1 text-[10px] font-medium text-muted-foreground">
+                关联实体 · {linkedEntities.length}
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {linkedEntities.map((e) => (
+                  <button
+                    className={BACKLINK_CHIP.entity}
+                    key={e.id}
+                    onClick={() => setSelectedEntityId(e.id)}
+                    type="button"
+                  >
+                    <span className="truncate">@{e.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

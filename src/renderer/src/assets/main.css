@@ -115,7 +115,8 @@ body {
 
 /* 允许输入框选中文本 */
 input,
-textarea {
+textarea,
+[contenteditable='true'] {
   user-select: text;
   font: inherit;
 }

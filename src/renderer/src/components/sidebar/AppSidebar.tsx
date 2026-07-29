@@ -1,6 +1,5 @@
 import {
   BookOpen,
-  ChevronDown,
   ChevronRight,
   CircleDot,
   Home,
@@ -12,6 +11,7 @@ import {
   Trash2,
   Users
 } from 'lucide-react'
+import { AnimatePresence, motion } from 'motion/react'
 import { SidebarButton } from './SidebarButton'
 import {
   DropdownMenu,
@@ -21,11 +21,12 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { confirmDelete } from '@/components/ui/confirm-dialog'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useProjectStore, type ProjectView } from '@/stores/project-store'
 
 /**
- * 左侧导航：上（通用） / 中（项目） / 下（设置）
+ * 左侧导航：上（通用） / 中（项目，展开带动画） / 下（设置）
  */
 export function AppSidebar(): React.JSX.Element {
   const openSettings = useSettingsStore((s) => s.openSettings)
@@ -53,25 +54,21 @@ export function AppSidebar(): React.JSX.Element {
     void openProject(projectId, view)
   }
 
-  const goHome = (): void => {
-    closeProject()
-  }
-
   const handleDeleteProject = (projectId: string, title: string): void => {
-    if (
-      !window.confirm(
-        `确定删除项目「${title}」？\n将移除整个项目文件夹且不可恢复。`
-      )
-    ) {
-      return
-    }
-    void deleteProject(projectId)
+    void (async () => {
+      const ok = await confirmDelete({
+        title: '删除项目',
+        description: `确定删除项目「${title}」？\n将移除整个项目文件夹且不可恢复。`
+      })
+      if (!ok) return
+      void deleteProject(projectId)
+    })()
   }
 
   const isAppHome = !activeProjectId
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
+    <aside className="flex h-full w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
       <div className="px-4 pb-1 pt-4">
         <h1 className="text-lg font-semibold tracking-tight text-foreground">造梦师</h1>
       </div>
@@ -79,7 +76,7 @@ export function AppSidebar(): React.JSX.Element {
       <div className="px-3 pt-2">
         <SectionLabel>通用</SectionLabel>
         <nav className="space-y-1">
-          <SidebarButton active={isAppHome} icon={Home} label="首页" onClick={goHome} />
+          <SidebarButton active={isAppHome} icon={Home} label="首页" onClick={closeProject} />
           <div
             className="flex h-9 items-center gap-3 rounded-md px-3 text-sm text-muted-foreground/60"
             title="后续接入"
@@ -127,18 +124,17 @@ export function AppSidebar(): React.JSX.Element {
                       onClick={() => toggleProjectExpanded(project.id)}
                       type="button"
                     >
-                      {expanded ? (
-                        <ChevronDown className="size-3.5" />
-                      ) : (
+                      <motion.span
+                        animate={{ rotate: expanded ? 90 : 0 }}
+                        className="inline-flex"
+                        transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                      >
                         <ChevronRight className="size-3.5" />
-                      )}
+                      </motion.span>
                     </button>
                     <button
                       className="min-w-0 flex-1 truncate text-left font-medium"
-                      onClick={() => {
-                        if (!expanded) toggleProjectExpanded(project.id)
-                        void openProject(project.id, 'create')
-                      }}
+                      onClick={() => toggleProjectExpanded(project.id)}
                       title={project.title}
                       type="button"
                     >
@@ -158,9 +154,7 @@ export function AppSidebar(): React.JSX.Element {
                         <MoreHorizontal className="size-3.5" />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" side="bottom">
-                        <DropdownMenuItem
-                          onSelect={() => openEditProjectModal(project.id)}
-                        >
+                        <DropdownMenuItem onSelect={() => openEditProjectModal(project.id)}>
                           <Pencil className="size-3.5" />
                           编辑
                         </DropdownMenuItem>
@@ -176,31 +170,42 @@ export function AppSidebar(): React.JSX.Element {
                     </DropdownMenu>
                   </div>
 
-                  {expanded ? (
-                    <div className="mb-1 ml-3 space-y-0.5 border-l border-border pl-2">
-                      <SubNavButton
-                        active={isActiveProject && projectView === 'beats'}
-                        icon={CircleDot}
-                        label="节点"
-                        onClick={() => openView(project.id, 'beats')}
-                      />
-                      <SubNavButton
-                        active={isActiveProject && projectView === 'entities'}
-                        icon={Users}
-                        label="实体"
-                        onClick={() => openView(project.id, 'entities')}
-                      />
-                      <SubNavButton
-                        active={isActiveProject && projectView === 'create'}
-                        icon={BookOpen}
-                        label="创作"
-                        onClick={() => openView(project.id, 'create')}
-                      />
-                      <p className="px-2 py-1 text-[10px] text-muted-foreground">
-                        {project.beatCount} 节点 · {project.entityCount} 实体
-                      </p>
-                    </div>
-                  ) : null}
+                  <AnimatePresence initial={false}>
+                    {expanded ? (
+                      <motion.div
+                        animate={{ height: 'auto', opacity: 1 }}
+                        className="overflow-hidden"
+                        exit={{ height: 0, opacity: 0 }}
+                        initial={{ height: 0, opacity: 0 }}
+                        key={`${project.id}-sub`}
+                        transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+                      >
+                        <div className="mb-1 ml-3 space-y-0.5 border-l border-border pl-2">
+                          <SubNavButton
+                            active={isActiveProject && projectView === 'beats'}
+                            icon={CircleDot}
+                            label="节点"
+                            onClick={() => openView(project.id, 'beats')}
+                          />
+                          <SubNavButton
+                            active={isActiveProject && projectView === 'entities'}
+                            icon={Users}
+                            label="实体"
+                            onClick={() => openView(project.id, 'entities')}
+                          />
+                          <SubNavButton
+                            active={isActiveProject && projectView === 'create'}
+                            icon={BookOpen}
+                            label="创作"
+                            onClick={() => openView(project.id, 'create')}
+                          />
+                          <p className="px-2 py-1 text-[10px] text-muted-foreground">
+                            {project.beatCount} 节点 · {project.entityCount} 实体
+                          </p>
+                        </div>
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
                 </div>
               )
             })

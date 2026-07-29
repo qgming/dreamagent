@@ -1,18 +1,16 @@
 /**
  * 造梦师 · 项目/节点/实体 共享类型
- * 本地目录结构：
- *   {libraryRoot}/{projectFolder}/
- *     project.json
- *     index.json                      ← 顺序的唯一索引（扁平）
- *     beats/{名称}-{uuid}.json
- *     entities/{名称}-{uuid}.json
- *     documents/
+ *
+ * {libraryRoot}/{projectFolder}/
+ *   project.json
+ *   index.json
+ *   beats/{名称}-{uuid}.json
+ *   entities/{名称}-{uuid}.json
+ *   documents/
  */
 
-/** 节点状态 */
 export type BeatStatus = 'draft' | 'outlined' | 'expanded' | 'polished'
 
-/** 项目元信息（project.json） */
 export interface ProjectMeta {
   id: string
   folderName: string
@@ -23,32 +21,35 @@ export interface ProjectMeta {
   updatedAt: string
 }
 
-/** 节点文件（beats/{名称}-{uuid}.json） */
+/** 节点文件 */
 export interface Beat {
   id: string
   title: string
   fileName: string
   content: string
   status: BeatStatus
+  /** 正文双链 → 实体 */
   entityRefs: string[]
+  /** 正文双链 → 其他节点 */
+  beatRefs: string[]
   createdAt: string
   updatedAt: string
 }
 
-/** 实体文件（entities/{名称}-{uuid}.json）——无类型，仅名称 + 正文 */
+/** 实体文件 */
 export interface Entity {
   id: string
   name: string
   fileName: string
-  /** 设定 / 简介正文 */
   content: string
-  /** 别名，用于 @ 匹配 */
-  aliases: string[]
+  /** 正文双链 → 其他实体 */
+  entityRefs: string[]
+  /** 正文双链 → 节点 */
+  beatRefs: string[]
   createdAt: string
   updatedAt: string
 }
 
-/** 索引文件（index.json） */
 export interface ProjectIndex {
   version: number
   beats: { order: string[] }
@@ -90,15 +91,18 @@ export interface CreateBeatInput {
   afterId?: string | null
 }
 
-export type UpdateBeatInput = Partial<Pick<Beat, 'title' | 'content' | 'status' | 'entityRefs'>>
+export type UpdateBeatInput = Partial<
+  Pick<Beat, 'title' | 'content' | 'status' | 'entityRefs' | 'beatRefs'>
+>
 
 export interface CreateEntityInput {
   name: string
   content?: string
-  aliases?: string[]
 }
 
-export type UpdateEntityInput = Partial<Pick<Entity, 'name' | 'content' | 'aliases'>>
+export type UpdateEntityInput = Partial<
+  Pick<Entity, 'name' | 'content' | 'entityRefs' | 'beatRefs'>
+>
 
 export interface ReorderBeatsInput {
   orderedIds: string[]
@@ -112,4 +116,4 @@ export const BEAT_STATUS_LABELS: Record<BeatStatus, string> = {
 }
 
 export const PROJECT_SCHEMA_VERSION = 1
-export const INDEX_SCHEMA_VERSION = 2
+export const INDEX_SCHEMA_VERSION = 1

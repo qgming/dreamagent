@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import { TitleBar } from '@/components/TitleBar'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { NameFormModals } from '@/components/NameFormModals'
 import { SettingsModal } from '@/components/settings/SettingsModal'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useTheme } from '@/hooks/useTheme'
 import { BeatsPage } from '@/pages/BeatsPage'
 import { CreatePage } from '@/pages/CreatePage'
@@ -11,7 +13,7 @@ import { HomePage, useBootstrapLibrary } from '@/pages/HomePage'
 import { useProjectStore } from '@/stores/project-store'
 
 /**
- * 应用外壳：标题栏 + 侧边栏 + 主内容区
+ * 应用外壳：标题栏 + 侧边栏（带动画） + 主内容区
  */
 export function AppShell(): React.JSX.Element {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -23,7 +25,6 @@ export function AppShell(): React.JSX.Element {
   const snapshot = useProjectStore((s) => s.snapshot)
   const error = useProjectStore((s) => s.error)
 
-  // 窗口标题跟随当前项目
   useEffect(() => {
     const title = snapshot?.meta.title ? `${snapshot.meta.title} - 造梦师` : '造梦师'
     void window.api?.window?.setTitle?.(title)
@@ -37,7 +38,22 @@ export function AppShell(): React.JSX.Element {
       />
 
       <div className="flex min-h-0 flex-1">
-        {!sidebarCollapsed ? <AppSidebar /> : null}
+        <AnimatePresence initial={false}>
+          {!sidebarCollapsed ? (
+            <motion.div
+              animate={{ width: 240, opacity: 1 }}
+              className="h-full shrink-0 overflow-hidden"
+              exit={{ width: 0, opacity: 0 }}
+              initial={{ width: 0, opacity: 0 }}
+              key="sidebar"
+              transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+            >
+              <div className="h-full w-60">
+                <AppSidebar />
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
 
         <main className="relative min-w-0 flex-1 overflow-hidden bg-background">
           {error ? (
@@ -62,6 +78,7 @@ export function AppShell(): React.JSX.Element {
 
       <SettingsModal />
       <NameFormModals />
+      <ConfirmDialog />
     </div>
   )
 }

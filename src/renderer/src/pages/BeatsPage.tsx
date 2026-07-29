@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
   ChevronDown,
   GripVertical,
@@ -10,8 +10,11 @@ import {
 import {
   BEAT_STATUS_LABELS,
   type Beat,
-  type BeatStatus
+  type BeatStatus,
+  type Entity
 } from '@shared/project-types'
+import { extractRefIds } from '@shared/mentions'
+import { MentionEditor } from '@/components/EntityMentionEditor'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -22,23 +25,24 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import { BACKLINK_CHIP } from '@/lib/mention-styles'
 import { cn } from '@/lib/utils'
+import { confirmDelete } from '@/components/ui/confirm-dialog'
 import {
   arrayMove,
   BEAT_STATUS_DOT_CLASS,
   beatStatusTitle
 } from '@/lib/project-utils'
-import { getOrderedBeats, useProjectStore } from '@/stores/project-store'
+import {
+  getOrderedBeats,
+  getOrderedEntities,
+  useProjectStore
+} from '@/stores/project-store'
 
 const STATUSES: BeatStatus[] = ['draft', 'outlined', 'expanded', 'polished']
-
-/** 左右顶栏统一高度 */
 const TOOLBAR_CLASS =
   'flex h-11 shrink-0 items-center gap-2 border-b border-border px-3'
 
-/**
- * 节点管理页：可拖拽排序 + 更多菜单 + 状态色点；右侧顶栏与左侧等高
- */
 export function BeatsPage(): React.JSX.Element {
   const snapshot = useProjectStore((s) => s.snapshot)
   const selectedBeatId = useProjectStore((s) => s.selectedBeatId)
@@ -54,13 +58,18 @@ export function BeatsPage(): React.JSX.Element {
 
   const handleReorder = (from: number, to: number): void => {
     if (!snapshot || from === to) return
-    const next = arrayMove(snapshot.index.beats.order, from, to)
-    void reorderBeats({ orderedIds: next })
+    void reorderBeats({ orderedIds: arrayMove(snapshot.index.beats.order, from, to) })
   }
 
   const handleDelete = (beat: Beat): void => {
-    if (!window.confirm(`删除节点「${beat.title}」？`)) return
-    void deleteBeat(beat.id)
+    void (async () => {
+      const ok = await confirmDelete({
+        title: '删除节点',
+        description: `确定删除节点「${beat.title || '未命名节点'}」？\n此操作不可恢复。`
+      })
+      if (!ok) return
+      void deleteBeat(beat.id)
+    })()
   }
 
   if (!snapshot) {
@@ -160,7 +169,6 @@ function BeatListRow({
         setDragging(true)
         e.dataTransfer.effectAllowed = 'move'
         e.dataTransfer.setData('text/plain', String(index))
-        e.dataTransfer.setData('application/x-dreamagent-beat', beat.id)
       }}
       onDrop={(e: DragEvent) => {
         e.preventDefault()
@@ -176,7 +184,6 @@ function BeatListRow({
       <button className="min-w-0 flex-1 truncate text-left" onClick={onSelect} type="button">
         {beat.title || '未命名节点'}
       </button>
-
       <span className="relative flex size-6 shrink-0 items-center justify-center">
         <span
           className={cn(
@@ -221,6 +228,11 @@ function BeatEditor({
   beat: Beat
   onChange: (patch: Partial<Pick<Beat, 'title' | 'content' | 'status'>>) => void
 }): React.JSX.Element {
+  const snapshot = useProjectStore((s) => s.snapshot)
+  const setSelectedEntityId = useProjectStore((s) => s.setSelectedEntityId)
+  const setSelectedBeatId = useProjectStore((s) => s.setSelectedBeatId)
+  const setProjectView = useProjectStore((s) => s.setProjectView)
+
   const [title, setTitle] = useState(beat.title)
   const [content, setContent] = useState(beat.content)
   const [status, setStatus] = useState<BeatStatus>(beat.status)
@@ -245,6 +257,37 @@ function BeatEditor({
     return () => window.clearTimeout(timer)
   }, [title, content, status, beat.title, beat.content, beat.status])
 
+  /** 关联节点：正文引用 + 被其他节点引用 */
+  const linkedBeats = useMemo((): Beat[] => {
+    if (!snapshot) return []
+    const map = new Map<string, Beat>()
+    for (const id of extractRefIds(content, 'beat', beat.id)) {
+      const b = snapshot.beats[id]
+      if (b) map.set(id, b)
+    }
+    for (const b of getOrderedBeats(snapshot)) {
+      if (b.id === beat.id) continue
+      if (extractRefIds(b.content ?? '', 'beat').includes(beat.id)) map.set(b.id, b)
+    }
+    return [...map.values()]
+  }, [snapshot, content, beat.id])
+
+  /** 关联实体：正文引用 + 被实体引用 */
+  const linkedEntities = useMemo((): Entity[] => {
+    if (!snapshot) return []
+    const map = new Map<string, Entity>()
+    for (const id of extractRefIds(content, 'entity')) {
+      const e = snapshot.entities[id]
+      if (e) map.set(id, e)
+    }
+    for (const e of getOrderedEntities(snapshot)) {
+      if (extractRefIds(e.content ?? '', 'beat').includes(beat.id)) map.set(e.id, e)
+    }
+    return [...map.values()]
+  }, [snapshot, content, beat.id])
+
+  const hasLinks = linkedBeats.length > 0 || linkedEntities.length > 0
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className={TOOLBAR_CLASS}>
@@ -257,14 +300,11 @@ function BeatEditor({
         <DropdownMenu>
           <DropdownMenuTrigger
             className={cn(
-              'inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs outline-none',
-              'hover:bg-muted'
+              'inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs outline-none hover:bg-muted'
             )}
             type="button"
           >
-            <span
-              className={cn('size-2 shrink-0 rounded-full', BEAT_STATUS_DOT_CLASS[status])}
-            />
+            <span className={cn('size-2 shrink-0 rounded-full', BEAT_STATUS_DOT_CLASS[status])} />
             {BEAT_STATUS_LABELS[status]}
             <ChevronDown className="size-3.5 opacity-60" />
           </DropdownMenuTrigger>
@@ -275,9 +315,7 @@ function BeatEditor({
             >
               {STATUSES.map((s) => (
                 <DropdownMenuRadioItem key={s} value={s}>
-                  <span
-                    className={cn('mr-1 size-2 rounded-full', BEAT_STATUS_DOT_CLASS[s])}
-                  />
+                  <span className={cn('mr-1 size-2 rounded-full', BEAT_STATUS_DOT_CLASS[s])} />
                   {BEAT_STATUS_LABELS[s]}
                 </DropdownMenuRadioItem>
               ))}
@@ -285,12 +323,71 @@ function BeatEditor({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <textarea
-        className="min-h-0 flex-1 resize-none bg-transparent px-4 py-3 text-sm leading-7 outline-none placeholder:text-muted-foreground app-scrollbar"
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="写下这个节点的内容……可用 (@实体名) 标记实体，后续会接入自动识别。"
+
+      <MentionEditor
+        excludeId={beat.id}
+        onChange={setContent}
+        onOpenBeat={(id) => {
+          setSelectedBeatId(id)
+          setProjectView('beats')
+        }}
+        onOpenEntity={(id) => {
+          setSelectedEntityId(id)
+          setProjectView('entities')
+        }}
+        placeholder="写下节点内容……输入 @ 可关联实体或节点"
+        sourceType="beat"
         value={content}
       />
+
+      {hasLinks ? (
+        <div className="shrink-0 space-y-2 border-t border-border px-4 py-2">
+          {linkedBeats.length > 0 ? (
+            <div>
+              <p className="mb-1 text-[10px] font-medium text-muted-foreground">
+                关联节点 · {linkedBeats.length}
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {linkedBeats.map((b) => (
+                  <button
+                    className={BACKLINK_CHIP.beat}
+                    key={b.id}
+                    onClick={() => {
+                      setSelectedBeatId(b.id)
+                      setProjectView('beats')
+                    }}
+                    type="button"
+                  >
+                    <span className="truncate">@{b.title || '未命名节点'}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {linkedEntities.length > 0 ? (
+            <div>
+              <p className="mb-1 text-[10px] font-medium text-muted-foreground">
+                关联实体 · {linkedEntities.length}
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {linkedEntities.map((e) => (
+                  <button
+                    className={BACKLINK_CHIP.cross}
+                    key={e.id}
+                    onClick={() => {
+                      setSelectedEntityId(e.id)
+                      setProjectView('entities')
+                    }}
+                    type="button"
+                  >
+                    <span className="truncate">@{e.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

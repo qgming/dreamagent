@@ -1,5 +1,10 @@
 import path from 'path'
 import { promises as fs } from 'fs'
+import {
+  breakLinksInContent,
+  extractRefIds,
+  renameLinksInContent
+} from '../../shared/mentions'
 import { createId, toBeatFileName, toEntityFileName, toFolderName } from '../../shared/ids'
 import {
   INDEX_SCHEMA_VERSION,
@@ -39,72 +44,21 @@ function emptyIndex(): ProjectIndex {
   }
 }
 
-/**
- * 兼容旧版 index（rootIds/children）→ 扁平 order
- */
-function normalizeIndex(raw: unknown): ProjectIndex {
-  if (!raw || typeof raw !== 'object') return emptyIndex()
-  const data = raw as Record<string, unknown>
-  const beats = (data.beats ?? {}) as Record<string, unknown>
-
-  // 新格式
-  if (Array.isArray(beats.order)) {
-    return {
-      version: INDEX_SCHEMA_VERSION,
-      beats: { order: beats.order.filter((id): id is string => typeof id === 'string') },
-      entities: {
-        order: Array.isArray((data.entities as { order?: unknown })?.order)
-          ? ((data.entities as { order: string[] }).order)
-          : []
-      },
-      updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : nowIso()
-    }
-  }
-
-  // 旧格式：rootIds + children → 深度优先展平
-  const rootIds = Array.isArray(beats.rootIds)
-    ? (beats.rootIds as string[])
-    : []
-  const children =
-    beats.children && typeof beats.children === 'object'
-      ? (beats.children as Record<string, string[]>)
-      : {}
-  const order: string[] = []
-  const walk = (ids: string[]): void => {
-    for (const id of ids) {
-      if (order.includes(id)) continue
-      order.push(id)
-      walk(children[id] ?? [])
-    }
-  }
-  walk(rootIds)
-  // 旧 children 里可能有遗漏
-  for (const kids of Object.values(children)) {
-    for (const id of kids) {
-      if (!order.includes(id)) order.push(id)
-    }
-  }
-
+function refsFromContent(content: string, selfId?: string): {
+  entityRefs: string[]
+  beatRefs: string[]
+} {
   return {
-    version: INDEX_SCHEMA_VERSION,
-    beats: { order },
-    entities: {
-      order: Array.isArray((data.entities as { order?: unknown })?.order)
-        ? ((data.entities as { order: string[] }).order)
-        : []
-    },
-    updatedAt: nowIso()
+    entityRefs: extractRefIds(content, 'entity', selfId),
+    beatRefs: extractRefIds(content, 'beat', selfId)
   }
 }
 
 /**
- * 项目服务：对单个项目目录做节点/实体/索引的读写
- * 节点为扁平列表；文件名为「名称-uuid.json」
+ * 项目服务：节点 / 实体扁平列表；双链 beat↔entity / beat↔beat / entity↔entity
  */
 export class ProjectService {
   constructor(private readonly library: LibraryService) {}
-
-  // ── 路径辅助 ──────────────────────────────────────────
 
   private paths(dirPath: string) {
     return {
@@ -116,7 +70,6 @@ export class ProjectService {
     }
   }
 
-  /** 节点 / 实体文件完整路径（按 fileName） */
   private beatPath(dirPath: string, fileName: string): string {
     return path.join(dirPath, 'beats', fileName)
   }
@@ -138,8 +91,8 @@ export class ProjectService {
   }
 
   private async readIndex(dirPath: string): Promise<ProjectIndex> {
-    const raw = await readJsonFile<unknown>(this.paths(dirPath).index)
-    return normalizeIndex(raw)
+    const index = await readJsonFile<ProjectIndex>(this.paths(dirPath).index)
+    return index ?? emptyIndex()
   }
 
   private async writeMeta(dirPath: string, meta: ProjectMeta): Promise<void> {
@@ -147,14 +100,11 @@ export class ProjectService {
   }
 
   private async writeIndex(dirPath: string, index: ProjectIndex): Promise<void> {
-    index.version = INDEX_SCHEMA_VERSION
-    index.updatedAt = nowIso()
-    // 确保不写回 children
     const clean: ProjectIndex = {
       version: INDEX_SCHEMA_VERSION,
       beats: { order: [...index.beats.order] },
       entities: { order: [...index.entities.order] },
-      updatedAt: index.updatedAt
+      updatedAt: nowIso()
     }
     await writeJsonAtomic(this.paths(dirPath).index, clean)
   }
@@ -166,29 +116,33 @@ export class ProjectService {
     return meta
   }
 
-  /**
-   * 按 id 定位节点文件：优先用已知 fileName，否则扫目录
-   */
   private async findBeatFile(
     dirPath: string,
-    beatId: string,
-    knownFileName?: string
+    beatId: string
   ): Promise<{ filePath: string; fileName: string } | null> {
-    const beatsDir = this.paths(dirPath).beats
-    if (knownFileName) {
-      const filePath = this.beatPath(dirPath, knownFileName)
-      if (await pathExists(filePath)) return { filePath, fileName: knownFileName }
-    }
-    const files = await listFileNames(beatsDir)
+    const files = await listFileNames(this.paths(dirPath).beats)
     for (const file of files) {
-      const full = path.join(beatsDir, file)
+      const full = path.join(this.paths(dirPath).beats, file)
       const beat = await readJsonFile<Beat>(full)
       if (beat?.id === beatId) return { filePath: full, fileName: file }
     }
     return null
   }
 
-  // ── 项目级 ────────────────────────────────────────────
+  private async findEntityFile(
+    dirPath: string,
+    entityId: string
+  ): Promise<{ filePath: string; fileName: string } | null> {
+    const files = await listFileNames(this.paths(dirPath).entities)
+    for (const file of files) {
+      const full = path.join(this.paths(dirPath).entities, file)
+      const entity = await readJsonFile<Entity>(full)
+      if (entity?.id === entityId) return { filePath: full, fileName: file }
+    }
+    return null
+  }
+
+  // ── 项目 ──────────────────────────────────────────────
 
   async listProjects() {
     return this.library.listProjects()
@@ -206,8 +160,7 @@ export class ProjectService {
     const root = await this.library.getLibraryRoot()
     await ensureDir(root)
 
-    const baseFolder = toFolderName(input.title)
-    const folderName = await this.library.allocateFolderName(baseFolder)
+    const folderName = await this.library.allocateFolderName(toFolderName(input.title))
     const dirPath = path.join(root, folderName)
     const p = this.paths(dirPath)
 
@@ -225,23 +178,15 @@ export class ProjectService {
       createdAt: ts,
       updatedAt: ts
     }
-    const index = emptyIndex()
 
     await this.writeMeta(dirPath, meta)
-    await this.writeIndex(dirPath, index)
+    await this.writeIndex(dirPath, emptyIndex())
 
-    return {
-      meta,
-      index,
-      beats: {},
-      entities: {},
-      dirPath
-    }
+    return { meta, index: emptyIndex(), beats: {}, entities: {}, dirPath }
   }
 
   async openProject(projectId: string): Promise<ProjectSnapshot> {
-    const dirPath = await this.resolveDir(projectId)
-    return this.loadSnapshot(dirPath)
+    return this.loadSnapshot(await this.resolveDir(projectId))
   }
 
   async openProjectByPath(dirPath: string): Promise<ProjectSnapshot> {
@@ -253,126 +198,50 @@ export class ProjectService {
 
   private async loadSnapshot(dirPath: string): Promise<ProjectSnapshot> {
     const meta = await this.readMeta(dirPath)
-    let index = await this.readIndex(dirPath)
+    const index = await this.readIndex(dirPath)
     const p = this.paths(dirPath)
 
     const beats: Record<string, Beat> = {}
-    const beatFiles = await listFileNames(p.beats)
-    for (const file of beatFiles) {
+    for (const file of await listFileNames(p.beats)) {
       const beat = await readJsonFile<Beat>(path.join(p.beats, file))
       if (!beat?.id) continue
-      // 补全/校正 fileName 字段
-      if (!beat.fileName) beat.fileName = file
-      beats[beat.id] = beat
-    }
-
-    // 迁移：若实际文件名与规范「名称-uuid.json」不一致，则重命名
-    for (const beat of Object.values(beats)) {
-      const expected = toBeatFileName(beat.title, beat.id)
-      if (beat.fileName === expected) continue
-      const from = this.beatPath(dirPath, beat.fileName)
-      const to = this.beatPath(dirPath, expected)
-      if (from !== to && (await pathExists(from))) {
-        try {
-          // 目标已存在则跳过（极端冲突）
-          if (!(await pathExists(to))) {
-            await fs.rename(from, to)
-            beat.fileName = expected
-            beat.updatedAt = nowIso()
-            await writeJsonAtomic(to, beat)
-          }
-        } catch {
-          // 重命名失败不阻断加载
-        }
+      const content = beat.content ?? ''
+      const refs = refsFromContent(content, beat.id)
+      beats[beat.id] = {
+        ...beat,
+        fileName: beat.fileName || file,
+        content,
+        status: beat.status ?? 'draft',
+        entityRefs: beat.entityRefs ?? refs.entityRefs,
+        beatRefs: beat.beatRefs ?? refs.beatRefs
       }
     }
 
     const entities: Record<string, Entity> = {}
-    const entityFiles = await listFileNames(p.entities)
-    for (const file of entityFiles) {
-      const raw = await readJsonFile<Record<string, unknown>>(path.join(p.entities, file))
-      const entity = this.normalizeEntity(raw, file)
-      if (entity) entities[entity.id] = entity
-    }
-
-    // 实体文件名迁移为「名称-uuid.json」
-    for (const entity of Object.values(entities)) {
-      const expected = toEntityFileName(entity.name, entity.id)
-      if (entity.fileName === expected) continue
-      const from = this.entityPath(dirPath, entity.fileName)
-      const to = this.entityPath(dirPath, expected)
-      if (from !== to && (await pathExists(from))) {
-        try {
-          if (!(await pathExists(to))) {
-            await fs.rename(from, to)
-            entity.fileName = expected
-            entity.updatedAt = nowIso()
-            await writeJsonAtomic(to, entity)
-          }
-        } catch {
-          // 忽略
-        }
+    for (const file of await listFileNames(p.entities)) {
+      const entity = await readJsonFile<Entity>(path.join(p.entities, file))
+      if (!entity?.id) continue
+      const content = entity.content ?? ''
+      const refs = refsFromContent(content, entity.id)
+      entities[entity.id] = {
+        ...entity,
+        fileName: entity.fileName || file,
+        content,
+        entityRefs: entity.entityRefs ?? refs.entityRefs,
+        beatRefs: entity.beatRefs ?? refs.beatRefs
       }
     }
 
-    index = this.reconcileIndex(index, beats, entities)
-    await this.writeIndex(dirPath, index)
-
-    return { meta, index, beats, entities, dirPath }
-  }
-
-  /**
-   * 兼容旧实体字段（kind / summary / attributes）→ 新结构
-   */
-  private normalizeEntity(
-    raw: Record<string, unknown> | null,
-    fileName: string
-  ): Entity | null {
-    if (!raw || typeof raw.id !== 'string') return null
-    const name =
-      typeof raw.name === 'string' && raw.name.trim() ? raw.name : '未命名实体'
-    const content =
-      typeof raw.content === 'string'
-        ? raw.content
-        : typeof raw.summary === 'string'
-          ? raw.summary
-          : ''
-    const aliases = Array.isArray(raw.aliases)
-      ? raw.aliases.filter((a): a is string => typeof a === 'string')
-      : []
-    return {
-      id: raw.id,
-      name,
-      fileName: typeof raw.fileName === 'string' ? raw.fileName : fileName,
-      content,
-      aliases,
-      createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : nowIso(),
-      updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : nowIso()
-    }
-  }
-
-  /**
-   * 让 index 与磁盘文件对齐（扁平 order）
-   */
-  private reconcileIndex(
-    index: ProjectIndex,
-    beats: Record<string, Beat>,
-    entities: Record<string, Entity>
-  ): ProjectIndex {
-    const beatIds = new Set(Object.keys(beats))
-    const entityIds = new Set(Object.keys(entities))
-
-    index.beats.order = index.beats.order.filter((id) => beatIds.has(id))
-    for (const id of beatIds) {
+    index.beats.order = index.beats.order.filter((id) => beats[id])
+    for (const id of Object.keys(beats)) {
       if (!index.beats.order.includes(id)) index.beats.order.push(id)
     }
-
-    index.entities.order = index.entities.order.filter((id) => entityIds.has(id))
-    for (const id of entityIds) {
+    index.entities.order = index.entities.order.filter((id) => entities[id])
+    for (const id of Object.keys(entities)) {
       if (!index.entities.order.includes(id)) index.entities.order.push(id)
     }
 
-    return index
+    return { meta, index, beats, entities, dirPath }
   }
 
   async updateProjectMeta(
@@ -391,28 +260,29 @@ export class ProjectService {
   }
 
   async deleteProject(projectId: string): Promise<void> {
-    const dirPath = await this.resolveDir(projectId)
-    await removeDir(dirPath)
+    await removeDir(await this.resolveDir(projectId))
   }
 
-  // ── 节点（扁平） ──────────────────────────────────────
+  // ── 节点 ──────────────────────────────────────────────
 
   async createBeat(projectId: string, input: CreateBeatInput): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
-    const p = this.paths(dirPath)
-    await ensureDir(p.beats)
+    await ensureDir(this.paths(dirPath).beats)
 
     const ts = nowIso()
     const id = createId('beat')
     const title = input.title.trim() || '未命名节点'
     const fileName = toBeatFileName(title, id)
+    const content = input.content ?? ''
+    const refs = refsFromContent(content, id)
     const beat: Beat = {
       id,
       title,
       fileName,
-      content: input.content ?? '',
+      content,
       status: input.status ?? 'draft',
-      entityRefs: [],
+      entityRefs: refs.entityRefs,
+      beatRefs: refs.beatRefs,
       createdAt: ts,
       updatedAt: ts
     }
@@ -422,13 +292,11 @@ export class ProjectService {
     const index = await this.readIndex(dirPath)
     const list = [...index.beats.order.filter((x) => x !== id)]
     if (input.afterId && list.includes(input.afterId)) {
-      const idx = list.indexOf(input.afterId)
-      list.splice(idx + 1, 0, id)
+      list.splice(list.indexOf(input.afterId) + 1, 0, id)
     } else {
       list.push(id)
     }
     index.beats.order = list
-
     await this.writeIndex(dirPath, index)
     await this.touchProject(dirPath)
     return this.loadSnapshot(dirPath)
@@ -447,15 +315,18 @@ export class ProjectService {
     if (!beat) throw new Error(`节点不存在: ${beatId}`)
 
     const titleChanged =
-      patch.title !== undefined && patch.title.trim() && patch.title !== beat.title
+      patch.title !== undefined && patch.title.trim() !== '' && patch.title !== beat.title
 
     if (patch.title !== undefined) beat.title = patch.title.trim() || beat.title
-    if (patch.content !== undefined) beat.content = patch.content
+    if (patch.content !== undefined) {
+      beat.content = patch.content
+      const refs = refsFromContent(patch.content, beatId)
+      beat.entityRefs = refs.entityRefs
+      beat.beatRefs = refs.beatRefs
+    }
     if (patch.status !== undefined) beat.status = patch.status
-    if (patch.entityRefs !== undefined) beat.entityRefs = patch.entityRefs
     beat.updatedAt = nowIso()
 
-    // 标题变更 → 同步重命名文件（名称-uuid.json）
     if (titleChanged) {
       const newFileName = toBeatFileName(beat.title, beat.id)
       beat.fileName = newFileName
@@ -467,6 +338,9 @@ export class ProjectService {
           // 忽略
         }
       }
+      await this.rewriteMentionsEverywhere(dirPath, 'beat', beatId, (c) =>
+        renameLinksInContent(c, 'beat', beatId, beat.title)
+      )
     } else {
       beat.fileName = beat.fileName || located.fileName
       await writeJsonAtomic(located.filePath, beat)
@@ -476,9 +350,6 @@ export class ProjectService {
     return this.loadSnapshot(dirPath)
   }
 
-  /**
-   * 删除节点（扁平，无级联）
-   */
   async deleteBeat(projectId: string, beatId: string): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
     const index = await this.readIndex(dirPath)
@@ -489,18 +360,19 @@ export class ProjectService {
       try {
         await fs.unlink(located.filePath)
       } catch {
-        // 文件可能已不在
+        // 忽略
       }
     }
+
+    await this.rewriteMentionsEverywhere(dirPath, 'beat', beatId, (c) =>
+      breakLinksInContent(c, 'beat', beatId)
+    )
 
     await this.writeIndex(dirPath, index)
     await this.touchProject(dirPath)
     return this.loadSnapshot(dirPath)
   }
 
-  /**
-   * 重排节点：用完整有序 id 列表覆盖
-   */
   async reorderBeats(projectId: string, input: ReorderBeatsInput): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
     const index = await this.readIndex(dirPath)
@@ -519,40 +391,23 @@ export class ProjectService {
 
   // ── 实体 ──────────────────────────────────────────────
 
-  private async findEntityFile(
-    dirPath: string,
-    entityId: string,
-    knownFileName?: string
-  ): Promise<{ filePath: string; fileName: string } | null> {
-    const entitiesDir = this.paths(dirPath).entities
-    if (knownFileName) {
-      const filePath = this.entityPath(dirPath, knownFileName)
-      if (await pathExists(filePath)) return { filePath, fileName: knownFileName }
-    }
-    const files = await listFileNames(entitiesDir)
-    for (const file of files) {
-      const full = path.join(entitiesDir, file)
-      const raw = await readJsonFile<Record<string, unknown>>(full)
-      if (raw && raw.id === entityId) return { filePath: full, fileName: file }
-    }
-    return null
-  }
-
   async createEntity(projectId: string, input: CreateEntityInput): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
-    const p = this.paths(dirPath)
-    await ensureDir(p.entities)
+    await ensureDir(this.paths(dirPath).entities)
 
     const ts = nowIso()
     const id = createId('ent')
     const name = input.name.trim() || '未命名实体'
     const fileName = toEntityFileName(name, id)
+    const content = input.content ?? ''
+    const refs = refsFromContent(content, id)
     const entity: Entity = {
       id,
       name,
       fileName,
-      content: input.content ?? '',
-      aliases: input.aliases ?? [],
+      content,
+      entityRefs: refs.entityRefs,
+      beatRefs: refs.beatRefs,
       createdAt: ts,
       updatedAt: ts
     }
@@ -575,16 +430,19 @@ export class ProjectService {
     const located = await this.findEntityFile(dirPath, entityId)
     if (!located) throw new Error(`实体不存在: ${entityId}`)
 
-    const raw = await readJsonFile<Record<string, unknown>>(located.filePath)
-    const entity = this.normalizeEntity(raw, located.fileName)
+    const entity = await readJsonFile<Entity>(located.filePath)
     if (!entity) throw new Error(`实体不存在: ${entityId}`)
 
     const nameChanged =
-      patch.name !== undefined && patch.name.trim() && patch.name !== entity.name
+      patch.name !== undefined && patch.name.trim() !== '' && patch.name !== entity.name
 
     if (patch.name !== undefined) entity.name = patch.name.trim() || entity.name
-    if (patch.content !== undefined) entity.content = patch.content
-    if (patch.aliases !== undefined) entity.aliases = patch.aliases
+    if (patch.content !== undefined) {
+      entity.content = patch.content
+      const refs = refsFromContent(patch.content, entityId)
+      entity.entityRefs = refs.entityRefs
+      entity.beatRefs = refs.beatRefs
+    }
     entity.updatedAt = nowIso()
 
     if (nameChanged) {
@@ -598,6 +456,9 @@ export class ProjectService {
           // 忽略
         }
       }
+      await this.rewriteMentionsEverywhere(dirPath, 'entity', entityId, (c) =>
+        renameLinksInContent(c, 'entity', entityId, entity.name)
+      )
     } else {
       entity.fileName = entity.fileName || located.fileName
       await writeJsonAtomic(located.filePath, entity)
@@ -609,7 +470,6 @@ export class ProjectService {
 
   async deleteEntity(projectId: string, entityId: string): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
-    const p = this.paths(dirPath)
     const index = await this.readIndex(dirPath)
     const located = await this.findEntityFile(dirPath, entityId)
 
@@ -622,20 +482,55 @@ export class ProjectService {
       }
     }
 
-    // 从节点的 entityRefs 中清理
-    const beatFiles = await listFileNames(p.beats)
-    for (const file of beatFiles) {
-      const full = path.join(p.beats, file)
-      const beat = await readJsonFile<Beat>(full)
-      if (!beat?.entityRefs?.includes(entityId)) continue
-      beat.entityRefs = beat.entityRefs.filter((id) => id !== entityId)
-      beat.updatedAt = nowIso()
-      await writeJsonAtomic(full, beat)
-    }
+    await this.rewriteMentionsEverywhere(dirPath, 'entity', entityId, (c) =>
+      breakLinksInContent(c, 'entity', entityId)
+    )
 
     await this.writeIndex(dirPath, index)
     await this.touchProject(dirPath)
     return this.loadSnapshot(dirPath)
+  }
+
+  /**
+   * 改写全部节点与实体正文中的双链（排除 subject 自身文件）
+   */
+  private async rewriteMentionsEverywhere(
+    dirPath: string,
+    subjectType: 'beat' | 'entity',
+    subjectId: string,
+    transform: (content: string) => string
+  ): Promise<void> {
+    const p = this.paths(dirPath)
+
+    for (const file of await listFileNames(p.beats)) {
+      const full = path.join(p.beats, file)
+      const beat = await readJsonFile<Beat>(full)
+      if (!beat) continue
+      if (subjectType === 'beat' && beat.id === subjectId) continue
+      const next = transform(beat.content ?? '')
+      if (next === beat.content) continue
+      beat.content = next
+      const refs = refsFromContent(next, beat.id)
+      beat.entityRefs = refs.entityRefs
+      beat.beatRefs = refs.beatRefs
+      beat.updatedAt = nowIso()
+      await writeJsonAtomic(full, beat)
+    }
+
+    for (const file of await listFileNames(p.entities)) {
+      const full = path.join(p.entities, file)
+      const entity = await readJsonFile<Entity>(full)
+      if (!entity) continue
+      if (subjectType === 'entity' && entity.id === subjectId) continue
+      const next = transform(entity.content ?? '')
+      if (next === entity.content) continue
+      entity.content = next
+      const refs = refsFromContent(next, entity.id)
+      entity.entityRefs = refs.entityRefs
+      entity.beatRefs = refs.beatRefs
+      entity.updatedAt = nowIso()
+      await writeJsonAtomic(full, entity)
+    }
   }
 
   async reorderEntities(projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> {
