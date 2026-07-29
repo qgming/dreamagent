@@ -46,6 +46,17 @@ function chapterLabel(c: Chapter): LinkRef {
   return { id: c.id, label: c.title || '未命名文章' }
 }
 
+/** 摘要里回显双链解析结果，便于核对 entityRefs/beatRefs 是否完整 */
+function refsSummary(item: {
+  entityRefs?: string[]
+  beatRefs?: string[]
+}): string {
+  const e = item.entityRefs?.length ?? 0
+  const b = item.beatRefs?.length ?? 0
+  if (e === 0 && b === 0) return '无双链'
+  return `实体链 ${e} · 节点链 ${b}`
+}
+
 /**
  * 从 snapshot 计算入链（O(n)）
  */
@@ -285,18 +296,15 @@ export class AgentToolRuntime {
   ): Promise<AgentToolResult<Beat>> {
     const title = String(input?.title ?? '').trim()
     if (!title) return { ok: false, summary: '缺少 title', error: 'invalid_input' }
-    const before = await this.projects.openProject(projectId)
-    const beforeIds = new Set(Object.keys(before.beats))
-    const snap = await this.projects.createBeat(projectId, {
+    const { created } = await this.projects.createBeat(projectId, {
       title,
       content: input.content,
       status: input.status,
       afterId: input.afterId
     })
-    const created = Object.values(snap.beats).find((b) => b && !beforeIds.has(b.id))
     return {
       ok: true,
-      summary: `已创建节点「${created?.title ?? title}」`,
+      summary: `已创建节点「${created.title}」(${created.id}) · ${refsSummary(created)}`,
       data: created
     }
   }
@@ -318,7 +326,7 @@ export class AgentToolRuntime {
     const beat = snap.beats[beatId]
     return {
       ok: true,
-      summary: `已更新节点「${beat?.title ?? beatId}」`,
+      summary: `已更新节点「${beat?.title ?? beatId}」 · ${beat ? refsSummary(beat) : '无双链'}`,
       data: beat
     }
   }
@@ -346,17 +354,14 @@ export class AgentToolRuntime {
   ): Promise<AgentToolResult<Entity>> {
     const name = String(input?.name ?? '').trim()
     if (!name) return { ok: false, summary: '缺少 name', error: 'invalid_input' }
-    const before = await this.projects.openProject(projectId)
-    const beforeIds = new Set(Object.keys(before.entities))
-    const snap = await this.projects.createEntity(projectId, {
+    const { created } = await this.projects.createEntity(projectId, {
       name,
       content: input.content,
       status: input.status
     })
-    const created = Object.values(snap.entities).find((e) => e && !beforeIds.has(e.id))
     return {
       ok: true,
-      summary: `已创建实体「${created?.name ?? name}」`,
+      summary: `已创建实体「${created.name}」(${created.id}) · ${refsSummary(created)}`,
       data: created
     }
   }
@@ -378,7 +383,7 @@ export class AgentToolRuntime {
     const entity = snap.entities[entityId]
     return {
       ok: true,
-      summary: `已更新实体「${entity?.name ?? entityId}」`,
+      summary: `已更新实体「${entity?.name ?? entityId}」 · ${entity ? refsSummary(entity) : '无双链'}`,
       data: entity
     }
   }
@@ -480,11 +485,10 @@ export class AgentToolRuntime {
       beatRefs,
       conversationId: input.conversationId
     })
-    const newId = snap.index.chapters.order[snap.index.chapters.order.length - 1]
-    const chapter = newId ? snap.chapters[newId] : undefined
+    const chapter = snap.created
     return {
       ok: true,
-      summary: `已写入文章「${chapter?.title ?? input.title}」· ${input.content.length} 字`,
+      summary: `已写入文章「${chapter.title}」· ${input.content.length} 字`,
       data: chapter
     }
   }

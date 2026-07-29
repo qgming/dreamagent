@@ -11,6 +11,7 @@ import { CreatePage } from '@/pages/CreatePage'
 import { EntitiesPage } from '@/pages/EntitiesPage'
 import { HomePage, useBootstrapLibrary } from '@/pages/HomePage'
 import { OverviewPage } from '@/pages/OverviewPage'
+import { SkillsPage } from '@/pages/SkillsPage'
 import { useProjectStore, type ProjectView } from '@/stores/project-store'
 
 const SIDEBAR_SPRING = { type: 'spring' as const, stiffness: 380, damping: 36 }
@@ -30,11 +31,14 @@ export function AppShell(): React.JSX.Element {
   useBootstrapLibrary()
 
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const appSurface = useProjectStore((s) => s.appSurface)
   const projectView = useProjectStore((s) => s.projectView)
   const snapshot = useProjectStore((s) => s.snapshot)
   const error = useProjectStore((s) => s.error)
 
-  const isCreate = Boolean(activeProjectId && snapshot && projectView === 'create')
+  const isCreate = Boolean(
+    appSurface === 'project' && activeProjectId && snapshot && projectView === 'create'
+  )
 
   // 进/出创作：同帧硬切侧栏，不排队 spring
   if (isCreate !== wasCreate.current) {
@@ -106,6 +110,7 @@ export function AppShell(): React.JSX.Element {
 
           <MainView
             activeProjectId={activeProjectId}
+            appSurface={appSurface}
             hasSnapshot={Boolean(snapshot)}
             projectView={projectView}
           />
@@ -121,14 +126,17 @@ export function AppShell(): React.JSX.Element {
 
 function MainView({
   activeProjectId,
+  appSurface,
   projectView,
   hasSnapshot
 }: {
   activeProjectId: string | null
+  appSurface: 'home' | 'skills' | 'project'
   projectView: ProjectView
   hasSnapshot: boolean
 }): React.JSX.Element {
-  if (activeProjectId && hasSnapshot) {
+  if (appSurface === 'skills') return <SkillsPage />
+  if (appSurface === 'project' && activeProjectId && hasSnapshot) {
     if (projectView === 'overview') return <OverviewPage />
     if (projectView === 'beats') return <BeatsPage />
     if (projectView === 'entities') return <EntitiesPage />

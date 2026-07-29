@@ -26,6 +26,7 @@ import {
   type CreateBeatInput,
   type CreateChapterInput,
   type CreateEntityInput,
+  type CreateMutationResult,
   type CreateProjectInput,
   type Entity,
   type ProjectIndex,
@@ -80,8 +81,28 @@ function refsFromContent(
 export class ProjectService {
   /** 按项目目录串行化 index.json 写入，避免 Windows 并发 rename ENOENT */
   private indexWriteQueues = new Map<string, Promise<void>>()
+  /** 按项目目录串行化所有会改 index / 文件的写操作，避免并行 create 丢 id */
+  private mutationQueues = new Map<string, Promise<unknown>>()
 
   constructor(private readonly library: LibraryService) {}
+
+  /**
+   * 同一项目目录内的写操作串行执行。
+   * 读操作（open/list）不进队，避免阻塞查询。
+   */
+  private enqueueMutation<T>(dirPath: string, task: () => Promise<T>): Promise<T> {
+    const prev = this.mutationQueues.get(dirPath) ?? Promise.resolve()
+    const next = prev.catch(() => undefined).then(task)
+    this.mutationQueues.set(
+      dirPath,
+      next.finally(() => {
+        if (this.mutationQueues.get(dirPath) === next) {
+          this.mutationQueues.delete(dirPath)
+        }
+      })
+    )
+    return next
+  }
 
   paths(dirPath: string) {
     return {
@@ -456,41 +477,48 @@ export class ProjectService {
 
   // ── 节点 ──────────────────────────────────────────────
 
-  async createBeat(projectId: string, input: CreateBeatInput): Promise<ProjectSnapshot> {
+  async createBeat(
+    projectId: string,
+    input: CreateBeatInput
+  ): Promise<CreateMutationResult<Beat>> {
     const dirPath = await this.resolveDir(projectId)
-    await ensureDir(this.paths(dirPath).beats)
+    return this.enqueueMutation(dirPath, async () => {
+      await ensureDir(this.paths(dirPath).beats)
 
-    const ts = nowIso()
-    const id = createId('beat')
-    const title = input.title.trim() || '未命名节点'
-    const fileName = toBeatFileName(title, id)
-    const content = input.content ?? ''
-    const refs = refsFromContent(content, id)
-    const beat: Beat = {
-      id,
-      title,
-      fileName,
-      content,
-      status: input.status ?? 'idea',
-      entityRefs: refs.entityRefs,
-      beatRefs: refs.beatRefs,
-      createdAt: ts,
-      updatedAt: ts
-    }
+      const ts = nowIso()
+      const id = createId('beat')
+      const title = input.title.trim() || '未命名节点'
+      const fileName = toBeatFileName(title, id)
+      const content = input.content ?? ''
+      const refs = refsFromContent(content, id)
+      const beat: Beat = {
+        id,
+        title,
+        fileName,
+        content,
+        status: input.status ?? 'idea',
+        entityRefs: refs.entityRefs,
+        beatRefs: refs.beatRefs,
+        createdAt: ts,
+        updatedAt: ts
+      }
 
-    await writeJsonAtomic(this.beatPath(dirPath, fileName), beat)
+      await writeJsonAtomic(this.beatPath(dirPath, fileName), beat)
 
-    const index = await this.readIndex(dirPath)
-    const list = [...index.beats.order.filter((x) => x !== id)]
-    if (input.afterId && list.includes(input.afterId)) {
-      list.splice(list.indexOf(input.afterId) + 1, 0, id)
-    } else {
-      list.push(id)
-    }
-    index.beats.order = list
-    await this.writeIndex(dirPath, index)
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
+      const index = await this.readIndex(dirPath)
+      const list = [...index.beats.order.filter((x) => x !== id)]
+      if (input.afterId && list.includes(input.afterId)) {
+        list.splice(list.indexOf(input.afterId) + 1, 0, id)
+      } else {
+        list.push(id)
+      }
+      index.beats.order = list
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      const snapshot = await this.loadSnapshot(dirPath)
+      // 用内存中的 beat，避免 snapshot 加载竞态导致找不到
+      return { snapshot, created: snapshot.beats[id] ?? beat }
+    })
   }
 
   async updateBeat(
@@ -499,72 +527,76 @@ export class ProjectService {
     patch: UpdateBeatInput
   ): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
-    const located = await this.findBeatFile(dirPath, beatId)
-    if (!located) throw new Error(`节点不存在: ${beatId}`)
+    return this.enqueueMutation(dirPath, async () => {
+      const located = await this.findBeatFile(dirPath, beatId)
+      if (!located) throw new Error(`节点不存在: ${beatId}`)
 
-    const beat = await readJsonFile<Beat>(located.filePath)
-    if (!beat) throw new Error(`节点不存在: ${beatId}`)
+      const beat = await readJsonFile<Beat>(located.filePath)
+      if (!beat) throw new Error(`节点不存在: ${beatId}`)
 
-    const titleChanged =
-      patch.title !== undefined && patch.title.trim() !== '' && patch.title !== beat.title
+      const titleChanged =
+        patch.title !== undefined && patch.title.trim() !== '' && patch.title !== beat.title
 
-    if (patch.title !== undefined) beat.title = patch.title.trim() || beat.title
-    if (patch.content !== undefined) {
-      beat.content = patch.content
-      const refs = refsFromContent(patch.content, beatId)
-      beat.entityRefs = refs.entityRefs
-      beat.beatRefs = refs.beatRefs
-    }
-    if (patch.status !== undefined) beat.status = patch.status
-    beat.updatedAt = nowIso()
+      if (patch.title !== undefined) beat.title = patch.title.trim() || beat.title
+      if (patch.content !== undefined) {
+        beat.content = patch.content
+        const refs = refsFromContent(patch.content, beatId)
+        beat.entityRefs = refs.entityRefs
+        beat.beatRefs = refs.beatRefs
+      }
+      if (patch.status !== undefined) beat.status = patch.status
+      beat.updatedAt = nowIso()
 
-    if (titleChanged) {
-      const newFileName = toBeatFileName(beat.title, beat.id)
-      beat.fileName = newFileName
-      await writeJsonAtomic(this.beatPath(dirPath, newFileName), beat)
-      if (newFileName !== located.fileName) {
+      if (titleChanged) {
+        const newFileName = toBeatFileName(beat.title, beat.id)
+        beat.fileName = newFileName
+        await writeJsonAtomic(this.beatPath(dirPath, newFileName), beat)
+        if (newFileName !== located.fileName) {
+          try {
+            await fs.unlink(located.filePath)
+          } catch {
+            // 忽略
+          }
+        }
+        await this.rewriteMentionsEverywhere(dirPath, 'beat', beatId, (c) =>
+          renameLinksInContent(c, 'beat', beatId, beat.title)
+        )
+      } else {
+        beat.fileName = beat.fileName || located.fileName
+        await writeJsonAtomic(located.filePath, beat)
+      }
+
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
+  }
+
+  async deleteBeat(projectId: string, beatId: string): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    return this.enqueueMutation(dirPath, async () => {
+      const index = await this.readIndex(dirPath)
+      const located = await this.findBeatFile(dirPath, beatId)
+
+      index.beats.order = index.beats.order.filter((id) => id !== beatId)
+      if (located) {
         try {
           await fs.unlink(located.filePath)
         } catch {
           // 忽略
         }
       }
+
       await this.rewriteMentionsEverywhere(dirPath, 'beat', beatId, (c) =>
-        renameLinksInContent(c, 'beat', beatId, beat.title)
+        breakLinksInContent(c, 'beat', beatId)
       )
-    } else {
-      beat.fileName = beat.fileName || located.fileName
-      await writeJsonAtomic(located.filePath, beat)
-    }
 
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
-  }
+      // 清理章节 sourceBeatIds
+      await this.stripSourceBeatFromChapters(dirPath, beatId)
 
-  async deleteBeat(projectId: string, beatId: string): Promise<ProjectSnapshot> {
-    const dirPath = await this.resolveDir(projectId)
-    const index = await this.readIndex(dirPath)
-    const located = await this.findBeatFile(dirPath, beatId)
-
-    index.beats.order = index.beats.order.filter((id) => id !== beatId)
-    if (located) {
-      try {
-        await fs.unlink(located.filePath)
-      } catch {
-        // 忽略
-      }
-    }
-
-    await this.rewriteMentionsEverywhere(dirPath, 'beat', beatId, (c) =>
-      breakLinksInContent(c, 'beat', beatId)
-    )
-
-    // 清理章节 sourceBeatIds
-    await this.stripSourceBeatFromChapters(dirPath, beatId)
-
-    await this.writeIndex(dirPath, index)
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
   }
 
   private async stripSourceBeatFromChapters(dirPath: string, beatId: string): Promise<void> {
@@ -581,51 +613,59 @@ export class ProjectService {
 
   async reorderBeats(projectId: string, input: ReorderBeatsInput): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
-    const index = await this.readIndex(dirPath)
+    return this.enqueueMutation(dirPath, async () => {
+      const index = await this.readIndex(dirPath)
 
-    const currentSet = new Set(index.beats.order)
-    const nextSet = new Set(input.orderedIds)
-    if (currentSet.size !== nextSet.size || [...currentSet].some((id) => !nextSet.has(id))) {
-      throw new Error('重排失败：有序 id 列表与当前节点集合不一致')
-    }
+      const currentSet = new Set(index.beats.order)
+      const nextSet = new Set(input.orderedIds)
+      if (currentSet.size !== nextSet.size || [...currentSet].some((id) => !nextSet.has(id))) {
+        throw new Error('重排失败：有序 id 列表与当前节点集合不一致')
+      }
 
-    index.beats.order = [...input.orderedIds]
-    await this.writeIndex(dirPath, index)
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
+      index.beats.order = [...input.orderedIds]
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
   }
 
   // ── 实体 ──────────────────────────────────────────────
 
-  async createEntity(projectId: string, input: CreateEntityInput): Promise<ProjectSnapshot> {
+  async createEntity(
+    projectId: string,
+    input: CreateEntityInput
+  ): Promise<CreateMutationResult<Entity>> {
     const dirPath = await this.resolveDir(projectId)
-    await ensureDir(this.paths(dirPath).entities)
+    return this.enqueueMutation(dirPath, async () => {
+      await ensureDir(this.paths(dirPath).entities)
 
-    const ts = nowIso()
-    const id = createId('ent')
-    const name = input.name.trim() || '未命名实体'
-    const fileName = toEntityFileName(name, id)
-    const content = input.content ?? ''
-    const refs = refsFromContent(content, id)
-    const entity: Entity = {
-      id,
-      name,
-      fileName,
-      content,
-      status: input.status ?? 'active',
-      entityRefs: refs.entityRefs,
-      beatRefs: refs.beatRefs,
-      createdAt: ts,
-      updatedAt: ts
-    }
+      const ts = nowIso()
+      const id = createId('ent')
+      const name = input.name.trim() || '未命名实体'
+      const fileName = toEntityFileName(name, id)
+      const content = input.content ?? ''
+      const refs = refsFromContent(content, id)
+      const entity: Entity = {
+        id,
+        name,
+        fileName,
+        content,
+        status: input.status ?? 'active',
+        entityRefs: refs.entityRefs,
+        beatRefs: refs.beatRefs,
+        createdAt: ts,
+        updatedAt: ts
+      }
 
-    await writeJsonAtomic(this.entityPath(dirPath, fileName), entity)
+      await writeJsonAtomic(this.entityPath(dirPath, fileName), entity)
 
-    const index = await this.readIndex(dirPath)
-    index.entities.order = [...index.entities.order.filter((x) => x !== id), id]
-    await this.writeIndex(dirPath, index)
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
+      const index = await this.readIndex(dirPath)
+      index.entities.order = [...index.entities.order.filter((x) => x !== id), id]
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      const snapshot = await this.loadSnapshot(dirPath)
+      return { snapshot, created: snapshot.entities[id] ?? entity }
+    })
   }
 
   async updateEntity(
@@ -634,69 +674,73 @@ export class ProjectService {
     patch: UpdateEntityInput
   ): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
-    const located = await this.findEntityFile(dirPath, entityId)
-    if (!located) throw new Error(`实体不存在: ${entityId}`)
+    return this.enqueueMutation(dirPath, async () => {
+      const located = await this.findEntityFile(dirPath, entityId)
+      if (!located) throw new Error(`实体不存在: ${entityId}`)
 
-    const entity = await readJsonFile<Entity>(located.filePath)
-    if (!entity) throw new Error(`实体不存在: ${entityId}`)
+      const entity = await readJsonFile<Entity>(located.filePath)
+      if (!entity) throw new Error(`实体不存在: ${entityId}`)
 
-    const nameChanged =
-      patch.name !== undefined && patch.name.trim() !== '' && patch.name !== entity.name
+      const nameChanged =
+        patch.name !== undefined && patch.name.trim() !== '' && patch.name !== entity.name
 
-    if (patch.name !== undefined) entity.name = patch.name.trim() || entity.name
-    if (patch.content !== undefined) {
-      entity.content = patch.content
-      const refs = refsFromContent(patch.content, entityId)
-      entity.entityRefs = refs.entityRefs
-      entity.beatRefs = refs.beatRefs
-    }
-    if (patch.status !== undefined) entity.status = patch.status
-    entity.updatedAt = nowIso()
+      if (patch.name !== undefined) entity.name = patch.name.trim() || entity.name
+      if (patch.content !== undefined) {
+        entity.content = patch.content
+        const refs = refsFromContent(patch.content, entityId)
+        entity.entityRefs = refs.entityRefs
+        entity.beatRefs = refs.beatRefs
+      }
+      if (patch.status !== undefined) entity.status = patch.status
+      entity.updatedAt = nowIso()
 
-    if (nameChanged) {
-      const newFileName = toEntityFileName(entity.name, entity.id)
-      entity.fileName = newFileName
-      await writeJsonAtomic(this.entityPath(dirPath, newFileName), entity)
-      if (newFileName !== located.fileName) {
+      if (nameChanged) {
+        const newFileName = toEntityFileName(entity.name, entity.id)
+        entity.fileName = newFileName
+        await writeJsonAtomic(this.entityPath(dirPath, newFileName), entity)
+        if (newFileName !== located.fileName) {
+          try {
+            await fs.unlink(located.filePath)
+          } catch {
+            // 忽略
+          }
+        }
+        await this.rewriteMentionsEverywhere(dirPath, 'entity', entityId, (c) =>
+          renameLinksInContent(c, 'entity', entityId, entity.name)
+        )
+      } else {
+        entity.fileName = entity.fileName || located.fileName
+        await writeJsonAtomic(located.filePath, entity)
+      }
+
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
+  }
+
+  async deleteEntity(projectId: string, entityId: string): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    return this.enqueueMutation(dirPath, async () => {
+      const index = await this.readIndex(dirPath)
+      const located = await this.findEntityFile(dirPath, entityId)
+
+      index.entities.order = index.entities.order.filter((id) => id !== entityId)
+      if (located) {
         try {
           await fs.unlink(located.filePath)
         } catch {
           // 忽略
         }
       }
+
       await this.rewriteMentionsEverywhere(dirPath, 'entity', entityId, (c) =>
-        renameLinksInContent(c, 'entity', entityId, entity.name)
+        breakLinksInContent(c, 'entity', entityId)
       )
-    } else {
-      entity.fileName = entity.fileName || located.fileName
-      await writeJsonAtomic(located.filePath, entity)
-    }
 
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
-  }
-
-  async deleteEntity(projectId: string, entityId: string): Promise<ProjectSnapshot> {
-    const dirPath = await this.resolveDir(projectId)
-    const index = await this.readIndex(dirPath)
-    const located = await this.findEntityFile(dirPath, entityId)
-
-    index.entities.order = index.entities.order.filter((id) => id !== entityId)
-    if (located) {
-      try {
-        await fs.unlink(located.filePath)
-      } catch {
-        // 忽略
-      }
-    }
-
-    await this.rewriteMentionsEverywhere(dirPath, 'entity', entityId, (c) =>
-      breakLinksInContent(c, 'entity', entityId)
-    )
-
-    await this.writeIndex(dirPath, index)
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
   }
 
   /**
@@ -755,56 +799,64 @@ export class ProjectService {
 
   async reorderEntities(projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
-    const index = await this.readIndex(dirPath)
+    return this.enqueueMutation(dirPath, async () => {
+      const index = await this.readIndex(dirPath)
 
-    const currentSet = new Set(index.entities.order)
-    const nextSet = new Set(orderedIds)
-    if (currentSet.size !== nextSet.size || [...currentSet].some((id) => !nextSet.has(id))) {
-      throw new Error('重排失败：实体有序 id 列表与当前集合不一致')
-    }
+      const currentSet = new Set(index.entities.order)
+      const nextSet = new Set(orderedIds)
+      if (currentSet.size !== nextSet.size || [...currentSet].some((id) => !nextSet.has(id))) {
+        throw new Error('重排失败：实体有序 id 列表与当前集合不一致')
+      }
 
-    index.entities.order = [...orderedIds]
-    await this.writeIndex(dirPath, index)
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
+      index.entities.order = [...orderedIds]
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
   }
 
   // ── 文章 ──────────────────────────────────────────────
 
-  async createChapter(projectId: string, input: CreateChapterInput): Promise<ProjectSnapshot> {
+  async createChapter(
+    projectId: string,
+    input: CreateChapterInput
+  ): Promise<CreateMutationResult<Chapter>> {
     const dirPath = await this.resolveDir(projectId)
-    await ensureDir(this.paths(dirPath).chapters)
+    return this.enqueueMutation(dirPath, async () => {
+      await ensureDir(this.paths(dirPath).chapters)
 
-    const ts = nowIso()
-    const id = createId('chap')
-    const title = input.title.trim() || '未命名文章'
-    const fileName = toChapterFileName(title, id)
-    // 正文保持纯文本；关联仅存元数据字段
-    const content = input.content ?? ''
-    const sourceBeatIds = input.sourceBeatIds ?? []
-    const beatRefs = input.beatRefs ?? sourceBeatIds
-    const entityRefs = input.entityRefs ?? []
-    const chapter: Chapter = {
-      id,
-      title,
-      fileName,
-      content,
-      status: input.status ?? 'draft',
-      sourceBeatIds,
-      entityRefs,
-      beatRefs,
-      conversationId: input.conversationId,
-      createdAt: ts,
-      updatedAt: ts
-    }
+      const ts = nowIso()
+      const id = createId('chap')
+      const title = input.title.trim() || '未命名文章'
+      const fileName = toChapterFileName(title, id)
+      // 正文保持纯文本；关联仅存元数据字段
+      const content = input.content ?? ''
+      const sourceBeatIds = input.sourceBeatIds ?? []
+      const beatRefs = input.beatRefs ?? sourceBeatIds
+      const entityRefs = input.entityRefs ?? []
+      const chapter: Chapter = {
+        id,
+        title,
+        fileName,
+        content,
+        status: input.status ?? 'draft',
+        sourceBeatIds,
+        entityRefs,
+        beatRefs,
+        conversationId: input.conversationId,
+        createdAt: ts,
+        updatedAt: ts
+      }
 
-    await writeJsonAtomic(this.chapterPath(dirPath, fileName), chapter)
+      await writeJsonAtomic(this.chapterPath(dirPath, fileName), chapter)
 
-    const index = await this.readIndex(dirPath)
-    index.chapters.order = [...index.chapters.order.filter((x) => x !== id), id]
-    await this.writeIndex(dirPath, index)
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
+      const index = await this.readIndex(dirPath)
+      index.chapters.order = [...index.chapters.order.filter((x) => x !== id), id]
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      const snapshot = await this.loadSnapshot(dirPath)
+      return { snapshot, created: snapshot.chapters[id] ?? chapter }
+    })
   }
 
   async updateChapter(
@@ -813,80 +865,86 @@ export class ProjectService {
     patch: UpdateChapterInput
   ): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
-    const located = await this.findChapterFile(dirPath, chapterId)
-    if (!located) throw new Error(`文章不存在: ${chapterId}`)
+    return this.enqueueMutation(dirPath, async () => {
+      const located = await this.findChapterFile(dirPath, chapterId)
+      if (!located) throw new Error(`文章不存在: ${chapterId}`)
 
-    const chapter = await readJsonFile<Chapter>(located.filePath)
-    if (!chapter) throw new Error(`文章不存在: ${chapterId}`)
+      const chapter = await readJsonFile<Chapter>(located.filePath)
+      if (!chapter) throw new Error(`文章不存在: ${chapterId}`)
 
-    const titleChanged =
-      patch.title !== undefined && patch.title.trim() !== '' && patch.title !== chapter.title
+      const titleChanged =
+        patch.title !== undefined && patch.title.trim() !== '' && patch.title !== chapter.title
 
-    if (patch.title !== undefined) chapter.title = patch.title.trim() || chapter.title
-    if (patch.content !== undefined) {
-      // 纯正文，不从 content 解析双链
-      chapter.content = patch.content
-    }
-    if (patch.status !== undefined) chapter.status = patch.status
-    if (patch.sourceBeatIds !== undefined) chapter.sourceBeatIds = patch.sourceBeatIds
-    if (patch.entityRefs !== undefined) chapter.entityRefs = patch.entityRefs
-    if (patch.beatRefs !== undefined) chapter.beatRefs = patch.beatRefs
-    if (patch.conversationId !== undefined) chapter.conversationId = patch.conversationId
-    chapter.updatedAt = nowIso()
+      if (patch.title !== undefined) chapter.title = patch.title.trim() || chapter.title
+      if (patch.content !== undefined) {
+        // 纯正文，不从 content 解析双链
+        chapter.content = patch.content
+      }
+      if (patch.status !== undefined) chapter.status = patch.status
+      if (patch.sourceBeatIds !== undefined) chapter.sourceBeatIds = patch.sourceBeatIds
+      if (patch.entityRefs !== undefined) chapter.entityRefs = patch.entityRefs
+      if (patch.beatRefs !== undefined) chapter.beatRefs = patch.beatRefs
+      if (patch.conversationId !== undefined) chapter.conversationId = patch.conversationId
+      chapter.updatedAt = nowIso()
 
-    if (titleChanged) {
-      const newFileName = toChapterFileName(chapter.title, chapter.id)
-      chapter.fileName = newFileName
-      await writeJsonAtomic(this.chapterPath(dirPath, newFileName), chapter)
-      if (newFileName !== located.fileName) {
+      if (titleChanged) {
+        const newFileName = toChapterFileName(chapter.title, chapter.id)
+        chapter.fileName = newFileName
+        await writeJsonAtomic(this.chapterPath(dirPath, newFileName), chapter)
+        if (newFileName !== located.fileName) {
+          try {
+            await fs.unlink(located.filePath)
+          } catch {
+            // 忽略
+          }
+        }
+      } else {
+        chapter.fileName = chapter.fileName || located.fileName
+        await writeJsonAtomic(located.filePath, chapter)
+      }
+
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
+  }
+
+  async deleteChapter(projectId: string, chapterId: string): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    return this.enqueueMutation(dirPath, async () => {
+      const index = await this.readIndex(dirPath)
+      const located = await this.findChapterFile(dirPath, chapterId)
+
+      index.chapters.order = index.chapters.order.filter((id) => id !== chapterId)
+      if (located) {
         try {
           await fs.unlink(located.filePath)
         } catch {
           // 忽略
         }
       }
-    } else {
-      chapter.fileName = chapter.fileName || located.fileName
-      await writeJsonAtomic(located.filePath, chapter)
-    }
 
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
-  }
-
-  async deleteChapter(projectId: string, chapterId: string): Promise<ProjectSnapshot> {
-    const dirPath = await this.resolveDir(projectId)
-    const index = await this.readIndex(dirPath)
-    const located = await this.findChapterFile(dirPath, chapterId)
-
-    index.chapters.order = index.chapters.order.filter((id) => id !== chapterId)
-    if (located) {
-      try {
-        await fs.unlink(located.filePath)
-      } catch {
-        // 忽略
-      }
-    }
-
-    await this.writeIndex(dirPath, index)
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
   }
 
   async reorderChapters(projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
-    const index = await this.readIndex(dirPath)
+    return this.enqueueMutation(dirPath, async () => {
+      const index = await this.readIndex(dirPath)
 
-    const currentSet = new Set(index.chapters.order)
-    const nextSet = new Set(orderedIds)
-    if (currentSet.size !== nextSet.size || [...currentSet].some((id) => !nextSet.has(id))) {
-      throw new Error('重排失败：文章有序 id 列表与当前集合不一致')
-    }
+      const currentSet = new Set(index.chapters.order)
+      const nextSet = new Set(orderedIds)
+      if (currentSet.size !== nextSet.size || [...currentSet].some((id) => !nextSet.has(id))) {
+        throw new Error('重排失败：文章有序 id 列表与当前集合不一致')
+      }
 
-    index.chapters.order = [...orderedIds]
-    await this.writeIndex(dirPath, index)
-    await this.touchProject(dirPath)
-    return this.loadSnapshot(dirPath)
+      index.chapters.order = [...orderedIds]
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
   }
 
   async getChapter(projectId: string, chapterId: string): Promise<Chapter> {

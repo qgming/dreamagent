@@ -7,10 +7,12 @@ import { PiModelsService } from './services/pi-models'
 import { PiSessionService } from './services/pi-session-service'
 import { HarnessManager } from './services/harness-manager'
 import { AgentRunner } from './services/agent-runner'
+import { SkillService } from './services/skill-service'
 import { registerProjectIpc } from './ipc/project-ipc'
 import { registerSessionIpc } from './ipc/session-ipc'
 import { registerAgentIpc } from './ipc/agent-ipc'
 import { registerSettingsIpc } from './ipc/settings-ipc'
+import { registerSkillIpc } from './ipc/skill-ipc'
 
 /** 是否为开发环境 */
 const isDev = !app.isPackaged
@@ -127,14 +129,21 @@ app.whenReady().then(async () => {
   // 窗口控制 IPC
   registerWindowIpc()
 
-  // 项目库 / 节点 / 实体 / 章节 / pi 会话 / Agent / 设置
+  // 项目库 / 节点 / 实体 / 章节 / pi 会话 / Agent / 设置 / 技能
   const libraryService = new LibraryService()
   await libraryService.init()
   const projectService = new ProjectService(libraryService)
   const llmSettings = new LlmSettingsService()
   const piModels = new PiModelsService(llmSettings)
   const sessionService = new PiSessionService(projectService)
-  const harnessManager = new HarnessManager(projectService, sessionService, piModels)
+  const skillService = new SkillService()
+  await skillService.ensureReady()
+  const harnessManager = new HarnessManager(
+    projectService,
+    sessionService,
+    piModels,
+    skillService
+  )
   const agentRunner = new AgentRunner(
     projectService,
     sessionService,
@@ -146,6 +155,7 @@ app.whenReady().then(async () => {
   registerSessionIpc(sessionService)
   registerAgentIpc(agentRunner)
   registerSettingsIpc(llmSettings)
+  registerSkillIpc(skillService)
 
   createWindow()
 

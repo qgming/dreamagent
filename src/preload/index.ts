@@ -16,7 +16,10 @@ import type {
   CreateBeatInput,
   CreateChapterInput,
   CreateEntityInput,
+  CreateMutationResult,
   CreateProjectInput,
+  Beat,
+  Entity,
   ProjectMeta,
   ProjectSnapshot,
   ProjectSummary,
@@ -25,6 +28,15 @@ import type {
   UpdateChapterInput,
   UpdateEntityInput
 } from '../shared/project-types'
+import type {
+  CreateSkillInput,
+  ImportSkillZipResult,
+  SkillDetail,
+  SkillSummary,
+  SkillWriteResult,
+  UninstallSkillResult,
+  WriteSkillFileInput
+} from '../shared/skills'
 
 /**
  * 应用信息 API
@@ -76,8 +88,10 @@ const projectApi = {
   revealInFolder: (projectId: string): Promise<void> =>
     ipcRenderer.invoke('project:revealInFolder', projectId),
 
-  createBeat: (projectId: string, input: CreateBeatInput): Promise<ProjectSnapshot> =>
-    ipcRenderer.invoke('beat:create', projectId, input),
+  createBeat: (
+    projectId: string,
+    input: CreateBeatInput
+  ): Promise<CreateMutationResult<Beat>> => ipcRenderer.invoke('beat:create', projectId, input),
   updateBeat: (
     projectId: string,
     beatId: string,
@@ -88,7 +102,10 @@ const projectApi = {
   reorderBeats: (projectId: string, input: ReorderBeatsInput): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke('beat:reorder', projectId, input),
 
-  createEntity: (projectId: string, input: CreateEntityInput): Promise<ProjectSnapshot> =>
+  createEntity: (
+    projectId: string,
+    input: CreateEntityInput
+  ): Promise<CreateMutationResult<Entity>> =>
     ipcRenderer.invoke('entity:create', projectId, input),
   updateEntity: (
     projectId: string,
@@ -101,7 +118,10 @@ const projectApi = {
   reorderEntities: (projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke('entity:reorder', projectId, orderedIds),
 
-  createChapter: (projectId: string, input: CreateChapterInput): Promise<ProjectSnapshot> =>
+  createChapter: (
+    projectId: string,
+    input: CreateChapterInput
+  ): Promise<CreateMutationResult<Chapter>> =>
     ipcRenderer.invoke('chapter:create', projectId, input),
   updateChapter: (
     projectId: string,
@@ -165,13 +185,34 @@ const settingsApi = {
     ipcRenderer.invoke('settings:setLlm', patch)
 }
 
+/**
+ * 技能 API
+ */
+const skillsApi = {
+  list: (): Promise<SkillSummary[]> => ipcRenderer.invoke('skills:list'),
+  getDetail: (id: string): Promise<SkillDetail> => ipcRenderer.invoke('skills:getDetail', id),
+  setEnabled: (id: string, enabled: boolean): Promise<SkillSummary[]> =>
+    ipcRenderer.invoke('skills:setEnabled', id, enabled),
+  importZip: (): Promise<ImportSkillZipResult | null> => ipcRenderer.invoke('skills:importZip'),
+  uninstall: (id: string): Promise<UninstallSkillResult> =>
+    ipcRenderer.invoke('skills:uninstall', id),
+  reload: (): Promise<SkillSummary[]> => ipcRenderer.invoke('skills:reload'),
+  create: (input: CreateSkillInput): Promise<SkillWriteResult> =>
+    ipcRenderer.invoke('skills:create', input),
+  writeFile: (input: WriteSkillFileInput): Promise<SkillWriteResult> =>
+    ipcRenderer.invoke('skills:writeFile', input),
+  readFile: (id: string, relativePath: string): Promise<string> =>
+    ipcRenderer.invoke('skills:readFile', id, relativePath)
+}
+
 const api = {
   app: appApi,
   window: windowApi,
   project: projectApi,
   session: sessionApi,
   agent: agentApi,
-  settings: settingsApi
+  settings: settingsApi,
+  skills: skillsApi
 }
 
 try {

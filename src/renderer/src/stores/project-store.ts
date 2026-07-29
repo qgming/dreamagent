@@ -16,6 +16,9 @@ import type {
 /** 项目内视图 */
 export type ProjectView = 'overview' | 'beats' | 'entities' | 'create'
 
+/** 应用主表面：首页 / 技能库 / 项目 */
+export type AppSurface = 'home' | 'skills' | 'project'
+
 /** 项目表单模态：新建 或 编辑 */
 export type ProjectFormMode =
   | { mode: 'create' }
@@ -37,6 +40,8 @@ interface ProjectState {
   snapshot: ProjectSnapshot | null
   expandedProjectIds: string[]
   activeProjectId: string | null
+  /** 全局主表面 */
+  appSurface: AppSurface
   projectView: ProjectView
   selectedBeatId: string | null
   selectedEntityId: string | null
@@ -50,6 +55,7 @@ interface ProjectState {
   loadLibraryRoot: () => Promise<void>
   createProject: (input: CreateProjectInput) => Promise<ProjectSnapshot>
   openProject: (projectId: string, view?: ProjectView) => Promise<void>
+  openSkills: () => void
   closeProject: () => void
   deleteProject: (projectId: string) => Promise<void>
   updateProjectMeta: (
@@ -102,6 +108,7 @@ function applySnapshot(
       conversationSummaries: snap.conversationSummaries ?? []
     },
     activeProjectId: snap.meta.id,
+    appSurface: 'project',
     expandedProjectIds: [...expanded],
     error: null
   })
@@ -116,6 +123,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   snapshot: null,
   expandedProjectIds: [],
   activeProjectId: null,
+  appSurface: 'home',
   projectView: 'overview',
   selectedBeatId: null,
   selectedEntityId: null,
@@ -196,10 +204,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  openSkills: () => {
+    set({
+      appSurface: 'skills',
+      // 离开项目主视图，但保留侧栏项目展开状态
+      activeProjectId: null,
+      snapshot: null,
+      selectedBeatId: null,
+      selectedEntityId: null
+    })
+    void import('./create-store').then(({ useCreateStore }) => {
+      useCreateStore.getState().reset()
+    })
+  },
+
   closeProject: () => {
     set({
       snapshot: null,
       activeProjectId: null,
+      appSurface: 'home',
       selectedBeatId: null,
       selectedEntityId: null
     })
@@ -218,6 +241,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         set({
           snapshot: null,
           activeProjectId: null,
+          appSurface: 'home',
           selectedBeatId: null,
           selectedEntityId: null
         })
@@ -272,7 +296,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   // 同步切页：进创作立刻满宽出现
-  setProjectView: (view) => set({ projectView: view }),
+  setProjectView: (view) => set({ appSurface: 'project', projectView: view }),
   setSelectedBeatId: (id) => set({ selectedBeatId: id }),
   setSelectedEntityId: (id) => set({ selectedEntityId: id }),
 
@@ -309,11 +333,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { activeProjectId } = get()
     if (!activeProjectId) return
     try {
-      const snap = await window.api.project.createBeat(activeProjectId, input)
-      const newId = snap.index.beats.order[snap.index.beats.order.length - 1] ?? null
+      const { snapshot: snap, created } = await window.api.project.createBeat(
+        activeProjectId,
+        input
+      )
       applySnapshot(set, get, snap)
       set({
-        selectedBeatId: newId ?? get().selectedBeatId,
+        selectedBeatId: created.id,
         beatForm: null
       })
       await get().refreshLibrary()
@@ -370,10 +396,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { activeProjectId } = get()
     if (!activeProjectId) return
     try {
-      const snap = await window.api.project.createEntity(activeProjectId, input)
-      const newId = snap.index.entities.order[snap.index.entities.order.length - 1] ?? null
+      const { snapshot: snap, created } = await window.api.project.createEntity(
+        activeProjectId,
+        input
+      )
       applySnapshot(set, get, snap)
-      set({ selectedEntityId: newId, entityForm: null })
+      set({ selectedEntityId: created.id, entityForm: null })
       await get().refreshLibrary()
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
@@ -428,7 +456,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { activeProjectId } = get()
     if (!activeProjectId) return
     try {
-      const snap = await window.api.project.createChapter(activeProjectId, input)
+      const { snapshot: snap } = await window.api.project.createChapter(
+        activeProjectId,
+        input
+      )
       applySnapshot(set, get, snap)
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })

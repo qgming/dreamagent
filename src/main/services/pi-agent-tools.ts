@@ -4,7 +4,9 @@
 import { Type, type Static, type TSchema } from 'typebox'
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 import type { AgentHarnessTool } from '@earendil-works/pi-agent-core'
+import type { Skill } from '@earendil-works/pi-agent-core'
 import type { AgentToolRuntime } from './agent-tool-runtime'
+import type { SkillService } from './skill-service'
 import type { AgentToolName } from '../../shared/agent-tools'
 
 /** 每轮注入的工具上下文 */
@@ -12,6 +14,10 @@ export interface DreamToolContext {
   projectId: string
   sessionId: string
   runtime: AgentToolRuntime
+  /** 当前启用的 pi 技能（渐进式披露） */
+  skills?: Skill[]
+  /** 技能服务（write_skill 增删改） */
+  skillService?: SkillService
 }
 
 function text(value: string): AgentToolResult<unknown>['content'] {
@@ -80,7 +86,12 @@ const readBeatParams = Type.Object({
 
 const createBeatParams = Type.Object({
   title: Type.String({ description: '节点标题' }),
-  content: Type.Optional(Type.String({ description: '节点正文，可含双链' })),
+  content: Type.Optional(
+    Type.String({
+      description:
+        '节点正文。合法双链 [@显示名](entity:真实id) / [@显示名](beat:真实id) 会自动同步到 entityRefs/beatRefs；禁止只写 @名'
+    })
+  ),
   status: Type.Optional(beatStatusEnum),
   afterId: Type.Optional(Type.String({ description: '插入到该节点之后' }))
 })
@@ -106,7 +117,12 @@ const readEntityParams = Type.Object({
 
 const createEntityParams = Type.Object({
   name: Type.String({ description: '实体名称' }),
-  content: Type.Optional(Type.String({ description: '设定正文，可含双链' })),
+  content: Type.Optional(
+    Type.String({
+      description:
+        '设定正文。合法双链 [@显示名](entity:真实id) / [@显示名](beat:真实id) 会自动同步到 entityRefs/beatRefs；禁止只写 @名'
+    })
+  ),
   status: Type.Optional(entityStatusEnum)
 })
 
@@ -183,16 +199,19 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       name: 'create_beat',
       label: '创建节点',
       description:
-        '新建节点。可写标题、正文（可含双链）、初始状态。',
+        '新建节点。返回完整对象（id + entityRefs + beatRefs）。content 写 [@名](entity|beat:真实id) 后自动同步底部属性；禁止只写 @名字。',
       parameters: createBeatParams,
+      executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
         runRuntime(ctx, 'create_beat', { ...(params as Static<typeof createBeatParams>) })
     },
     {
       name: 'update_beat',
       label: '更新节点',
-      description: '更新节点标题/正文/状态。改写 content 时双链会自动解析。',
+      description:
+        '更新节点。改 content 时自动解析双链并回写 entityRefs/beatRefs；摘要会显示「实体链 N · 节点链 M」。',
       parameters: updateBeatParams,
+      executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
         runRuntime(ctx, 'update_beat', { ...(params as Static<typeof updateBeatParams>) })
     },
@@ -201,6 +220,7 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       label: '删除节点',
       description: '删除节点，并清理相关双链引用。',
       parameters: deleteBeatParams,
+      executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
         runRuntime(ctx, 'delete_beat', { ...(params as Static<typeof deleteBeatParams>) })
     },
@@ -225,16 +245,20 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
     {
       name: 'create_entity',
       label: '创建实体',
-      description: '新建实体（人物/地点/物品等设定）。',
+      description:
+        '新建实体。返回完整对象（id + entityRefs + beatRefs）。content 合法双链会自动同步底部属性。',
       parameters: createEntityParams,
+      executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
         runRuntime(ctx, 'create_entity', { ...(params as Static<typeof createEntityParams>) })
     },
     {
       name: 'update_entity',
       label: '更新实体',
-      description: '更新实体名称/正文/状态。',
+      description:
+        '更新实体。改 content 时自动解析双链并回写 entityRefs/beatRefs；摘要会显示链路数量。',
       parameters: updateEntityParams,
+      executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
         runRuntime(ctx, 'update_entity', { ...(params as Static<typeof updateEntityParams>) })
     },
@@ -243,6 +267,7 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       label: '删除实体',
       description: '删除实体，并清理相关双链引用。',
       parameters: deleteEntityParams,
+      executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
         runRuntime(ctx, 'delete_entity', { ...(params as Static<typeof deleteEntityParams>) })
     },
@@ -251,6 +276,7 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       label: '更新节点状态',
       description: '仅更新节点写作成熟度（idea→outline→draft→final）。不改写节点正文。',
       parameters: updateBeatStatusParams,
+      executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
         runRuntime(ctx, 'update_beat_status', {
           ...(params as Static<typeof updateBeatStatusParams>)
@@ -262,6 +288,7 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       description:
         '创建或覆盖文章。content 必须是纯正文，禁止双链语法；关联节点/实体通过 sourceBeatIds、entityRefs、beatRefs 元数据传递。不回写 beat.content。',
       parameters: writeChapterParams,
+      executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
         runRuntime(ctx, 'write_chapter', { ...(params as Static<typeof writeChapterParams>) })
     },
@@ -286,8 +313,9 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
     {
       name: 'update_chapter',
       label: '更新文章',
-      description: '更新文章标题/正文/状态/关联节点与实体。',
+      description: '更新文章标题/正文/状态/关联节点与实体。正文禁止双链。',
       parameters: updateChapterParams,
+      executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
         runRuntime(ctx, 'update_chapter', { ...(params as Static<typeof updateChapterParams>) })
     },
@@ -296,6 +324,7 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       label: '删除文章',
       description: '删除文章。',
       parameters: deleteChapterParams,
+      executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
         runRuntime(ctx, 'delete_chapter', { ...(params as Static<typeof deleteChapterParams>) })
     },
@@ -324,6 +353,24 @@ export const DREAM_AGENT_BASE_PROMPT = `你是「造梦师」的创作助手，�
 5. 写完后如源节点尚未 draft/final，可用 update_beat_status 推进到 draft。
 6. 用中文回复用户；工具调用按需进行，不要无意义循环。
 7. 回复可用 Markdown（标题、列表、加粗、引用等）提升可读性。
+8. 不熟悉造梦师工具/双链时，先 read_skill「dreamagent-guide」。
+
+## 双链（硬规则，必须遵守）
+- 唯一合法语法：\`[@显示名](entity:真实id)\` 或 \`[@显示名](beat:真实id)\`
+- **禁止**只写 \`@名字\`、\`[[名字]]\`、\`[名字]\` 等；这些不会建立图谱引用。
+- 创建时：先 create_entity / create_beat，从工具返回的 data.id（或摘要里的 id）拿到真实 id，再在 content 中写入双链。
+- 示例：创建实体返回 id=ent_abc 后，节点 content 写 \`[@林远](entity:ent_abc)\`。
+- 双链**只能**出现在节点/实体 content；文章 content 禁止双链，用元数据 entityRefs / beatRefs / sourceBeatIds。
+- 完整建链 = content 合法语法 + 底部属性同步：
+  - 写入 content 后，系统**自动**解析并维护 \`entityRefs\` / \`beatRefs\`
+  - 工具 data 会带回完整对象；摘要含「实体链 N · 节点链 M」
+  - 若摘要是「无双链」或 data.entityRefs/beatRefs 为空，说明语法无效，必须改 content 重写
+  - **不要**尝试单独传 entityRefs/beatRefs 字段；只改 content
+
+## 技能（Skills）
+- 系统提示中的技能列表只含名称与简介，不含全文。
+- 当用户任务匹配某技能时：先 list_skills 确认，再 read_skill 读取完整流程；references 用 read_skill_file。
+- 不要假设技能全文已在系统提示中；读完技能后再调用图谱工具执行。
 
 ## 约束
 - 节点/实体正文可含双链；文章正文必须是纯文本。

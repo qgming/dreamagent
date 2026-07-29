@@ -15,7 +15,10 @@ import type {
   CreateBeatInput,
   CreateChapterInput,
   CreateEntityInput,
+  CreateMutationResult,
   CreateProjectInput,
+  Beat,
+  Entity,
   ProjectMeta,
   ProjectSnapshot,
   ProjectSummary,
@@ -24,6 +27,15 @@ import type {
   UpdateChapterInput,
   UpdateEntityInput
 } from '../shared/project-types'
+import type {
+  CreateSkillInput,
+  ImportSkillZipResult,
+  SkillDetail,
+  SkillSummary,
+  SkillWriteResult,
+  UninstallSkillResult,
+  WriteSkillFileInput
+} from '../shared/skills'
 
 export interface AppApi {
   getVersion: () => Promise<string>
@@ -54,7 +66,10 @@ export interface ProjectApi {
   delete: (projectId: string) => Promise<void>
   revealInFolder: (projectId: string) => Promise<void>
 
-  createBeat: (projectId: string, input: CreateBeatInput) => Promise<ProjectSnapshot>
+  createBeat: (
+    projectId: string,
+    input: CreateBeatInput
+  ) => Promise<CreateMutationResult<Beat>>
   updateBeat: (
     projectId: string,
     beatId: string,
@@ -63,7 +78,10 @@ export interface ProjectApi {
   deleteBeat: (projectId: string, beatId: string) => Promise<ProjectSnapshot>
   reorderBeats: (projectId: string, input: ReorderBeatsInput) => Promise<ProjectSnapshot>
 
-  createEntity: (projectId: string, input: CreateEntityInput) => Promise<ProjectSnapshot>
+  createEntity: (
+    projectId: string,
+    input: CreateEntityInput
+  ) => Promise<CreateMutationResult<Entity>>
   updateEntity: (
     projectId: string,
     entityId: string,
@@ -72,7 +90,10 @@ export interface ProjectApi {
   deleteEntity: (projectId: string, entityId: string) => Promise<ProjectSnapshot>
   reorderEntities: (projectId: string, orderedIds: string[]) => Promise<ProjectSnapshot>
 
-  createChapter: (projectId: string, input: CreateChapterInput) => Promise<ProjectSnapshot>
+  createChapter: (
+    projectId: string,
+    input: CreateChapterInput
+  ) => Promise<CreateMutationResult<Chapter>>
   updateChapter: (
     projectId: string,
     chapterId: string,
@@ -107,6 +128,18 @@ export interface SettingsApi {
   setLlm: (patch: LlmSettingsPatch) => Promise<LlmPublicSettings>
 }
 
+export interface SkillsApi {
+  list: () => Promise<SkillSummary[]>
+  getDetail: (id: string) => Promise<SkillDetail>
+  setEnabled: (id: string, enabled: boolean) => Promise<SkillSummary[]>
+  importZip: () => Promise<ImportSkillZipResult | null>
+  uninstall: (id: string) => Promise<UninstallSkillResult>
+  reload: () => Promise<SkillSummary[]>
+  create: (input: CreateSkillInput) => Promise<SkillWriteResult>
+  writeFile: (input: WriteSkillFileInput) => Promise<SkillWriteResult>
+  readFile: (id: string, relativePath: string) => Promise<string>
+}
+
 export interface DreamAgentApi {
   app: AppApi
   window: WindowApi
@@ -114,6 +147,7 @@ export interface DreamAgentApi {
   session: SessionApi
   agent: AgentApi
   settings: SettingsApi
+  skills: SkillsApi
 }
 
 declare global {

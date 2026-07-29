@@ -35,11 +35,13 @@ export function AppSidebar(): React.JSX.Element {
   const library = useProjectStore((s) => s.library)
   const expandedProjectIds = useProjectStore((s) => s.expandedProjectIds)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const appSurface = useProjectStore((s) => s.appSurface)
   const projectView = useProjectStore((s) => s.projectView)
   const snapshot = useProjectStore((s) => s.snapshot)
 
   const toggleProjectExpanded = useProjectStore((s) => s.toggleProjectExpanded)
   const openProject = useProjectStore((s) => s.openProject)
+  const openSkills = useProjectStore((s) => s.openSkills)
   const openCreateProjectModal = useProjectStore((s) => s.openCreateProjectModal)
   const openEditProjectModal = useProjectStore((s) => s.openEditProjectModal)
   const deleteProject = useProjectStore((s) => s.deleteProject)
@@ -48,7 +50,11 @@ export function AppSidebar(): React.JSX.Element {
   const openView = (projectId: string, view: ProjectView): void => {
     // 同步切换：进创作立刻满宽，不排队 transition
     if (snapshot?.meta.id === projectId) {
-      useProjectStore.setState({ activeProjectId: projectId, projectView: view })
+      useProjectStore.setState({
+        activeProjectId: projectId,
+        appSurface: 'project',
+        projectView: view
+      })
       return
     }
     void openProject(projectId, view)
@@ -65,7 +71,8 @@ export function AppSidebar(): React.JSX.Element {
     })()
   }
 
-  const isAppHome = !activeProjectId
+  const isAppHome = appSurface === 'home'
+  const isSkills = appSurface === 'skills'
 
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
@@ -77,14 +84,7 @@ export function AppSidebar(): React.JSX.Element {
         <SectionLabel>通用</SectionLabel>
         <nav className="space-y-1">
           <SidebarButton active={isAppHome} icon={Home} label="首页" onClick={closeProject} />
-          <div
-            className="flex h-9 items-center gap-3 rounded-md px-3 text-sm text-muted-foreground/60"
-            title="后续接入"
-          >
-            <Sparkles className="size-[18px] shrink-0" />
-            <span className="truncate">技能 / MCP</span>
-            <span className="ml-auto text-[10px]">稍后</span>
-          </div>
+          <SidebarButton active={isSkills} icon={Sparkles} label="技能" onClick={openSkills} />
         </nav>
       </div>
 
@@ -107,7 +107,8 @@ export function AppSidebar(): React.JSX.Element {
           ) : (
             library.map((project) => {
               const expanded = expandedProjectIds.includes(project.id)
-              const isActiveProject = activeProjectId === project.id
+              const isActiveProject =
+                appSurface === 'project' && activeProjectId === project.id
 
               return (
                 <div key={project.id}>

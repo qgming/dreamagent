@@ -11,6 +11,10 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+# 内置技能：打包到 resources/skills，运行时由 SkillService 同步到 userData
+extraResources:
+  - from: resources/skills
+    to: skills
 win:
   executableName: dreamagent
   target:

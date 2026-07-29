@@ -1,17 +1,19 @@
 /**
  * 每会话一个 AgentHarness 缓存
  */
-import { AgentHarness } from '@earendil-works/pi-agent-core'
+import { AgentHarness, formatSkillsForSystemPrompt } from '@earendil-works/pi-agent-core'
 import type { Model, Models, Api } from '@earendil-works/pi-ai'
 import type { ProjectService } from './project-service'
 import type { PiSessionService } from './pi-session-service'
 import type { PiModelsService } from './pi-models'
+import type { SkillService } from './skill-service'
 import { AgentToolRuntime } from './agent-tool-runtime'
 import {
   buildDreamAgentTools,
   DREAM_AGENT_BASE_PROMPT,
   type DreamToolContext
 } from './pi-agent-tools'
+import { buildSkillTools } from './skill-tools'
 import { readPinsFromBranch } from './pi-session-parser'
 
 type DreamHarness = AgentHarness<DreamToolContext>
@@ -36,7 +38,8 @@ export class HarnessManager {
   constructor(
     private readonly projects: ProjectService,
     private readonly sessions: PiSessionService,
-    private readonly modelsService: PiModelsService
+    private readonly modelsService: PiModelsService,
+    private readonly skills: SkillService
   ) {
     this.toolRuntime = new AgentToolRuntime(projects)
   }
@@ -116,14 +119,18 @@ export class HarnessManager {
   }
 
   private async configSignature(projectId: string, sessionId: string): Promise<string> {
-    const { model } = await this.modelsService.getModelsAndDefault()
-    const view = await this.sessions.open(projectId, sessionId).catch(() => null)
+    const [{ model }, view, enabledSkillIds] = await Promise.all([
+      this.modelsService.getModelsAndDefault(),
+      this.sessions.open(projectId, sessionId).catch(() => null),
+      this.skills.getEnabledSkillIds().catch(() => [] as string[])
+    ])
     return JSON.stringify({
       modelId: model.id,
       provider: model.provider,
       baseUrl: model.baseUrl,
       pinsB: view?.pinnedBeatIds ?? [],
-      pinsE: view?.pinnedEntityIds ?? []
+      pinsE: view?.pinnedEntityIds ?? [],
+      skills: enabledSkillIds
     })
   }
 
@@ -163,17 +170,34 @@ export class HarnessManager {
     sessionId: string,
     _signature: string
   ): Promise<DreamHarness> {
-    const [{ models, model }, session, systemPrompt] = await Promise.all([
+    const [{ models, model }, session, basePrompt, piSkills] = await Promise.all([
       this.modelsService.getModelsAndDefault(),
       this.sessions.openSessionObject(projectId, sessionId),
-      this.buildSystemPrompt(projectId, sessionId)
+      this.buildSystemPrompt(projectId, sessionId),
+      this.skills.getEnabledPiSkills().catch((error) => {
+        console.warn('[harness-manager] 加载技能失败，降级为无技能:', error)
+        return []
+      })
     ])
 
-    const tools = buildDreamAgentTools()
-    const toolContext = {
+    const skillsBlock = [
+      formatSkillsForSystemPrompt(piSkills),
+      piSkills.length > 0
+        ? '需要使用某个技能时：先 list_skills 确认可用技能，再 read_skill 读取完整说明和目录树；references 等子文件用 read_skill_file。不要假设技能全文已在系统提示中。可用 write_skill 创建/编辑/删除自定义技能（不能改内置）。'
+        : '可用 write_skill 创建自定义技能；list_skills / read_skill 在有启用技能时可用。'
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+
+    const systemPrompt = [basePrompt, skillsBlock].filter(Boolean).join('\n\n')
+
+    const tools = [...buildDreamAgentTools(), ...buildSkillTools()]
+    const toolContext: DreamToolContext = {
       projectId,
       sessionId,
-      runtime: this.toolRuntime
+      runtime: this.toolRuntime,
+      skills: piSkills,
+      skillService: this.skills
     }
 
     // pi 0.82：不再传 env；工具上下文经 toolContext 注入
@@ -184,6 +208,7 @@ export class HarnessManager {
       tools,
       toolContext,
       systemPrompt,
+      resources: { skills: piSkills },
       // 中等思考档：支持 reasoning 的模型会流式输出 thinking 块
       thinkingLevel: 'medium'
     })

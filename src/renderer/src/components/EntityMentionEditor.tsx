@@ -233,31 +233,31 @@ export function MentionEditor({
     setCreating(true)
     try {
       if (target === 'entity') {
-        const snap = await window.api.project.createEntity(projectId, {
-          name: name.trim()
-        })
-        const newId = snap.index.entities.order[snap.index.entities.order.length - 1]
+        const { snapshot: snap, created } = await window.api.project.createEntity(
+          projectId,
+          {
+            name: name.trim()
+          }
+        )
         useProjectStore.setState({
           snapshot: snap,
-          selectedEntityId: newId ?? null
+          selectedEntityId: created.id
         })
         void useProjectStore.getState().refreshLibrary()
-        if (newId && snap.entities[newId]) {
-          insertChip(snap.entities[newId].name, 'entity', newId)
-        }
+        insertChip(created.name, 'entity', created.id)
       } else {
-        const snap = await window.api.project.createBeat(projectId, {
-          title: name.trim()
-        })
-        const newId = snap.index.beats.order[snap.index.beats.order.length - 1]
+        const { snapshot: snap, created } = await window.api.project.createBeat(
+          projectId,
+          {
+            title: name.trim()
+          }
+        )
         useProjectStore.setState({
           snapshot: snap,
-          selectedBeatId: newId ?? null
+          selectedBeatId: created.id
         })
         void useProjectStore.getState().refreshLibrary()
-        if (newId && snap.beats[newId]) {
-          insertChip(snap.beats[newId].title, 'beat', newId)
-        }
+        insertChip(created.title, 'beat', created.id)
       }
     } finally {
       setCreating(false)

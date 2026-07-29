@@ -168,6 +168,12 @@ export interface ProjectSnapshot {
   dirPath: string
 }
 
+/** 创建类写操作返回：完整快照 + 刚创建的对象（避免并发下用 diff 猜 id） */
+export interface CreateMutationResult<T> {
+  snapshot: ProjectSnapshot
+  created: T
+}
+
 export interface CreateProjectInput {
   title: string
   description?: string

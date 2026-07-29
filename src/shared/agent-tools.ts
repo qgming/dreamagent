@@ -142,12 +142,16 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'create_beat',
     description:
-      '新建节点。可写标题、正文（可含 [@名](entity:id) / [@名](beat:id) 双链）、初始状态。',
+      '新建节点。返回完整对象（含 id、entityRefs、beatRefs）。content 写合法双链后系统自动填充底部 entityRefs/beatRefs；禁止只写 @名。',
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', description: '节点标题' },
-        content: { type: 'string', description: '节点正文，可含双链' },
+        content: {
+          type: 'string',
+          description:
+            '节点正文；双链 [@显示名](entity:id)/[@显示名](beat:id) 会自动同步到 entityRefs/beatRefs'
+        },
         status: {
           type: 'string',
           enum: ['idea', 'outline', 'draft', 'final'],
@@ -164,7 +168,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'update_beat',
     description:
-      '更新节点标题/正文/状态。改写 content 时双链会自动解析为 entityRefs/beatRefs。',
+      '更新节点标题/正文/状态。改写 content 时自动解析双链并完整回写 entityRefs/beatRefs；双链必须带真实 id。返回 data 可核对底部属性。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -216,12 +220,17 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   },
   {
     name: 'create_entity',
-    description: '新建实体（人物/地点/物品等设定）。可写名称、正文（可含双链）、状态。',
+    description:
+      '新建实体。返回完整对象（含 id、entityRefs、beatRefs）。content 合法双链会自动同步底部属性。',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: '实体名称' },
-        content: { type: 'string', description: '设定正文，可含双链' },
+        content: {
+          type: 'string',
+          description:
+            '设定正文；双链 [@显示名](entity:id)/[@显示名](beat:id) 会自动同步到 entityRefs/beatRefs'
+        },
         status: {
           type: 'string',
           enum: ['active', 'dormant', 'archived'],
@@ -233,7 +242,8 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   },
   {
     name: 'update_entity',
-    description: '更新实体名称/正文/状态。',
+    description:
+      '更新实体名称/正文/状态。改 content 时自动解析双链并完整回写 entityRefs/beatRefs；返回 data 可核对。',
     inputSchema: {
       type: 'object',
       properties: {
