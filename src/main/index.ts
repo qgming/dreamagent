@@ -1,5 +1,8 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
+import { LibraryService } from './services/library-service'
+import { ProjectService } from './services/project-service'
+import { registerProjectIpc } from './ipc/project-ipc'
 
 /** 是否为开发环境 */
 const isDev = !app.isPackaged
@@ -103,7 +106,7 @@ function registerWindowIpc(): void {
 }
 
 // 应用准备就绪
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // 设置 Windows 应用用户模型 ID（对应包名）
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.qgming.dreamagent')
@@ -115,6 +118,12 @@ app.whenReady().then(() => {
 
   // 窗口控制 IPC
   registerWindowIpc()
+
+  // 项目库 / 节点 / 实体 IPC
+  const libraryService = new LibraryService()
+  await libraryService.init()
+  const projectService = new ProjectService(libraryService)
+  registerProjectIpc(projectService)
 
   createWindow()
 

@@ -1,19 +1,33 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { TitleBar } from '@/components/TitleBar'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
+import { NameFormModals } from '@/components/NameFormModals'
 import { SettingsModal } from '@/components/settings/SettingsModal'
 import { useTheme } from '@/hooks/useTheme'
-import type { PageId } from '@/lib/navigation'
+import { BeatsPage } from '@/pages/BeatsPage'
+import { CreatePage } from '@/pages/CreatePage'
+import { EntitiesPage } from '@/pages/EntitiesPage'
+import { HomePage, useBootstrapLibrary } from '@/pages/HomePage'
+import { useProjectStore } from '@/stores/project-store'
 
 /**
  * 应用外壳：标题栏 + 侧边栏 + 主内容区
- * 后续页面内容都挂载在这里
  */
 export function AppShell(): React.JSX.Element {
-  const [activePage, setActivePage] = useState<PageId>('home')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  // 挂载主题同步
   useTheme()
+  useBootstrapLibrary()
+
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const projectView = useProjectStore((s) => s.projectView)
+  const snapshot = useProjectStore((s) => s.snapshot)
+  const error = useProjectStore((s) => s.error)
+
+  // 窗口标题跟随当前项目
+  useEffect(() => {
+    const title = snapshot?.meta.title ? `${snapshot.meta.title} - 造梦师` : '造梦师'
+    void window.api?.window?.setTitle?.(title)
+  }, [snapshot?.meta.title])
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -23,43 +37,31 @@ export function AppShell(): React.JSX.Element {
       />
 
       <div className="flex min-h-0 flex-1">
-        {!sidebarCollapsed ? (
-          <AppSidebar activePage={activePage} onOpenPage={setActivePage} />
-        ) : null}
+        {!sidebarCollapsed ? <AppSidebar /> : null}
 
-        <main className="min-w-0 flex-1 overflow-hidden bg-background">
-          <PagePlaceholder page={activePage} />
+        <main className="relative min-w-0 flex-1 overflow-hidden bg-background">
+          {error ? (
+            <div className="absolute inset-x-0 top-0 z-10 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive">
+              {error}
+            </div>
+          ) : null}
+
+          {activeProjectId && snapshot ? (
+            projectView === 'beats' ? (
+              <BeatsPage />
+            ) : projectView === 'entities' ? (
+              <EntitiesPage />
+            ) : (
+              <CreatePage />
+            )
+          ) : (
+            <HomePage />
+          )}
         </main>
       </div>
 
-      {/* 设置大模态窗 */}
       <SettingsModal />
-    </div>
-  )
-}
-
-/**
- * 页面占位内容（后续替换为真实页面）
- */
-function PagePlaceholder({ page }: { page: PageId }): React.JSX.Element {
-  const titles: Record<PageId, { title: string; desc: string }> = {
-    home: { title: '首页', desc: '欢迎使用造梦师，从这里开始你的创作之旅。' },
-    create: { title: '创作', desc: '创作工作台将在这里展开。' },
-    projects: { title: '项目', desc: '管理你的全部造梦项目。' }
-  }
-
-  const current = titles[page]
-
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex flex-1 flex-col items-center justify-center gap-6 px-8 text-center">
-        <div className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            {current.title}
-          </h1>
-          <p className="max-w-md text-sm text-muted-foreground">{current.desc}</p>
-        </div>
-      </div>
+      <NameFormModals />
     </div>
   )
 }

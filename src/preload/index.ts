@@ -1,12 +1,21 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type {
+  CreateBeatInput,
+  CreateEntityInput,
+  CreateProjectInput,
+  ProjectMeta,
+  ProjectSnapshot,
+  ProjectSummary,
+  ReorderBeatsInput,
+  UpdateBeatInput,
+  UpdateEntityInput
+} from '../shared/project-types'
 
 /**
  * 应用信息 API
  */
 const appApi = {
-  /** 获取应用版本号 */
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
-  /** 获取应用名称 */
   getName: (): Promise<string> => ipcRenderer.invoke('app:getName')
 }
 
@@ -14,20 +23,11 @@ const appApi = {
  * 窗口控制 API
  */
 const windowApi = {
-  /** 最小化窗口 */
   minimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
-  /** 切换最大化 / 还原 */
   toggleMaximize: (): Promise<boolean> => ipcRenderer.invoke('window:toggle-maximize'),
-  /** 关闭窗口 */
   close: (): Promise<void> => ipcRenderer.invoke('window:close'),
-  /** 查询是否最大化 */
   isMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:is-maximized'),
-  /** 设置窗口标题 */
   setTitle: (title: string): Promise<void> => ipcRenderer.invoke('window:set-title', title),
-  /**
-   * 监听最大化状态变化
-   * @returns 取消订阅函数
-   */
   onMaximizedChange: (handler: (maximized: boolean) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, value: boolean): void => {
       handler(Boolean(value))
@@ -40,14 +40,59 @@ const windowApi = {
 }
 
 /**
- * 暴露给渲染进程的统一 API 命名空间
+ * 项目库 / 项目 / 节点 / 实体 API
  */
-const api = {
-  app: appApi,
-  window: windowApi
+const projectApi = {
+  getLibraryRoot: (): Promise<string> => ipcRenderer.invoke('library:getRoot'),
+  setLibraryRoot: (root: string): Promise<string> => ipcRenderer.invoke('library:setRoot', root),
+  listProjects: (): Promise<ProjectSummary[]> => ipcRenderer.invoke('library:listProjects'),
+
+  create: (input: CreateProjectInput): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('project:create', input),
+  open: (projectId: string): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('project:open', projectId),
+  openByPath: (dirPath: string): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('project:openByPath', dirPath),
+  updateMeta: (
+    projectId: string,
+    patch: Partial<Pick<ProjectMeta, 'title' | 'description'>>
+  ): Promise<ProjectMeta> => ipcRenderer.invoke('project:updateMeta', projectId, patch),
+  delete: (projectId: string): Promise<void> => ipcRenderer.invoke('project:delete', projectId),
+  revealInFolder: (projectId: string): Promise<void> =>
+    ipcRenderer.invoke('project:revealInFolder', projectId),
+
+  createBeat: (projectId: string, input: CreateBeatInput): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('beat:create', projectId, input),
+  updateBeat: (
+    projectId: string,
+    beatId: string,
+    patch: UpdateBeatInput
+  ): Promise<ProjectSnapshot> => ipcRenderer.invoke('beat:update', projectId, beatId, patch),
+  deleteBeat: (projectId: string, beatId: string): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('beat:delete', projectId, beatId),
+  reorderBeats: (projectId: string, input: ReorderBeatsInput): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('beat:reorder', projectId, input),
+
+  createEntity: (projectId: string, input: CreateEntityInput): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('entity:create', projectId, input),
+  updateEntity: (
+    projectId: string,
+    entityId: string,
+    patch: UpdateEntityInput
+  ): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('entity:update', projectId, entityId, patch),
+  deleteEntity: (projectId: string, entityId: string): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('entity:delete', projectId, entityId),
+  reorderEntities: (projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('entity:reorder', projectId, orderedIds)
 }
 
-// 通过 contextBridge 安全暴露 API 到渲染进程
+const api = {
+  app: appApi,
+  window: windowApi,
+  project: projectApi
+}
+
 try {
   contextBridge.exposeInMainWorld('api', api)
 } catch (error) {

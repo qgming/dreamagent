@@ -1,0 +1,304 @@
+import { useEffect, useRef, useState, type DragEvent } from 'react'
+import {
+  ChevronDown,
+  GripVertical,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Trash2
+} from 'lucide-react'
+import {
+  BEAT_STATUS_LABELS,
+  type Beat,
+  type BeatStatus
+} from '@shared/project-types'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
+import { cn } from '@/lib/utils'
+import {
+  arrayMove,
+  BEAT_STATUS_DOT_CLASS,
+  beatStatusTitle
+} from '@/lib/project-utils'
+import { getOrderedBeats, useProjectStore } from '@/stores/project-store'
+
+const STATUSES: BeatStatus[] = ['draft', 'outlined', 'expanded', 'polished']
+
+/** 左右顶栏统一高度 */
+const TOOLBAR_CLASS =
+  'flex h-11 shrink-0 items-center gap-2 border-b border-border px-3'
+
+/**
+ * 节点管理页：可拖拽排序 + 更多菜单 + 状态色点；右侧顶栏与左侧等高
+ */
+export function BeatsPage(): React.JSX.Element {
+  const snapshot = useProjectStore((s) => s.snapshot)
+  const selectedBeatId = useProjectStore((s) => s.selectedBeatId)
+  const setSelectedBeatId = useProjectStore((s) => s.setSelectedBeatId)
+  const openCreateBeatModal = useProjectStore((s) => s.openCreateBeatModal)
+  const openEditBeatModal = useProjectStore((s) => s.openEditBeatModal)
+  const updateBeat = useProjectStore((s) => s.updateBeat)
+  const deleteBeat = useProjectStore((s) => s.deleteBeat)
+  const reorderBeats = useProjectStore((s) => s.reorderBeats)
+
+  const beats = getOrderedBeats(snapshot)
+  const selected = selectedBeatId && snapshot ? snapshot.beats[selectedBeatId] : null
+
+  const handleReorder = (from: number, to: number): void => {
+    if (!snapshot || from === to) return
+    const next = arrayMove(snapshot.index.beats.order, from, to)
+    void reorderBeats({ orderedIds: next })
+  }
+
+  const handleDelete = (beat: Beat): void => {
+    if (!window.confirm(`删除节点「${beat.title}」？`)) return
+    void deleteBeat(beat.id)
+  }
+
+  if (!snapshot) {
+    return <Empty hint="请先在侧栏打开或新建一个项目" />
+  }
+
+  return (
+    <div className="flex h-full min-h-0">
+      <div className="flex w-72 shrink-0 flex-col border-r border-border bg-card/30">
+        <div className={cn(TOOLBAR_CLASS, 'justify-between')}>
+          <span className="text-sm font-medium">节点</span>
+          <Button onClick={openCreateBeatModal} size="sm" type="button" variant="secondary">
+            <Plus className="size-3.5" />
+            新建
+          </Button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 app-scrollbar">
+          {beats.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              暂无节点，点击上方新建
+            </p>
+          ) : (
+            <ul className="space-y-0.5">
+              {beats.map((beat, index) => (
+                <BeatListRow
+                  active={selectedBeatId === beat.id}
+                  beat={beat}
+                  index={index}
+                  key={beat.id}
+                  onDelete={() => handleDelete(beat)}
+                  onEdit={() => openEditBeatModal(beat.id)}
+                  onReorder={handleReorder}
+                  onSelect={() => setSelectedBeatId(beat.id)}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {selected ? (
+          <BeatEditor
+            beat={selected}
+            onChange={(patch) => void updateBeat(selected.id, patch)}
+          />
+        ) : (
+          <Empty hint="选择左侧节点进行编辑" />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function BeatListRow({
+  beat,
+  index,
+  active,
+  onSelect,
+  onEdit,
+  onDelete,
+  onReorder
+}: {
+  beat: Beat
+  index: number
+  active: boolean
+  onSelect: () => void
+  onEdit: () => void
+  onDelete: () => void
+  onReorder: (from: number, to: number) => void
+}): React.JSX.Element {
+  const [dragging, setDragging] = useState(false)
+  const [over, setOver] = useState(false)
+
+  return (
+    <li
+      className={cn(
+        'group flex items-center gap-0.5 rounded-md px-1 py-1 text-sm transition-colors',
+        active
+          ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+        over && 'ring-1 ring-ring/50',
+        dragging && 'opacity-50'
+      )}
+      draggable
+      onDragEnd={() => {
+        setDragging(false)
+        setOver(false)
+      }}
+      onDragLeave={() => setOver(false)}
+      onDragOver={(e: DragEvent) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        setOver(true)
+      }}
+      onDragStart={(e: DragEvent) => {
+        setDragging(true)
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', String(index))
+        e.dataTransfer.setData('application/x-dreamagent-beat', beat.id)
+      }}
+      onDrop={(e: DragEvent) => {
+        e.preventDefault()
+        setOver(false)
+        const from = Number(e.dataTransfer.getData('text/plain'))
+        if (Number.isNaN(from) || from === index) return
+        onReorder(from, index)
+      }}
+    >
+      <span className="flex size-5 shrink-0 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing">
+        <GripVertical className="size-3.5" />
+      </span>
+      <button className="min-w-0 flex-1 truncate text-left" onClick={onSelect} type="button">
+        {beat.title || '未命名节点'}
+      </button>
+
+      <span className="relative flex size-6 shrink-0 items-center justify-center">
+        <span
+          className={cn(
+            'size-2 rounded-full transition-opacity group-hover:opacity-0 group-focus-within:opacity-0',
+            BEAT_STATUS_DOT_CLASS[beat.status]
+          )}
+          title={beatStatusTitle(beat.status)}
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              'absolute inset-0 flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none',
+              'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
+              'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
+            )}
+            title="更多"
+            type="button"
+          >
+            <MoreHorizontal className="size-3.5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" side="bottom">
+            <DropdownMenuItem onSelect={onEdit}>
+              <Pencil className="size-3.5" />
+              编辑
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onDelete} variant="destructive">
+              <Trash2 className="size-3.5" />
+              删除
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </span>
+    </li>
+  )
+}
+
+function BeatEditor({
+  beat,
+  onChange
+}: {
+  beat: Beat
+  onChange: (patch: Partial<Pick<Beat, 'title' | 'content' | 'status'>>) => void
+}): React.JSX.Element {
+  const [title, setTitle] = useState(beat.title)
+  const [content, setContent] = useState(beat.content)
+  const [status, setStatus] = useState<BeatStatus>(beat.status)
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+
+  useEffect(() => {
+    setTitle(beat.title)
+    setContent(beat.content)
+    setStatus(beat.status)
+  }, [beat.id, beat.title, beat.content, beat.status])
+
+  useEffect(() => {
+    if (title === beat.title && content === beat.content && status === beat.status) return
+    const timer = window.setTimeout(() => {
+      const patch: Partial<Pick<Beat, 'title' | 'content' | 'status'>> = {}
+      if (title !== beat.title) patch.title = title
+      if (content !== beat.content) patch.content = content
+      if (status !== beat.status) patch.status = status
+      if (Object.keys(patch).length > 0) onChangeRef.current(patch)
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [title, content, status, beat.title, beat.content, beat.status])
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className={TOOLBAR_CLASS}>
+        <input
+          className="h-8 min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground"
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="节点标题"
+          value={title}
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              'inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs outline-none',
+              'hover:bg-muted'
+            )}
+            type="button"
+          >
+            <span
+              className={cn('size-2 shrink-0 rounded-full', BEAT_STATUS_DOT_CLASS[status])}
+            />
+            {BEAT_STATUS_LABELS[status]}
+            <ChevronDown className="size-3.5 opacity-60" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuRadioGroup
+              onValueChange={(v) => setStatus(v as BeatStatus)}
+              value={status}
+            >
+              {STATUSES.map((s) => (
+                <DropdownMenuRadioItem key={s} value={s}>
+                  <span
+                    className={cn('mr-1 size-2 rounded-full', BEAT_STATUS_DOT_CLASS[s])}
+                  />
+                  {BEAT_STATUS_LABELS[s]}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <textarea
+        className="min-h-0 flex-1 resize-none bg-transparent px-4 py-3 text-sm leading-7 outline-none placeholder:text-muted-foreground app-scrollbar"
+        onChange={(e) => setContent(e.target.value)}
+        placeholder="写下这个节点的内容……可用 (@实体名) 标记实体，后续会接入自动识别。"
+        value={content}
+      />
+    </div>
+  )
+}
+
+function Empty({ hint }: { hint: string }): React.JSX.Element {
+  return (
+    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      {hint}
+    </div>
+  )
+}
