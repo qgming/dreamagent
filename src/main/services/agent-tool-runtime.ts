@@ -14,6 +14,7 @@ import type {
   Beat,
   BeatStatus,
   Chapter,
+  ChapterStatus,
   CreateBeatInput,
   CreateEntityInput,
   Entity,
@@ -24,6 +25,11 @@ import type {
   UpdateEntityInput
 } from '../../shared/project-types'
 import type { ProjectService } from './project-service'
+import {
+  applyExactEdits,
+  assertNoChapterDualLinks,
+  parseGraphPath
+} from './graph-path'
 
 function plainSummary(content: string, max = 80): string {
   const text = content
@@ -106,56 +112,24 @@ export class AgentToolRuntime {
   ): Promise<AgentToolResult> {
     try {
       switch (name) {
-        case 'list_beats':
-          return await this.listBeats(projectId, input.status as BeatStatus | undefined)
-        case 'read_beat':
-          return await this.readBeat(projectId, String(input.beatId ?? ''))
-        case 'create_beat':
-          return await this.createBeat(projectId, input as unknown as CreateBeatInput)
-        case 'update_beat':
-          return await this.updateBeatTool(
-            projectId,
-            String(input.beatId ?? ''),
-            input as UpdateBeatInput
-          )
-        case 'delete_beat':
-          return await this.deleteBeat(projectId, String(input.beatId ?? ''))
-        case 'list_entities':
-          return await this.listEntities(projectId, input.status as EntityStatus | undefined)
-        case 'read_entity':
-          return await this.readEntity(projectId, String(input.entityId ?? ''))
-        case 'create_entity':
-          return await this.createEntity(projectId, input as unknown as CreateEntityInput)
-        case 'update_entity':
-          return await this.updateEntityTool(
-            projectId,
-            String(input.entityId ?? ''),
-            input as UpdateEntityInput
-          )
-        case 'delete_entity':
-          return await this.deleteEntity(projectId, String(input.entityId ?? ''))
-        case 'update_beat_status':
-          return await this.updateBeatStatus(
-            projectId,
-            String(input.beatId ?? ''),
-            input.status as BeatStatus
-          )
-        case 'write_chapter':
-          return await this.writeChapter(projectId, input as unknown as WriteChapterToolInput)
-        case 'list_chapters':
-          return await this.listChapters(projectId)
-        case 'read_chapter':
-          return await this.readChapter(projectId, String(input.chapterId ?? ''))
-        case 'update_chapter':
-          return await this.updateChapterTool(
-            projectId,
-            String(input.chapterId ?? ''),
-            input as UpdateChapterInput
-          )
-        case 'delete_chapter':
-          return await this.deleteChapter(projectId, String(input.chapterId ?? ''))
-        case 'get_project_outline':
-          return await this.getOutline(projectId)
+        case 'list':
+          return await this.listPath(projectId, input)
+        case 'read':
+          return await this.readPath(projectId, String(input.path ?? ''))
+        case 'write':
+          return await this.writePath(projectId, input)
+        case 'edit':
+          return await this.editPath(projectId, input)
+        case 'delete':
+          return await this.deletePath(projectId, String(input.path ?? ''))
+        // 网络工具在 web-tools 中直接执行，不经 runtime
+        case 'web_search':
+        case 'web_fetch':
+          return {
+            ok: false,
+            summary: `工具 ${name} 应由 web-tools 执行`,
+            error: 'wrong_runtime'
+          }
         default:
           return { ok: false, summary: `未知工具: ${name as string}`, error: 'unknown_tool' }
       }
@@ -163,6 +137,234 @@ export class AgentToolRuntime {
       const message = error instanceof Error ? error.message : String(error)
       return { ok: false, summary: message, error: message }
     }
+  }
+
+  private async listPath(
+    projectId: string,
+    input: Record<string, unknown>
+  ): Promise<AgentToolResult> {
+    const pathRaw = String(input.path ?? input.type ?? 'beats')
+    const parsed = parseGraphPath(pathRaw)
+    const query =
+      typeof input.query === 'string' ? input.query.trim().toLowerCase() : ''
+    const limit =
+      typeof input.limit === 'number' && input.limit > 0 ? Math.floor(input.limit) : undefined
+    const status = typeof input.status === 'string' ? input.status : undefined
+
+    if (parsed.kind === 'outline') return this.getOutline(projectId)
+    if (parsed.kind === 'item') {
+      // list 传了具体 id：退化为 read
+      return this.readPath(projectId, pathRaw)
+    }
+
+    if (parsed.type === 'beat') {
+      const result = await this.listBeats(projectId, status as BeatStatus | undefined)
+      if (!result.ok || !result.data) return result
+      let items = result.data
+      if (query) items = items.filter((i) => i.title.toLowerCase().includes(query))
+      if (limit) items = items.slice(0, limit)
+      return { ok: true, summary: `共 ${items.length} 个节点`, data: items }
+    }
+    if (parsed.type === 'entity') {
+      const result = await this.listEntities(projectId, status as EntityStatus | undefined)
+      if (!result.ok || !result.data) return result
+      let items = result.data
+      if (query) items = items.filter((i) => i.name.toLowerCase().includes(query))
+      if (limit) items = items.slice(0, limit)
+      return { ok: true, summary: `共 ${items.length} 个实体`, data: items }
+    }
+    const result = await this.listChapters(projectId)
+    if (!result.ok || !result.data) return result
+    let items = result.data
+    if (status) items = items.filter((i) => i.status === status)
+    if (query) items = items.filter((i) => i.title.toLowerCase().includes(query))
+    if (limit) items = items.slice(0, limit)
+    return { ok: true, summary: `共 ${items.length} 章`, data: items }
+  }
+
+  private async readPath(projectId: string, pathRaw: string): Promise<AgentToolResult> {
+    const parsed = parseGraphPath(pathRaw)
+    if (parsed.kind === 'outline') return this.getOutline(projectId)
+    if (parsed.kind === 'collection') {
+      return this.listPath(projectId, { path: pathRaw })
+    }
+    if (parsed.type === 'beat') return this.readBeat(projectId, parsed.id)
+    if (parsed.type === 'entity') return this.readEntity(projectId, parsed.id)
+    return this.readChapter(projectId, parsed.id)
+  }
+
+  private async writePath(
+    projectId: string,
+    input: Record<string, unknown>
+  ): Promise<AgentToolResult> {
+    const pathRaw = typeof input.path === 'string' ? input.path.trim() : ''
+    if (pathRaw) {
+      const parsed = parseGraphPath(pathRaw)
+      if (parsed.kind !== 'item') {
+        return { ok: false, summary: 'write 覆盖需要具体对象 path', error: 'invalid_path' }
+      }
+      if (parsed.type === 'beat') {
+        const patch: UpdateBeatInput = {}
+        if (typeof input.title === 'string') patch.title = input.title
+        if (typeof input.content === 'string') patch.content = input.content
+        if (typeof input.status === 'string') patch.status = input.status as BeatStatus
+        return this.updateBeatTool(projectId, parsed.id, patch)
+      }
+      if (parsed.type === 'entity') {
+        const patch: UpdateEntityInput = {}
+        if (typeof input.name === 'string') patch.name = input.name
+        if (typeof input.title === 'string' && !patch.name) patch.name = input.title
+        if (typeof input.content === 'string') patch.content = input.content
+        if (typeof input.status === 'string') patch.status = input.status as EntityStatus
+        return this.updateEntityTool(projectId, parsed.id, patch)
+      }
+      // chapter 覆盖
+      if (typeof input.content === 'string') assertNoChapterDualLinks(input.content)
+      const chapterPatch: UpdateChapterInput = {}
+      if (typeof input.title === 'string') chapterPatch.title = input.title
+      if (typeof input.content === 'string') chapterPatch.content = input.content
+      if (typeof input.status === 'string') {
+        chapterPatch.status = input.status as 'draft' | 'final'
+      }
+      if (Array.isArray(input.sourceBeatIds)) {
+        chapterPatch.sourceBeatIds = input.sourceBeatIds as string[]
+      }
+      if (Array.isArray(input.entityRefs)) {
+        chapterPatch.entityRefs = input.entityRefs as string[]
+      }
+      if (Array.isArray(input.beatRefs)) chapterPatch.beatRefs = input.beatRefs as string[]
+      if (typeof input.conversationId === 'string') {
+        chapterPatch.conversationId = input.conversationId
+      }
+      return this.updateChapterTool(projectId, parsed.id, chapterPatch)
+    }
+
+    // 创建
+    const type = String(input.type ?? '').toLowerCase()
+    if (type === 'beat') {
+      return this.createBeat(projectId, {
+        title: String(input.title ?? ''),
+        content: typeof input.content === 'string' ? input.content : undefined,
+        status: input.status as BeatStatus | undefined,
+        afterId: typeof input.afterId === 'string' ? input.afterId : undefined
+      })
+    }
+    if (type === 'entity') {
+      return this.createEntity(projectId, {
+        name: String(input.name ?? input.title ?? ''),
+        content: typeof input.content === 'string' ? input.content : undefined,
+        status: input.status as EntityStatus | undefined
+      })
+    }
+    if (type === 'chapter') {
+      const content = String(input.content ?? '')
+      assertNoChapterDualLinks(content)
+      return this.writeChapter(projectId, {
+        title: String(input.title ?? ''),
+        content,
+        status: (input.status as ChapterStatus | undefined) ?? 'draft',
+        sourceBeatIds: input.sourceBeatIds as string[] | undefined,
+        entityRefs: input.entityRefs as string[] | undefined,
+        beatRefs: input.beatRefs as string[] | undefined,
+        conversationId: input.conversationId as string | undefined
+      })
+    }
+    return {
+      ok: false,
+      summary: 'write 创建需要 type=beat|entity|chapter，覆盖需要 path',
+      error: 'invalid_input'
+    }
+  }
+
+  private async editPath(
+    projectId: string,
+    input: Record<string, unknown>
+  ): Promise<AgentToolResult> {
+    const pathRaw = String(input.path ?? '')
+    const parsed = parseGraphPath(pathRaw)
+    if (parsed.kind !== 'item') {
+      return { ok: false, summary: 'edit 需要具体对象 path', error: 'invalid_path' }
+    }
+
+    const editsRaw = Array.isArray(input.edits) ? input.edits : []
+    const edits = editsRaw
+      .filter((e): e is { oldText: string; newText: string } => {
+        return (
+          Boolean(e) &&
+          typeof e === 'object' &&
+          typeof (e as { oldText?: unknown }).oldText === 'string' &&
+          typeof (e as { newText?: unknown }).newText === 'string'
+        )
+      })
+      .map((e) => ({ oldText: e.oldText, newText: e.newText }))
+
+    if (parsed.type === 'beat') {
+      const snap = await this.projects.openProject(projectId)
+      const beat = snap.beats[parsed.id]
+      if (!beat) return { ok: false, summary: `节点不存在: ${parsed.id}`, error: 'not_found' }
+      const patch: UpdateBeatInput = {}
+      if (typeof input.title === 'string') patch.title = input.title
+      if (typeof input.status === 'string') patch.status = input.status as BeatStatus
+      if (edits.length) {
+        patch.content = applyExactEdits(beat.content || '', edits)
+      } else if (typeof input.content === 'string') {
+        patch.content = input.content
+      }
+      if (Object.keys(patch).length === 0) {
+        return { ok: false, summary: '没有可更新的字段', error: 'empty_patch' }
+      }
+      // 仅改 status 时走状态摘要
+      if (patch.status && !patch.content && !patch.title) {
+        return this.updateBeatStatus(projectId, parsed.id, patch.status)
+      }
+      return this.updateBeatTool(projectId, parsed.id, patch)
+    }
+
+    if (parsed.type === 'entity') {
+      const snap = await this.projects.openProject(projectId)
+      const entity = snap.entities[parsed.id]
+      if (!entity) return { ok: false, summary: `实体不存在: ${parsed.id}`, error: 'not_found' }
+      const patch: UpdateEntityInput = {}
+      if (typeof input.name === 'string') patch.name = input.name
+      if (typeof input.title === 'string' && !patch.name) patch.name = input.title
+      if (typeof input.status === 'string') patch.status = input.status as EntityStatus
+      if (edits.length) {
+        patch.content = applyExactEdits(entity.content || '', edits)
+      } else if (typeof input.content === 'string') {
+        patch.content = input.content
+      }
+      return this.updateEntityTool(projectId, parsed.id, patch)
+    }
+
+    // chapter
+    const chapter = await this.projects.getChapter(projectId, parsed.id)
+    const patch: UpdateChapterInput = {}
+    if (typeof input.title === 'string') patch.title = input.title
+    if (typeof input.status === 'string') {
+      patch.status = input.status as 'draft' | 'final'
+    }
+    if (edits.length) {
+      patch.content = applyExactEdits(chapter.content || '', edits)
+    } else if (typeof input.content === 'string') {
+      patch.content = input.content
+    }
+    if (patch.content !== undefined) assertNoChapterDualLinks(patch.content)
+    if (Array.isArray(input.sourceBeatIds)) {
+      patch.sourceBeatIds = input.sourceBeatIds as string[]
+    }
+    if (Array.isArray(input.entityRefs)) patch.entityRefs = input.entityRefs as string[]
+    if (Array.isArray(input.beatRefs)) patch.beatRefs = input.beatRefs as string[]
+    return this.updateChapterTool(projectId, parsed.id, patch)
+  }
+
+  private async deletePath(projectId: string, pathRaw: string): Promise<AgentToolResult> {
+    const parsed = parseGraphPath(pathRaw)
+    if (parsed.kind !== 'item') {
+      return { ok: false, summary: 'delete 需要具体对象 path', error: 'invalid_path' }
+    }
+    if (parsed.type === 'beat') return this.deleteBeat(projectId, parsed.id)
+    if (parsed.type === 'entity') return this.deleteEntity(projectId, parsed.id)
+    return this.deleteChapter(projectId, parsed.id)
   }
 
   private async listBeats(

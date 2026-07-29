@@ -182,7 +182,27 @@ const agentApi = {
 const settingsApi = {
   getLlm: (): Promise<LlmPublicSettings> => ipcRenderer.invoke('settings:getLlm'),
   setLlm: (patch: LlmSettingsPatch): Promise<LlmPublicSettings> =>
-    ipcRenderer.invoke('settings:setLlm', patch)
+    ipcRenderer.invoke('settings:setLlm', patch),
+  getWebSearch: (): Promise<import('../shared/web-search').WebSearchPublicSettings> =>
+    ipcRenderer.invoke('settings:getWebSearch'),
+  setWebSearch: (
+    patch: import('../shared/web-search').WebSearchSettingsPatch
+  ): Promise<import('../shared/web-search').WebSearchPublicSettings> =>
+    ipcRenderer.invoke('settings:setWebSearch', patch)
+}
+
+/**
+ * 网络 API（调试/设置用；Agent 工具在主进程直连 NetworkService）
+ */
+const networkApi = {
+  corsFetch: (
+    request: import('../shared/web-search').CorsFetchRequest
+  ): Promise<import('../shared/web-search').CorsFetchResponse> =>
+    ipcRenderer.invoke('network:cors-fetch', request),
+  webSearch: (
+    request: import('../shared/web-search').WebSearchRequest
+  ): Promise<import('../shared/web-search').WebSearchResponse> =>
+    ipcRenderer.invoke('network:web-search', request)
 }
 
 /**
@@ -212,7 +232,8 @@ const api = {
   session: sessionApi,
   agent: agentApi,
   settings: settingsApi,
-  skills: skillsApi
+  skills: skillsApi,
+  network: networkApi
 }
 
 try {

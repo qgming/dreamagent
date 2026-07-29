@@ -29,18 +29,18 @@ metadata:
 - **只写在节点/实体的 content 里**；系统会维护 `entityRefs` / `beatRefs`
 - **文章 content 必须是纯文本**，禁止任何 `[@…](beat|entity:…)`
 - 文章与图谱的关系写在元数据：
-  - `sourceBeatIds`：取材/覆盖的源节点（写完可据此 `update_beat_status`）
+  - `sourceBeatIds`：取材/覆盖的源节点（写完可据此 `edit({ path: "beats/{id}", status })`）
   - `entityRefs`：文中涉及的实体 id
   - `beatRefs`：文中涉及的其他节点 id
 
 ### 工具怎么用
 
-1. 摸结构：`get_project_outline` / `list_beats` / `list_entities` / `list_chapters`
-2. 读详情：`read_beat` / `read_entity` / `read_chapter`
+1. 摸结构：`list({ path: "outline" })` / `list({ path: "beats" })` / `list({ path: "entities" })` / `list({ path: "chapters" })`
+2. 读详情：`read({ path: "beats/{id}" })` / `read({ path: "entities/{id}" })` / `read({ path: "chapters/{id}" })`
    - 读节点/实体时看 **outbound（出链）/ inbound（入链）/ suggestedReads**，顺藤摸瓜，勿编造未读设定
-3. 写结构/设定：`create_beat` `update_beat` `create_entity` `update_entity`（content 里用双链互联）
-4. 写正文：`write_chapter` / `update_chapter`（纯文本 + 元数据关联）
-5. 推进节点：`update_beat_status`（文章产出后，源节点常 `outline→draft` 或 `draft→final`）
+3. 写结构/设定：`write({ type: "beat", ... })` `write/edit path=beats/{id}` `write({ type: "entity", ... })` `write/edit path=entities/{id}`（content 里用双链互联）
+4. 写正文：`write({ type: "chapter", ... })` / `write/edit path=chapters/{id}`（纯文本 + 元数据关联）
+5. 推进节点：`edit({ path: "beats/{id}", status })`（文章产出后，源节点常 `outline→draft` 或 `draft→final`）
 6. 技能：`list_skills` → `read_skill` → `read_skill_file`
 
 ### 硬约束
@@ -52,9 +52,9 @@ metadata:
 
 ## 图怎么查
 
-1. `get_project_outline` 定范围节点
-2. `read_beat` / `read_entity` 吃 **outbound + inbound + suggestedReads**（双链即证据网络）
-3. `list_chapters` + `read_chapter`，核对其 `sourceBeatIds` / `entityRefs` / `beatRefs` 是否与正文一致
+1. `list({ path: "outline" })` 定范围节点
+2. `read({ path: "beats/{id}" })` / `read({ path: "entities/{id}" })` 吃 **outbound + inbound + suggestedReads**（双链即证据网络）
+3. `list({ path: "chapters" })` + `read({ path: "chapters/{id}" })`，核对其 `sourceBeatIds` / `entityRefs` / `beatRefs` 是否与正文一致
 4. 伏笔：优先找名为台账的实体/节点，或内容含「伏笔/回收」的对象
 
 ## 六维（任 2 不稳不建议交章）
@@ -78,11 +78,11 @@ metadata:
 
 | 问题类型 | 工具 |
 |----------|------|
-| 纲/任务卡错 | `update_beat`（可调双链） |
-| 人设/设定错 | `update_entity` |
-| 正文不一致 | `update_chapter`（纯文本+元数据） |
-| 存报告 | `create_beat`「连续性报告」并双链到相关对象 |
-| 节点已完稿 | `update_beat_status` → final |
+| 纲/任务卡错 | `write/edit path=beats/{id}`（可调双链） |
+| 人设/设定错 | `write/edit path=entities/{id}` |
+| 正文不一致 | `write/edit path=chapters/{id}`（纯文本+元数据） |
+| 存报告 | `write({ type: "beat", ... })`「连续性报告」并双链到相关对象 |
+| 节点已完稿 | `edit({ path: "beats/{id}", status })` → final |
 
 ## Quality Gates
 

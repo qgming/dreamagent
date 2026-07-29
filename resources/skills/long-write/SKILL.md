@@ -6,7 +6,7 @@ description: |
   触发方式：/long-write、/写长篇、「帮我开书」「写大纲」「续写下一章」
 metadata:
   displayName: 长篇写作
-  version: "3.0.0"
+  version: "3.1.0"
 ---
 
 # long-write
@@ -31,19 +31,19 @@ metadata:
 - **只写在节点/实体的 content 里**；系统会维护 `entityRefs` / `beatRefs`
 - **文章 content 必须是纯文本**，禁止任何 `[@…](beat|entity:…)`
 - 文章与图谱的关系写在元数据：
-  - `sourceBeatIds`：取材/覆盖的源节点（写完可据此 `update_beat_status`）
+  - `sourceBeatIds`：取材/覆盖的源节点（写完可据此 `edit({ path: "beats/{id}", status })`）
   - `entityRefs`：文中涉及的实体 id
   - `beatRefs`：文中涉及的其他节点 id
 - 不熟双链时先 `read_skill`「dreamagent-guide」
 
 ### 工具怎么用
 
-1. 摸结构：`get_project_outline` / `list_beats` / `list_entities` / `list_chapters`
-2. 读详情：`read_beat` / `read_entity` / `read_chapter`
+1. 摸结构：`list({ path: "outline" })` / `list({ path: "beats" })` / `list({ path: "entities" })` / `list({ path: "chapters" })`
+2. 读详情：`read({ path: "beats/{id}" })` / `read({ path: "entities/{id}" })` / `read({ path: "chapters/{id}" })`
    - 读节点/实体时看 **outbound（出链）/ inbound（入链）/ suggestedReads**，顺藤摸瓜，勿编造未读设定
-3. 写结构/设定：`create_beat` `update_beat` `create_entity` `update_entity`（content 里用双链互联）
-4. 写正文：`write_chapter` / `update_chapter`（纯文本 + 元数据关联）
-5. 推进节点：`update_beat_status`（文章产出后，源节点常 `outline→draft` 或 `draft→final`）
+3. 写结构/设定：`write({ type: "beat", ... })` `write/edit path=beats/{id}` `write({ type: "entity", ... })` `write/edit path=entities/{id}`（content 里用双链互联）
+4. 写正文：`write({ type: "chapter", ... })` / `write/edit path=chapters/{id}`（纯文本 + 元数据关联）
+5. 推进节点：`edit({ path: "beats/{id}", status })`（文章产出后，源节点常 `outline→draft` 或 `draft→final`）
 6. 技能：`list_skills` → `read_skill` → `read_skill_file`
 
 ### 硬约束
@@ -59,9 +59,9 @@ metadata:
 
 ## Inputs To Read（按需）
 
-1. `get_project_outline` — 节点全局与状态
-2. 关键 `read_beat` / `read_entity` — 跟 **suggestedReads / outbound / inbound**
-3. 续写：`list_chapters` + 最近 1–3 章 `read_chapter`（纯文本 + 其 sourceBeatIds/entityRefs）
+1. `list({ path: "outline" })` — 节点全局与状态
+2. 关键 `read({ path: "beats/{id}" })` / `read({ path: "entities/{id}" })` — 跟 **suggestedReads / outbound / inbound**
+3. 续写：`list({ path: "chapters" })` + 最近 1–3 章 `read({ path: "chapters/{id}" })`（纯文本 + 其 sourceBeatIds/entityRefs）
 4. 本包 `references/` 按需 `read_skill_file`（开篇/钩子/结构/对白/质检等）
 
 ## 对象怎么分工
@@ -86,11 +86,11 @@ metadata:
 ### 立项
 
 1. 确认题材/平台/字数/基调（不明则问）。
-2. **创建节点**（`create_beat`），content 里用双链挂实体，例如：
+2. **创建节点**（`write({ type: "beat", ... })`），content 里用双链挂实体，例如：
    - `[@林远](entity:ent_xxx)` 为主角
    - 章纲节点链到「卷一」节点
-3. **创建实体**（`create_entity`），人设 content 可链回「出场节点」「所属势力实体」。
-4. 结构节点 `update_beat_status` → `outline`。
+3. **创建实体**（`write({ type: "entity", ... })`），人设 content 可链回「出场节点」「所属势力实体」。
+4. 结构节点 `edit({ path: "beats/{id}", status })` → `outline`。
 
 故事引擎（可写在「作品定位」节点 content）：主角 → 欲望 → 阻碍 → 代价 → 为何现在 → 行动 → 后果 → 新问题。
 
@@ -108,12 +108,12 @@ metadata:
 
 1. 读章纲节点 + 上章文章 + 出链实体（跟 suggestedReads）。
 2. 默念四问：想做什么 / 谁挡 / 章末局面 / 为何翻下章。
-3. `write_chapter`：
+3. `write({ type: "chapter", ... })`：
    - `title`、纯文本 `content`（**无双链**）
    - `sourceBeatIds: [本章纲节点 id, …]`
    - `entityRefs: [出场实体 ids]`（从读到的实体收集，勿瞎填）
    - `beatRefs: [相关结构节点]`
-4. `update_beat_status(源节点, draft)`（若仍为 outline/idea）。
+4. `edit(path=beats/{id}, status)(源节点, draft)`（若仍为 outline/idea）。
 5. **句面自检（写时即做）**：
    - 视角统一；情绪用动作/物件；对白有身份差
    - 禁章末「他终于明白 / 他不知道的是…」升华预告体
@@ -122,8 +122,8 @@ metadata:
 
 ### 返修
 
-- 结构/人设：先 `update_beat` / `update_entity`（可改双链）
-- 正文：`update_chapter` 最小改，并同步元数据 refs；能换词不换句
+- 结构/人设：先 `write/edit path=beats/{id}` / `write/edit path=entities/{id}`（可改双链）
+- 正文：`write/edit path=chapters/{id}` 最小改，并同步元数据 refs；能换词不换句
 - 禁止把整章正文粘回 beat.content
 
 ## Quality Gates

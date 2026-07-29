@@ -184,10 +184,18 @@ export function parseSessionBranch(branch: SessionTreeEntry[]): UiChatMessage[] 
           }
           parts.push(toolPart)
           if (tr?.details) {
-            if (block.name === 'write_chapter') {
+            if (
+              block.name === 'write' ||
+              block.name === 'edit' ||
+              block.name === 'write_chapter'
+            ) {
               chapterIds.push(...extractChapterIds(tr.details))
             }
-            if (block.name === 'update_beat_status') {
+            if (
+              block.name === 'write' ||
+              block.name === 'edit' ||
+              block.name === 'update_beat_status'
+            ) {
               const st = extractBeatStatus(tr.details)
               if (st) beatStatusUpdates.push(st)
             }

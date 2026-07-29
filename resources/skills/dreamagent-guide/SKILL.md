@@ -6,7 +6,7 @@ description: |
   触发方式：/dreamagent-guide、/使用指南、「怎么建双链」「双链怎么写」「工具怎么用」
 metadata:
   displayName: 造梦师使用指南
-  version: "1.1.0"
+  version: "1.2.0"
 ---
 
 # dreamagent-guide
@@ -89,36 +89,36 @@ metadata:
 
 批量建人设并互链时，**必须**按这个顺序：
 
-1. `create_entity` / `create_beat`，一次一个或一批。
+1. `write({ type: "entity", ... })` / `write({ type: "beat", ... })`，一次一个或一批。
 2. 从工具结果读 **`data.id`**（摘要形如 `已创建实体「林远」(ent_…)`）。
-3. 需要互联时：`update_entity` / `update_beat`，在 content 里写入带**真实 id** 的双链。
+3. 需要互联时：`write/edit path=entities/{id}` / `write/edit path=beats/{id}`，在 content 里写入带**真实 id** 的双链。
 4. 不要用「猜的 id」或「名字当 id」。
 
 ### 示例
 
 ```text
 # 1) 创建
-create_entity { name: "林远", content: "少年剑修。" }
+write({ type: "entity",  name: "林远", content: "少年剑修。" }
 # → data.id = ent_111；data.entityRefs = []；摘要「无双链」
 
-create_entity { name: "苏晚", content: "医馆学徒。" }
+write({ type: "entity",  name: "苏晚", content: "医馆学徒。" }
 # → data.id = ent_222
 
 # 2) 再互链（update content，系统自动填 entityRefs）
-update_entity {
+write/edit({ path: "entities/{id}", 
   entityId: "ent_111",
   content: "少年剑修。青梅竹马：[@苏晚](entity:ent_222)"
 }
 # → data.entityRefs = ["ent_222"]；摘要「实体链 1 · 节点链 0」
 
-update_entity {
+write/edit({ path: "entities/{id}", 
   entityId: "ent_222",
   content: "医馆学徒。青梅竹马：[@林远](entity:ent_111)"
 }
 # → data.entityRefs = ["ent_111"]
 
 # 3) 章纲节点同时链实体 + 节点
-create_beat {
+write({ type: "beat", 
   title: "第一章·雨夜",
   content: "POV：[@林远](entity:ent_111)。相关：[@苏晚](entity:ent_222)。上承：[@序章](beat:beat_xxx)。"
 }
@@ -135,28 +135,30 @@ create_beat {
 
 ## 文章怎么关联图谱
 
-`write_chapter` / `update_chapter`：
+`write({ type: "chapter", ... })` / `write/edit path=chapters/{id}`：
 
 - `content`：**纯正文**，禁止任何 `[@…](…)`。
 - `sourceBeatIds`：取材的章纲/节点 id 列表。
 - `entityRefs`：文中涉及的实体 id（从已读实体收集）。
 - `beatRefs`：文中涉及的其他节点 id。
 
-写完后可用 `update_beat_status` 把源节点从 `outline` 推到 `draft`。
+写完后可用 `edit({ path: "beats/{id}", status })` 把源节点从 `outline` 推到 `draft`。
 
 ## 工具速查
 
 | 目的 | 工具 |
 |------|------|
-| 看全局 | `get_project_outline` / `list_beats` / `list_entities` / `list_chapters` |
-| 读详情 | `read_beat` / `read_entity` / `read_chapter`（看出入链 suggestedReads） |
-| 建结构 | `create_beat` / `create_entity` |
-| 改内容 | `update_beat` / `update_entity`（双链在这里写） |
-| 写正文 | `write_chapter` / `update_chapter` |
-| 推状态 | `update_beat_status` |
+| 看全局 | `list({ path: "outline" })` / `list({ path: "beats" })` / `list({ path: "entities" })` |
+| 读详情 | `read({ path: "beats/{id}" })` 等（看出入链） |
+| 创建 | `write({ type: "beat"\|"entity"\|"chapter", title/name, content })` |
+| 全量覆盖 | `write({ path: "beats/{id}", content })` |
+| 局部改 | `edit({ path, edits: [{ oldText, newText }] })` 或改 status |
+| 删除 | `delete({ path: "entities/{id}" })` |
+| 写正文 | `write({ type: "chapter", title, content, sourceBeatIds, entityRefs })` |
+| 搜索/读网 | `web_search` / `web_fetch` |
 | 技能 | `list_skills` → `read_skill` → `read_skill_file` |
 
-写工具（create/update/delete）会串行执行，避免并发丢 id；读工具可并行。
+写工具串行；读工具可并行。
 
 ## 常见失败
 

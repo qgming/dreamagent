@@ -3,12 +3,15 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Circle,
   CircleDot,
   FileText,
   GripVertical,
+  ListTodo,
   Loader2,
   MessageSquare,
   MessageSquarePlus,
+  Minus,
   MoreHorizontal,
   PanelRightClose,
   PanelRightOpen,
@@ -26,6 +29,7 @@ import {
   type Chapter
 } from '@shared/project-types'
 import type { SessionSummary } from '@shared/ui-chat'
+import type { TodoItem, TodoStatus } from '@shared/todos'
 import { CreateRuntimeProvider } from './assistant/CreateRuntimeProvider'
 import { CreateAssistantThread } from './assistant/CreateAssistantThread'
 import { contentToEditorHtml } from '@shared/mentions'
@@ -169,6 +173,7 @@ function CreateLeftSidebar(): React.JSX.Element {
   const openSession = useCreateStore((s) => s.openSession)
   const newSession = useCreateStore((s) => s.newSession)
   const sending = useCreateStore((s) => s.sending)
+  const todos = useCreateStore((s) => s.todos)
   // 1 = 向右（后一个 tab），-1 = 向左
   const [tabDirection, setTabDirection] = useState(0)
   const prevTabRef = useRef(leftListTab)
@@ -244,6 +249,12 @@ function CreateLeftSidebar(): React.JSX.Element {
           )}
         </CollapsibleSection>
       </div>
+
+      {todos.length > 0 ? (
+        <div className="shrink-0 border-t border-border px-3 pt-2">
+          <SessionTodoPanel todos={todos} />
+        </div>
+      ) : null}
 
       {/* 下：对话 | 文章（指示条 + 内容左右滑） */}
       <div className="mt-2 flex min-h-0 flex-1 flex-col border-t border-border px-3 pt-3">
@@ -522,6 +533,52 @@ function SectionLabel({
       )}
     >
       {children}
+    </div>
+  )
+}
+
+function sessionTodoIcon(status: TodoStatus): React.JSX.Element {
+  const cls = 'size-3 shrink-0'
+  switch (status) {
+    case 'completed':
+      return <CheckCircle2 className={cn(cls, 'text-emerald-500')} />
+    case 'in_progress':
+      return <Loader2 className={cn(cls, 'animate-spin text-sky-500')} />
+    case 'cancelled':
+      return <Minus className={cn(cls, 'text-muted-foreground')} />
+    default:
+      return <Circle className={cn(cls, 'text-muted-foreground')} />
+  }
+}
+
+/** 左栏：当前会话 Agent 待办 */
+function SessionTodoPanel({ todos }: { todos: TodoItem[] }): React.JSX.Element {
+  const done = todos.filter((t) => t.status === 'completed').length
+  return (
+    <div className="pb-1">
+      <div className="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
+        <ListTodo className="size-3" />
+        待办
+        <span className="ml-auto normal-case tracking-normal text-muted-foreground">
+          {done}/{todos.length}
+        </span>
+      </div>
+      <ul className="max-h-36 space-y-0.5 overflow-y-auto app-scrollbar">
+        {todos.map((t) => (
+          <li
+            key={t.id}
+            className={cn(
+              'flex items-start gap-1.5 rounded-md px-2 py-1 text-[11px] leading-snug',
+              t.status === 'completed' && 'opacity-60',
+              t.status === 'cancelled' && 'opacity-40 line-through'
+            )}
+            title={`${t.id} · ${t.status}`}
+          >
+            {sessionTodoIcon(t.status)}
+            <span className="min-w-0 flex-1 truncate">{t.content}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

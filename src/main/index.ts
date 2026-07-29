@@ -8,11 +8,13 @@ import { PiSessionService } from './services/pi-session-service'
 import { HarnessManager } from './services/harness-manager'
 import { AgentRunner } from './services/agent-runner'
 import { SkillService } from './services/skill-service'
+import { TodoService } from './services/todo-service'
 import { registerProjectIpc } from './ipc/project-ipc'
 import { registerSessionIpc } from './ipc/session-ipc'
 import { registerAgentIpc } from './ipc/agent-ipc'
 import { registerSettingsIpc } from './ipc/settings-ipc'
 import { registerSkillIpc } from './ipc/skill-ipc'
+import { registerNetworkIpc } from './ipc/network-ipc'
 
 /** 是否为开发环境 */
 const isDev = !app.isPackaged
@@ -138,11 +140,13 @@ app.whenReady().then(async () => {
   const sessionService = new PiSessionService(projectService)
   const skillService = new SkillService()
   await skillService.ensureReady()
+  const todoService = new TodoService(sessionService)
   const harnessManager = new HarnessManager(
     projectService,
     sessionService,
     piModels,
-    skillService
+    skillService,
+    todoService
   )
   const agentRunner = new AgentRunner(
     projectService,
@@ -156,6 +160,7 @@ app.whenReady().then(async () => {
   registerAgentIpc(agentRunner)
   registerSettingsIpc(llmSettings)
   registerSkillIpc(skillService)
+  registerNetworkIpc()
 
   createWindow()
 

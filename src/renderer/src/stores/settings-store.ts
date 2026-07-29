@@ -5,7 +5,7 @@ import { persist } from 'zustand/middleware'
 export type ThemeMode = 'light' | 'dark' | 'system'
 
 /** 设置分区 */
-export type SettingsSection = 'preferences' | 'about'
+export type SettingsSection = 'preferences' | 'web-search' | 'about'
 
 /** 外观设置 */
 export interface AppearanceSettings {

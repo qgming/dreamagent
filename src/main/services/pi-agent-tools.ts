@@ -1,5 +1,5 @@
 /**
- * 创作工具 → pi AgentHarnessTool（0.82：execute 第 5 参为 context）
+ * 创作工具 → pi AgentHarnessTool（路径式 list/read/write/edit/delete）
  */
 import { Type, type Static, type TSchema } from 'typebox'
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
@@ -7,6 +7,7 @@ import type { AgentHarnessTool } from '@earendil-works/pi-agent-core'
 import type { Skill } from '@earendil-works/pi-agent-core'
 import type { AgentToolRuntime } from './agent-tool-runtime'
 import type { SkillService } from './skill-service'
+import type { TodoService } from './todo-service'
 import type { AgentToolName } from '../../shared/agent-tools'
 
 /** 每轮注入的工具上下文 */
@@ -14,10 +15,9 @@ export interface DreamToolContext {
   projectId: string
   sessionId: string
   runtime: AgentToolRuntime
-  /** 当前启用的 pi 技能（渐进式披露） */
   skills?: Skill[]
-  /** 技能服务（write_skill 增删改） */
   skillService?: SkillService
+  todoService?: TodoService
 }
 
 function text(value: string): AgentToolResult<unknown>['content'] {
@@ -40,13 +40,17 @@ async function runRuntime(
   name: AgentToolName,
   params: Record<string, unknown>
 ): Promise<AgentToolResult<unknown>> {
-  const result = await ctx.runtime.execute(ctx.projectId, name, {
-    ...params,
-    conversationId:
-      name === 'write_chapter'
-        ? (params.conversationId ?? ctx.sessionId)
-        : params.conversationId
-  })
+  // write 创建 chapter 时补 conversationId
+  const enriched = { ...params }
+  if (
+    name === 'write' &&
+    !enriched.conversationId &&
+    (String(enriched.type || '').toLowerCase() === 'chapter' ||
+      (typeof enriched.path === 'string' && /chapter/i.test(enriched.path)))
+  ) {
+    enriched.conversationId = ctx.sessionId
+  }
+  const result = await ctx.runtime.execute(ctx.projectId, name, enriched)
   if (!result.ok) {
     return {
       content: text(result.summary || result.error || `工具失败: ${name}`),
@@ -61,319 +65,167 @@ async function runRuntime(
 
 type AnyHarnessTool = AgentHarnessTool<DreamToolContext, TSchema, unknown>
 
-const emptyParams = Type.Object({})
-
-const beatStatusEnum = Type.Union([
-  Type.Literal('idea'),
-  Type.Literal('outline'),
-  Type.Literal('draft'),
-  Type.Literal('final')
-])
-
-const entityStatusEnum = Type.Union([
-  Type.Literal('active'),
-  Type.Literal('dormant'),
-  Type.Literal('archived')
-])
-
-const listBeatsParams = Type.Object({
-  status: Type.Optional(beatStatusEnum)
+const listParams = Type.Object({
+  path: Type.String({
+    description: 'beats | entities | chapters | outline（可带尾 /）'
+  }),
+  status: Type.Optional(Type.String({ description: '可选状态过滤' })),
+  query: Type.Optional(Type.String({ description: '标题/名称关键词' })),
+  limit: Type.Optional(Type.Number())
 })
 
-const readBeatParams = Type.Object({
-  beatId: Type.String({ description: '节点 id' })
+const readParams = Type.Object({
+  path: Type.String({
+    description:
+      'beats/{id} | entities/{id} | chapters/{id} | beat:{id} | entity:{id} | outline'
+  })
 })
 
-const createBeatParams = Type.Object({
-  title: Type.String({ description: '节点标题' }),
-  content: Type.Optional(
-    Type.String({
-      description:
-        '节点正文。合法双链 [@显示名](entity:真实id) / [@显示名](beat:真实id) 会自动同步到 entityRefs/beatRefs；禁止只写 @名'
+const writeParams = Type.Object({
+  path: Type.Optional(
+    Type.String({ description: '有则全量覆盖该对象，如 beats/{id}' })
+  ),
+  type: Type.Optional(
+    Type.Union([Type.Literal('beat'), Type.Literal('entity'), Type.Literal('chapter')], {
+      description: '创建时必填'
     })
   ),
-  status: Type.Optional(beatStatusEnum),
-  afterId: Type.Optional(Type.String({ description: '插入到该节点之后' }))
-})
-
-const updateBeatParams = Type.Object({
-  beatId: Type.String(),
   title: Type.Optional(Type.String()),
-  content: Type.Optional(Type.String()),
-  status: Type.Optional(beatStatusEnum)
-})
-
-const deleteBeatParams = Type.Object({
-  beatId: Type.String()
-})
-
-const listEntitiesParams = Type.Object({
-  status: Type.Optional(entityStatusEnum)
-})
-
-const readEntityParams = Type.Object({
-  entityId: Type.String({ description: '实体 id' })
-})
-
-const createEntityParams = Type.Object({
-  name: Type.String({ description: '实体名称' }),
+  name: Type.Optional(Type.String({ description: '实体名称' })),
   content: Type.Optional(
     Type.String({
       description:
-        '设定正文。合法双链 [@显示名](entity:真实id) / [@显示名](beat:真实id) 会自动同步到 entityRefs/beatRefs；禁止只写 @名'
+        'beat/entity 可含 [@显示名](entity|beat:真实id)；chapter 必须纯正文无双链'
     })
   ),
-  status: Type.Optional(entityStatusEnum)
-})
-
-const updateEntityParams = Type.Object({
-  entityId: Type.String(),
-  name: Type.Optional(Type.String()),
-  content: Type.Optional(Type.String()),
-  status: Type.Optional(entityStatusEnum)
-})
-
-const deleteEntityParams = Type.Object({
-  entityId: Type.String()
-})
-
-const updateBeatStatusParams = Type.Object({
-  beatId: Type.String(),
-  status: beatStatusEnum
-})
-
-const writeChapterParams = Type.Object({
-  title: Type.String({ description: '文章标题' }),
-  content: Type.String({ description: '纯正文，禁止双链语法' }),
+  status: Type.Optional(Type.String()),
+  afterId: Type.Optional(Type.String()),
   sourceBeatIds: Type.Optional(Type.Array(Type.String())),
   entityRefs: Type.Optional(Type.Array(Type.String())),
   beatRefs: Type.Optional(Type.Array(Type.String())),
-  status: Type.Optional(Type.Union([Type.Literal('draft'), Type.Literal('final')])),
-  chapterId: Type.Optional(Type.String({ description: '有则更新已有文章' })),
   conversationId: Type.Optional(Type.String())
 })
 
-const readChapterParams = Type.Object({
-  chapterId: Type.String()
-})
-
-const updateChapterParams = Type.Object({
-  chapterId: Type.String(),
+const editParams = Type.Object({
+  path: Type.String({ description: 'beats/{id} 等' }),
+  edits: Type.Optional(
+    Type.Array(
+      Type.Object({
+        oldText: Type.String(),
+        newText: Type.String()
+      }),
+      { description: '精确替换；每段 oldText 须在原文唯一' }
+    )
+  ),
   title: Type.Optional(Type.String()),
-  content: Type.Optional(Type.String()),
-  status: Type.Optional(Type.Union([Type.Literal('draft'), Type.Literal('final')])),
+  name: Type.Optional(Type.String()),
+  status: Type.Optional(Type.String()),
+  content: Type.Optional(Type.String({ description: '也可直接给全文（少用）' })),
   sourceBeatIds: Type.Optional(Type.Array(Type.String())),
   entityRefs: Type.Optional(Type.Array(Type.String())),
   beatRefs: Type.Optional(Type.Array(Type.String()))
 })
 
-const deleteChapterParams = Type.Object({
-  chapterId: Type.String()
+const deleteParams = Type.Object({
+  path: Type.String(),
+  confirm: Type.Optional(Type.Boolean())
 })
 
 /**
- * 装配造梦师创作 Agent 工具列表（Harness 版）
+ * 装配造梦师创作 Agent 工具列表（路径式）
  */
 export function buildDreamAgentTools(): AnyHarnessTool[] {
-  const tools: AnyHarnessTool[] = [
+  return [
     {
-      name: 'list_beats',
-      label: '列出节点',
-      description: '列出项目节点目录（可按状态过滤）。',
-      parameters: listBeatsParams,
-      executionMode: 'parallel',
-      execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'list_beats', { ...(params as Static<typeof listBeatsParams>) })
-    },
-    {
-      name: 'read_beat',
-      label: '读取节点',
+      name: 'list',
+      label: 'list',
       description:
-        '读取节点全文，并返回出链与入链清单（含文章），便于继续深入读取相关内容。',
-      parameters: readBeatParams,
+        '列出图谱资源。path=beats|entities|chapters|outline。可选 status、query、limit。',
+      parameters: listParams,
       executionMode: 'parallel',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'read_beat', { ...(params as Static<typeof readBeatParams>) })
+        runRuntime(ctx, 'list', { ...(params as Static<typeof listParams>) })
     },
     {
-      name: 'create_beat',
-      label: '创建节点',
+      name: 'read',
+      label: 'read',
       description:
-        '新建节点。返回完整对象（id + entityRefs + beatRefs）。content 写 [@名](entity|beat:真实id) 后自动同步底部属性；禁止只写 @名字。',
-      parameters: createBeatParams,
-      executionMode: 'sequential',
+        '读取对象全文与出入链。path=beats/{id}|entities/{id}|chapters/{id} 或 beat:{id}。',
+      parameters: readParams,
+      executionMode: 'parallel',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'create_beat', { ...(params as Static<typeof createBeatParams>) })
+        runRuntime(ctx, 'read', { ...(params as Static<typeof readParams>) })
     },
     {
-      name: 'update_beat',
-      label: '更新节点',
+      name: 'write',
+      label: 'write',
       description:
-        '更新节点。改 content 时自动解析双链并回写 entityRefs/beatRefs；摘要会显示「实体链 N · 节点链 M」。',
-      parameters: updateBeatParams,
+        '创建或全量覆盖。创建：type+title/name+content；覆盖：path。beat/entity 双链自动同步 refs；chapter 禁止双链。返回含 id 的完整对象。',
+      parameters: writeParams,
       executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'update_beat', { ...(params as Static<typeof updateBeatParams>) })
+        runRuntime(ctx, 'write', { ...(params as Static<typeof writeParams>) })
     },
     {
-      name: 'delete_beat',
-      label: '删除节点',
-      description: '删除节点，并清理相关双链引用。',
-      parameters: deleteBeatParams,
-      executionMode: 'sequential',
-      execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'delete_beat', { ...(params as Static<typeof deleteBeatParams>) })
-    },
-    {
-      name: 'list_entities',
-      label: '列出实体',
-      description: '列出项目实体目录（可按状态过滤）。',
-      parameters: listEntitiesParams,
-      executionMode: 'parallel',
-      execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'list_entities', { ...(params as Static<typeof listEntitiesParams>) })
-    },
-    {
-      name: 'read_entity',
-      label: '读取实体',
-      description: '读取实体全文及出链/入链清单。',
-      parameters: readEntityParams,
-      executionMode: 'parallel',
-      execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'read_entity', { ...(params as Static<typeof readEntityParams>) })
-    },
-    {
-      name: 'create_entity',
-      label: '创建实体',
+      name: 'edit',
+      label: 'edit',
       description:
-        '新建实体。返回完整对象（id + entityRefs + beatRefs）。content 合法双链会自动同步底部属性。',
-      parameters: createEntityParams,
+        '局部精确替换 content（edits）或改 title/name/status。path 必填。chapter 禁止双链。',
+      parameters: editParams,
       executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'create_entity', { ...(params as Static<typeof createEntityParams>) })
+        runRuntime(ctx, 'edit', { ...(params as Static<typeof editParams>) })
     },
     {
-      name: 'update_entity',
-      label: '更新实体',
-      description:
-        '更新实体。改 content 时自动解析双链并回写 entityRefs/beatRefs；摘要会显示链路数量。',
-      parameters: updateEntityParams,
+      name: 'delete',
+      label: 'delete',
+      description: '删除资源 path=beats/{id}|entities/{id}|chapters/{id}，并清理双链。',
+      parameters: deleteParams,
       executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'update_entity', { ...(params as Static<typeof updateEntityParams>) })
-    },
-    {
-      name: 'delete_entity',
-      label: '删除实体',
-      description: '删除实体，并清理相关双链引用。',
-      parameters: deleteEntityParams,
-      executionMode: 'sequential',
-      execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'delete_entity', { ...(params as Static<typeof deleteEntityParams>) })
-    },
-    {
-      name: 'update_beat_status',
-      label: '更新节点状态',
-      description: '仅更新节点写作成熟度（idea→outline→draft→final）。不改写节点正文。',
-      parameters: updateBeatStatusParams,
-      executionMode: 'sequential',
-      execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'update_beat_status', {
-          ...(params as Static<typeof updateBeatStatusParams>)
-        })
-    },
-    {
-      name: 'write_chapter',
-      label: '写文章',
-      description:
-        '创建或覆盖文章。content 必须是纯正文，禁止双链语法；关联节点/实体通过 sourceBeatIds、entityRefs、beatRefs 元数据传递。不回写 beat.content。',
-      parameters: writeChapterParams,
-      executionMode: 'sequential',
-      execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'write_chapter', { ...(params as Static<typeof writeChapterParams>) })
-    },
-    {
-      name: 'list_chapters',
-      label: '列出文章',
-      description: '列出已有文章（有序）。',
-      parameters: emptyParams,
-      executionMode: 'parallel',
-      execute: async (_id, _params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'list_chapters', {})
-    },
-    {
-      name: 'read_chapter',
-      label: '读取文章',
-      description: '读取文章全文与关联元数据。',
-      parameters: readChapterParams,
-      executionMode: 'parallel',
-      execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'read_chapter', { ...(params as Static<typeof readChapterParams>) })
-    },
-    {
-      name: 'update_chapter',
-      label: '更新文章',
-      description: '更新文章标题/正文/状态/关联节点与实体。正文禁止双链。',
-      parameters: updateChapterParams,
-      executionMode: 'sequential',
-      execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'update_chapter', { ...(params as Static<typeof updateChapterParams>) })
-    },
-    {
-      name: 'delete_chapter',
-      label: '删除文章',
-      description: '删除文章。',
-      parameters: deleteChapterParams,
-      executionMode: 'sequential',
-      execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'delete_chapter', { ...(params as Static<typeof deleteChapterParams>) })
-    },
-    {
-      name: 'get_project_outline',
-      label: '项目节点',
-      description: '返回有序节点列表（标题 + 状态 + 内容摘要），便于规划多章写作。',
-      parameters: emptyParams,
-      executionMode: 'parallel',
-      execute: async (_id, _params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'get_project_outline', {})
+        runRuntime(ctx, 'delete', { ...(params as Static<typeof deleteParams>) })
     }
   ]
-
-  return tools
 }
 
-/** 默认系统提示（动态段由 runner 拼接） */
+/** 默认系统提示 */
 export const DREAM_AGENT_BASE_PROMPT = `你是「造梦师」的创作助手，帮助用户基于项目中的节点与实体（设定）进行长文创作。
 
 ## 工作方式
-1. 先用工具了解项目：get_project_outline / list_beats / list_entities。
-2. 需要细节时再 read_beat / read_entity，不要编造未读取的设定。
-3. 可用 create_beat / update_beat / delete_beat 管理节点；create_entity / update_entity / delete_entity 管理实体。
-4. 写文章时用 write_chapter：content 必须是纯正文，禁止写入 [@…](beat|entity:…) 双链；关联用 sourceBeatIds / entityRefs / beatRefs。
-5. 写完后如源节点尚未 draft/final，可用 update_beat_status 推进到 draft。
-6. 用中文回复用户；工具调用按需进行，不要无意义循环。
-7. 回复可用 Markdown（标题、列表、加粗、引用等）提升可读性。
-8. 不熟悉造梦师工具/双链时，先 read_skill「dreamagent-guide」。
+1. 先 list path=outline|beats|entities 了解项目；需要细节再 read path=beats/{id} 等。
+2. 不要编造未读取的设定；顺着 read 返回的出入链继续深入。
+3. 创建：write({ type:"entity", name, content }) / write({ type:"beat", title, content }) / write({ type:"chapter", title, content, sourceBeatIds, entityRefs })。
+4. 覆盖：write({ path:"beats/{id}", content|title|status })；局部改用 edit({ path, edits:[{oldText,newText}] })。
+5. 删除：delete({ path:"entities/{id}" })。
+6. 用中文回复用户；工具按需调用。
+7. 回复可用 Markdown。
+8. 不熟悉工具/双链时，先 read_skill「dreamagent-guide」。
 
-## 双链（硬规则，必须遵守）
+## 路径约定
+- 集合：beats / entities / chapters / outline
+- 对象：beats/{id}、entities/{id}、chapters/{id}（也可用 beat:{id}）
+
+## 双链（硬规则）
 - 唯一合法语法：\`[@显示名](entity:真实id)\` 或 \`[@显示名](beat:真实id)\`
-- **禁止**只写 \`@名字\`、\`[[名字]]\`、\`[名字]\` 等；这些不会建立图谱引用。
-- 创建时：先 create_entity / create_beat，从工具返回的 data.id（或摘要里的 id）拿到真实 id，再在 content 中写入双链。
-- 示例：创建实体返回 id=ent_abc 后，节点 content 写 \`[@林远](entity:ent_abc)\`。
-- 双链**只能**出现在节点/实体 content；文章 content 禁止双链，用元数据 entityRefs / beatRefs / sourceBeatIds。
-- 完整建链 = content 合法语法 + 底部属性同步：
-  - 写入 content 后，系统**自动**解析并维护 \`entityRefs\` / \`beatRefs\`
-  - 工具 data 会带回完整对象；摘要含「实体链 N · 节点链 M」
-  - 若摘要是「无双链」或 data.entityRefs/beatRefs 为空，说明语法无效，必须改 content 重写
-  - **不要**尝试单独传 entityRefs/beatRefs 字段；只改 content
+- **禁止**只写 \`@名字\`、\`[[名字]]\`
+- 流程：write 创建 → 从 data.id 取真实 id → write/edit 把双链写入 beat/entity 的 content
+- 双链只出现在节点/实体 content；文章 content 禁止双链，关联用 sourceBeatIds / entityRefs / beatRefs
+- 系统自动维护 entityRefs/beatRefs；摘要含「实体链 N · 节点链 M」；「无双链」表示语法无效
 
-## 技能（Skills）
-- 系统提示中的技能列表只含名称与简介，不含全文。
-- 当用户任务匹配某技能时：先 list_skills 确认，再 read_skill 读取完整流程；references 用 read_skill_file。
-- 不要假设技能全文已在系统提示中；读完技能后再调用图谱工具执行。
+## 网络
+- web_search 检索互联网；web_fetch 读 URL 正文。
+- 搜索需在「设置 > 网络搜索」配置 API Key。
+
+## 待办
+- 多步任务用 todo 工具维护完整清单（每次覆盖提交全量 todos）。
+- status: pending / in_progress / completed / cancelled；同时最多一个 in_progress。
+- 完成一步就更新清单，不要只在心里记。
+
+## 技能
+- 系统提示仅技能清单；任务匹配时 list_skills → read_skill → read_skill_file。
+- write_skill 仅用于自定义技能。
 
 ## 约束
-- 节点/实体正文可含双链；文章正文必须是纯文本。
-- 文章与节点分离：产出在 documents/chapters，不回写 beat.content。
-- 删除操作不可恢复，执行前应确认用户意图。
+- 文章与节点分离：成稿进 chapters，不回写 beat.content。
+- 删除不可恢复，执行前确认用户意图。
 `

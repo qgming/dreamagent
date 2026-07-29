@@ -159,7 +159,9 @@ export class AgentRunner {
     let assistantStarted = false
     let textBuffer = ''
     let thinkingBuffer = ''
-    let lastFlush = 0
+    // 思考与正文各自节流，避免互相抢 lastFlush 导致 thinking 几乎不刷
+    let lastTextFlush = 0
+    let lastThinkingFlush = 0
     const toolParts = new Map<string, UiToolCallPart>()
     const writtenChapterIds: string[] = []
     const beatStatusUpdates: UiBeatStatusUpdate[] = []
@@ -167,10 +169,10 @@ export class AgentRunner {
     const flushText = (force = false): void => {
       if (!textBuffer) return
       const now = Date.now()
-      if (!force && now - lastFlush < 32) return
+      if (!force && now - lastTextFlush < 32) return
       const delta = textBuffer
       textBuffer = ''
-      lastFlush = now
+      lastTextFlush = now
       this.emit(sender, {
         type: 'text_delta',
         projectId,
@@ -184,10 +186,10 @@ export class AgentRunner {
     const flushThinking = (force = false): void => {
       if (!thinkingBuffer) return
       const now = Date.now()
-      if (!force && now - lastFlush < 32) return
+      if (!force && now - lastThinkingFlush < 32) return
       const delta = thinkingBuffer
       thinkingBuffer = ''
-      lastFlush = now
+      lastThinkingFlush = now
       this.emit(sender, {
         type: 'thinking_delta',
         projectId,
@@ -231,10 +233,17 @@ export class AgentRunner {
             flushThinking(true)
             textBuffer += ame.delta
             flushText(false)
-          } else if (ame?.type === 'thinking_delta' && typeof ame.delta === 'string') {
+          } else if (
+            (ame?.type === 'thinking_delta' || ame?.type === 'reasoning_delta') &&
+            typeof ame.delta === 'string'
+          ) {
             ensureAssistantStart()
             thinkingBuffer += ame.delta
             flushThinking(false)
+          } else if (ame?.type === 'thinking_start' || ame?.type === 'thinking_end') {
+            // 块边界强制刷出缓冲，避免只剩尾包未 flush
+            ensureAssistantStart()
+            flushThinking(true)
           }
           break
         }
@@ -286,6 +295,19 @@ export class AgentRunner {
 
           let chapterIds: string[] | undefined
           let statusUpdates: UiBeatStatusUpdate[] | undefined
+          let todosPayload: import('../../shared/todos').TodoItem[] | undefined
+          // 路径式 write/edit 可能产出文章或状态变更
+          if (event.toolName === 'write' || event.toolName === 'edit') {
+            chapterIds = chapterIdsFromDetails(details)
+            if (chapterIds.length) writtenChapterIds.push(...chapterIds)
+            else chapterIds = undefined
+            const st = beatStatusFromDetails(details)
+            if (st) {
+              beatStatusUpdates.push(st)
+              statusUpdates = [st]
+            }
+          }
+          // 兼容旧会话工具名
           if (event.toolName === 'write_chapter') {
             chapterIds = chapterIdsFromDetails(details)
             writtenChapterIds.push(...(chapterIds ?? []))
@@ -298,6 +320,16 @@ export class AgentRunner {
             }
           }
 
+          if (event.toolName === 'todo') {
+            const data =
+              details && typeof details === 'object'
+                ? (details as { data?: { todos?: unknown } }).data
+                : undefined
+            if (data && Array.isArray(data.todos)) {
+              todosPayload = data.todos as import('../../shared/todos').TodoItem[]
+            }
+          }
+
           this.emit(sender, {
             type: 'tool_end',
             projectId,
@@ -306,7 +338,8 @@ export class AgentRunner {
             messageId: assistantMessageId,
             tool,
             chapterIds,
-            beatStatusUpdates: statusUpdates
+            beatStatusUpdates: statusUpdates,
+            todos: todosPayload
           })
 
           // 图谱变更后推送 snapshot
@@ -336,15 +369,63 @@ export class AgentRunner {
     })
 
     try {
-      await harness.prompt(userText)
-
-      // 检查 assistant 是否以 error 结束
-      // pi 不 throw，需看最后消息
-      const finalText = await this.inspectLastAssistantError(harness)
+      // prompt 返回最终 AssistantMessage；失败时 stopReason=error/aborted 且可能不 throw
+      const finalMessage = (await harness.prompt(userText)) as {
+        stopReason?: string
+        errorMessage?: string
+        content?: unknown
+      } | null
 
       flushAll(true)
 
-      const finalParts: UiChatMessage['parts'] = []
+      if (run.aborted) {
+        this.emit(sender, { type: 'aborted', projectId, sessionId, runId })
+        return
+      }
+
+      const stopReason = finalMessage?.stopReason
+      const errorMessage =
+        typeof finalMessage?.errorMessage === 'string' && finalMessage.errorMessage.trim()
+          ? finalMessage.errorMessage.trim()
+          : null
+
+      if (stopReason === 'aborted') {
+        this.emit(sender, { type: 'aborted', projectId, sessionId, runId })
+        return
+      }
+
+      if (stopReason === 'error' || errorMessage) {
+        // 尽量用 session 投影校准 UI（不发 turn_done，避免前端清掉 error）
+        try {
+          const sessionView = await this.sessions.open(projectId, sessionId)
+          this.emit(sender, {
+            type: 'assistant_end',
+            projectId,
+            sessionId,
+            runId,
+            message: {
+              ...( [...sessionView.messages].reverse().find((m) => m.role === 'assistant') ?? {
+                id: assistantMessageId,
+                role: 'assistant' as const,
+                createdAt: new Date().toISOString(),
+                parts: []
+              }),
+              status: 'error'
+            }
+          })
+        } catch {
+          // ignore
+        }
+        this.emit(sender, {
+          type: 'error',
+          projectId,
+          sessionId,
+          runId,
+          message: errorMessage || '模型生成失败'
+        })
+        return
+      }
+
       // 简化：turn 结束后用 session 全量投影校准
       await this.sessions.maybeAutotitle(projectId, sessionId, userText)
       const sessionView = await this.sessions.open(projectId, sessionId)
@@ -360,23 +441,7 @@ export class AgentRunner {
           runId,
           message: lastAssistant
         })
-      } else if (finalText) {
-        this.emit(sender, {
-          type: 'assistant_end',
-          projectId,
-          sessionId,
-          runId,
-          message: {
-            id: assistantMessageId,
-            role: 'assistant',
-            createdAt: new Date().toISOString(),
-            parts: [{ type: 'text', text: finalText }],
-            status: 'complete'
-          }
-        })
       }
-
-      void finalParts
 
       this.emit(sender, {
         type: 'turn_done',
@@ -390,6 +455,7 @@ export class AgentRunner {
         }
       })
     } catch (error) {
+      flushAll(true)
       if (run.aborted) {
         this.emit(sender, { type: 'aborted', projectId, sessionId, runId })
       } else {
@@ -402,9 +468,5 @@ export class AgentRunner {
         this.active.delete(key)
       }
     }
-  }
-
-  private async inspectLastAssistantError(_harness: unknown): Promise<string | null> {
-    return null
   }
 }

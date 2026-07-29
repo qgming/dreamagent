@@ -63,6 +63,8 @@ export type AgentStreamEvent =
       tool: UiToolCallPart
       chapterIds?: string[]
       beatStatusUpdates?: UiBeatStatusUpdate[]
+      /** todo 工具更新后的完整清单 */
+      todos?: import('./todos').TodoItem[]
     }
   | {
       type: 'assistant_end'
@@ -102,5 +104,6 @@ export type AgentStreamEvent =
 /** 自定义 session entry 类型常量（pi custom entry） */
 export const SESSION_ENTRY = {
   pinnedBeats: 'pinned_beats',
-  pinnedEntities: 'pinned_entities'
+  pinnedEntities: 'pinned_entities',
+  todos: 'session_todos'
 } as const

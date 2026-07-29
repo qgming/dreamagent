@@ -11,7 +11,7 @@ metadata:
 
 # deslop
 
-终稿抛光 **文章**。结构/人设/因果问题先 `update_beat` / `update_entity` 再动句面，不要用本技能硬磨剧情。
+终稿抛光 **文章**。结构/人设/因果问题先 `write/edit path=beats/{id}` / `write/edit path=entities/{id}` 再动句面，不要用本技能硬磨剧情。
 
 ## 造梦师领域模型（必须遵守）
 
@@ -29,18 +29,18 @@ metadata:
 - **只写在节点/实体的 content 里**；系统会维护 `entityRefs` / `beatRefs`
 - **文章 content 必须是纯文本**，禁止任何 `[@…](beat|entity:…)`
 - 文章与图谱的关系写在元数据：
-  - `sourceBeatIds`：取材/覆盖的源节点（写完可据此 `update_beat_status`）
+  - `sourceBeatIds`：取材/覆盖的源节点（写完可据此 `edit({ path: "beats/{id}", status })`）
   - `entityRefs`：文中涉及的实体 id
   - `beatRefs`：文中涉及的其他节点 id
 
 ### 工具怎么用
 
-1. 摸结构：`get_project_outline` / `list_beats` / `list_entities` / `list_chapters`
-2. 读详情：`read_beat` / `read_entity` / `read_chapter`
+1. 摸结构：`list({ path: "outline" })` / `list({ path: "beats" })` / `list({ path: "entities" })` / `list({ path: "chapters" })`
+2. 读详情：`read({ path: "beats/{id}" })` / `read({ path: "entities/{id}" })` / `read({ path: "chapters/{id}" })`
    - 读节点/实体时看 **outbound（出链）/ inbound（入链）/ suggestedReads**，顺藤摸瓜，勿编造未读设定
-3. 写结构/设定：`create_beat` `update_beat` `create_entity` `update_entity`（content 里用双链互联）
-4. 写正文：`write_chapter` / `update_chapter`（纯文本 + 元数据关联）
-5. 推进节点：`update_beat_status`（文章产出后，源节点常 `outline→draft` 或 `draft→final`）
+3. 写结构/设定：`write({ type: "beat", ... })` `write/edit path=beats/{id}` `write({ type: "entity", ... })` `write/edit path=entities/{id}`（content 里用双链互联）
+4. 写正文：`write({ type: "chapter", ... })` / `write/edit path=chapters/{id}`（纯文本 + 元数据关联）
+5. 推进节点：`edit({ path: "beats/{id}", status })`（文章产出后，源节点常 `outline→draft` 或 `draft→final`）
 6. 技能：`list_skills` → `read_skill` → `read_skill_file`
 
 ### 硬约束
@@ -54,16 +54,16 @@ metadata:
 
 | 做 | 不做 |
 |----|------|
-| `read_chapter` → 改 content → `update_chapter` | 把双链写进文章 |
+| `read({ path: "chapters/{id}" })` → 改 content → `write/edit path=chapters/{id}` | 把双链写进文章 |
 | 对照实体人设保持声线 | 擅自改剧情结构（除非用户要） |
 | 保持 `entityRefs` 等元数据合理 | 把长文回写到 beat.content |
 | 最小改动保用户手迹 | silent 大段重写不说明 |
 
 ## Inputs To Read
 
-1. `read_chapter`
-2. 元数据里的实体：`read_entity`（声线/口头禅）
-3. 可选源纲 `read_beat`
+1. `read({ path: "chapters/{id}" })`
+2. 元数据里的实体：`read({ path: "entities/{id}" })`（声线/口头禅）
+3. 可选源纲 `read({ path: "beats/{id}" })`
 4. `read_skill_file`：`references/banned-words.md`、`anti-ai-writing.md`、`structures.md`、`rhythm-fingerprint.md`、`checklist.md`
 
 ## 分层再动手
@@ -80,7 +80,7 @@ metadata:
 ## 三遍法
 
 1. **检测**只列表（位置+类型+摘录）
-2. **最小替换** `update_chapter`；能换词不换句；口头禅当手迹
+2. **最小替换** `write/edit path=chapters/{id}`；能换词不换句；口头禅当手迹
 3. **再检** checklist + 五维打分（&lt;35/50 再改）；向用户报告改动类型
 
 ## 中文硬规则
@@ -92,6 +92,6 @@ metadata:
 
 ## Outputs / Write-Back
 
-- 仅 `update_chapter`（content 纯文本）
+- 仅 `write/edit path=chapters/{id}`（content 纯文本）
 - 若发现 refs 与出场不符，可顺手修正 chapter 的 entityRefs/beatRefs 元数据
 - 清单与打分只在对话

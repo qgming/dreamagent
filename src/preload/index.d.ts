@@ -126,6 +126,21 @@ export interface AgentApi {
 export interface SettingsApi {
   getLlm: () => Promise<LlmPublicSettings>
   setLlm: (patch: LlmSettingsPatch) => Promise<LlmPublicSettings>
+  getWebSearch: () => Promise<
+    import('../shared/web-search').WebSearchPublicSettings
+  >
+  setWebSearch: (
+    patch: import('../shared/web-search').WebSearchSettingsPatch
+  ) => Promise<import('../shared/web-search').WebSearchPublicSettings>
+}
+
+export interface NetworkApi {
+  corsFetch: (
+    request: import('../shared/web-search').CorsFetchRequest
+  ) => Promise<import('../shared/web-search').CorsFetchResponse>
+  webSearch: (
+    request: import('../shared/web-search').WebSearchRequest
+  ) => Promise<import('../shared/web-search').WebSearchResponse>
 }
 
 export interface SkillsApi {
@@ -148,6 +163,7 @@ export interface DreamAgentApi {
   agent: AgentApi
   settings: SettingsApi
   skills: SkillsApi
+  network: NetworkApi
 }
 
 declare global {

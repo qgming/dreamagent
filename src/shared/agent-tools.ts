@@ -1,27 +1,21 @@
 /**
  * Agent 内置工具契约（UI / runtime / LLM 共用）
+ * 图谱工具为路径式 list/read/write/edit/delete；另含 web_search / web_fetch
  */
 
 import type { BeatStatus, ChapterStatus, EntityStatus } from './project-types'
 
 export type AgentToolName =
-  | 'list_beats'
-  | 'read_beat'
-  | 'create_beat'
-  | 'update_beat'
-  | 'delete_beat'
-  | 'list_entities'
-  | 'read_entity'
-  | 'create_entity'
-  | 'update_entity'
-  | 'delete_entity'
-  | 'update_beat_status'
-  | 'write_chapter'
-  | 'list_chapters'
-  | 'read_chapter'
-  | 'update_chapter'
-  | 'delete_chapter'
-  | 'get_project_outline'
+  | 'list'
+  | 'read'
+  | 'write'
+  | 'edit'
+  | 'delete'
+  | 'web_search'
+  | 'web_fetch'
+  | 'todo'
+
+export type GraphResourceType = 'beat' | 'entity' | 'chapter' | 'outline'
 
 export interface AgentToolDefinition {
   name: AgentToolName
@@ -73,12 +67,9 @@ export interface WriteChapterToolInput {
   /** 纯正文，不要写入双链语法 */
   content: string
   sourceBeatIds?: string[]
-  /** 关联实体 id 列表（元数据） */
   entityRefs?: string[]
-  /** 关联节点 id 列表（元数据） */
   beatRefs?: string[]
   status?: ChapterStatus
-  /** 有则更新已有文章 */
   chapterId?: string
   conversationId?: string
 }
@@ -99,257 +90,158 @@ export interface AgentToolResult<T = unknown> {
 
 /** 图谱会变更的写工具（runner 用于刷新 snapshot） */
 export const GRAPH_MUTATING_TOOLS: ReadonlySet<AgentToolName> = new Set([
-  'create_beat',
-  'update_beat',
-  'delete_beat',
-  'create_entity',
-  'update_entity',
-  'delete_entity',
-  'update_beat_status',
-  'write_chapter',
-  'update_chapter',
-  'delete_chapter'
+  'write',
+  'edit',
+  'delete'
 ])
 
 /** 供 agent:listTools 与 LLM 使用 */
 export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
-    name: 'list_beats',
-    description: '列出项目节点目录（可按状态过滤）。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        status: {
-          type: 'string',
-          enum: ['idea', 'outline', 'draft', 'final'],
-          description: '可选状态过滤'
-        }
-      }
-    }
-  },
-  {
-    name: 'read_beat',
+    name: 'list',
     description:
-      '读取节点全文，并返回出链与入链清单（含文章），便于继续深入读取相关内容。',
+      '列出图谱资源。path 为 beats / entities / chapters / outline（或 beats/ 等）。可按 status、query 过滤。',
     inputSchema: {
       type: 'object',
       properties: {
-        beatId: { type: 'string', description: '节点 id' }
-      },
-      required: ['beatId']
-    }
-  },
-  {
-    name: 'create_beat',
-    description:
-      '新建节点。返回完整对象（含 id、entityRefs、beatRefs）。content 写合法双链后系统自动填充底部 entityRefs/beatRefs；禁止只写 @名。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: '节点标题' },
-        content: {
+        path: {
           type: 'string',
-          description:
-            '节点正文；双链 [@显示名](entity:id)/[@显示名](beat:id) 会自动同步到 entityRefs/beatRefs'
+          description: 'beats | entities | chapters | outline'
         },
-        status: {
-          type: 'string',
-          enum: ['idea', 'outline', 'draft', 'final'],
-          description: '默认 idea'
-        },
-        afterId: {
-          type: 'string',
-          description: '插入到该节点之后；省略则追加末尾'
-        }
+        status: { type: 'string', description: '可选状态过滤' },
+        query: { type: 'string', description: '标题/名称关键词' },
+        limit: { type: 'number' }
       },
-      required: ['title']
+      required: ['path']
     }
   },
   {
-    name: 'update_beat',
+    name: 'read',
     description:
-      '更新节点标题/正文/状态。改写 content 时自动解析双链并完整回写 entityRefs/beatRefs；双链必须带真实 id。返回 data 可核对底部属性。',
+      '读取对象全文。path 形如 beats/{id}、entities/{id}、chapters/{id}，或 beat:{id} / entity:{id} / chapter:{id}。节点/实体返回出入链。',
     inputSchema: {
       type: 'object',
       properties: {
-        beatId: { type: 'string' },
+        path: { type: 'string', description: '资源路径' }
+      },
+      required: ['path']
+    }
+  },
+  {
+    name: 'write',
+    description:
+      '创建或全量覆盖。创建：type=beat|entity|chapter + title/name + content。覆盖：path=beats/{id} 等。beat/entity 的 content 可含 [@名](entity|beat:真实id) 双链并自动同步 entityRefs/beatRefs；chapter content 必须纯正文，关联用 sourceBeatIds/entityRefs/beatRefs。返回完整对象含 id。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '有则覆盖已有对象' },
+        type: {
+          type: 'string',
+          enum: ['beat', 'entity', 'chapter'],
+          description: '创建时必填'
+        },
         title: { type: 'string' },
-        content: { type: 'string' },
-        status: {
-          type: 'string',
-          enum: ['idea', 'outline', 'draft', 'final']
-        }
-      },
-      required: ['beatId']
-    }
-  },
-  {
-    name: 'delete_beat',
-    description: '删除节点。会清理其他内容中的相关双链引用。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        beatId: { type: 'string' }
-      },
-      required: ['beatId']
-    }
-  },
-  {
-    name: 'list_entities',
-    description: '列出项目实体目录（可按状态过滤）。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        status: {
-          type: 'string',
-          enum: ['active', 'dormant', 'archived']
-        }
-      }
-    }
-  },
-  {
-    name: 'read_entity',
-    description: '读取实体全文及出链/入链清单。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        entityId: { type: 'string' }
-      },
-      required: ['entityId']
-    }
-  },
-  {
-    name: 'create_entity',
-    description:
-      '新建实体。返回完整对象（含 id、entityRefs、beatRefs）。content 合法双链会自动同步底部属性。',
-    inputSchema: {
-      type: 'object',
-      properties: {
         name: { type: 'string', description: '实体名称' },
-        content: {
-          type: 'string',
-          description:
-            '设定正文；双链 [@显示名](entity:id)/[@显示名](beat:id) 会自动同步到 entityRefs/beatRefs'
-        },
-        status: {
-          type: 'string',
-          enum: ['active', 'dormant', 'archived'],
-          description: '默认 active'
-        }
-      },
-      required: ['name']
-    }
-  },
-  {
-    name: 'update_entity',
-    description:
-      '更新实体名称/正文/状态。改 content 时自动解析双链并完整回写 entityRefs/beatRefs；返回 data 可核对。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        entityId: { type: 'string' },
-        name: { type: 'string' },
         content: { type: 'string' },
-        status: {
-          type: 'string',
-          enum: ['active', 'dormant', 'archived']
-        }
-      },
-      required: ['entityId']
-    }
-  },
-  {
-    name: 'delete_entity',
-    description: '删除实体。会清理其他内容中的相关双链引用。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        entityId: { type: 'string' }
-      },
-      required: ['entityId']
-    }
-  },
-  {
-    name: 'update_beat_status',
-    description: '仅更新节点写作成熟度（idea→outline→draft→final）。不改写节点正文。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        beatId: { type: 'string' },
-        status: {
-          type: 'string',
-          enum: ['idea', 'outline', 'draft', 'final']
-        }
-      },
-      required: ['beatId', 'status']
-    }
-  },
-  {
-    name: 'write_chapter',
-    description:
-      '创建或覆盖文章（documents/chapters）。content 必须是纯正文，禁止双链语法；关联节点/实体通过 sourceBeatIds、entityRefs、beatRefs 元数据传递。不回写 beat.content。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string' },
-        content: { type: 'string', description: '纯正文，无双链' },
+        status: { type: 'string' },
+        afterId: { type: 'string' },
         sourceBeatIds: { type: 'array', items: { type: 'string' } },
         entityRefs: { type: 'array', items: { type: 'string' } },
         beatRefs: { type: 'array', items: { type: 'string' } },
-        status: { type: 'string', enum: ['draft', 'final'] },
-        chapterId: { type: 'string', description: '有则更新' },
         conversationId: { type: 'string' }
-      },
-      required: ['title', 'content']
+      }
     }
   },
   {
-    name: 'list_chapters',
-    description: '列出已有文章（有序）。',
-    inputSchema: { type: 'object', properties: {} }
-  },
-  {
-    name: 'read_chapter',
-    description: '读取文章全文与关联元数据。',
+    name: 'edit',
+    description:
+      '局部精确替换 content（及可选 status/title/name）。path 必填。edits 为 oldText→newText，每段须在原文中唯一。改 content 后 beat/entity 自动重算双链 refs；chapter 禁止双链语法。',
     inputSchema: {
       type: 'object',
       properties: {
-        chapterId: { type: 'string' }
-      },
-      required: ['chapterId']
-    }
-  },
-  {
-    name: 'update_chapter',
-    description: '更新文章标题/正文/状态/关联节点与实体。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        chapterId: { type: 'string' },
+        path: { type: 'string' },
+        edits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              oldText: { type: 'string' },
+              newText: { type: 'string' }
+            },
+            required: ['oldText', 'newText']
+          }
+        },
         title: { type: 'string' },
-        content: { type: 'string' },
-        status: { type: 'string', enum: ['draft', 'final'] },
+        name: { type: 'string' },
+        status: { type: 'string' },
         sourceBeatIds: { type: 'array', items: { type: 'string' } },
         entityRefs: { type: 'array', items: { type: 'string' } },
         beatRefs: { type: 'array', items: { type: 'string' } }
       },
-      required: ['chapterId']
+      required: ['path']
     }
   },
   {
-    name: 'delete_chapter',
-    description: '删除文章。',
+    name: 'delete',
+    description: '删除资源。path=beats/{id}|entities/{id}|chapters/{id}。会清理相关双链。',
     inputSchema: {
       type: 'object',
       properties: {
-        chapterId: { type: 'string' }
+        path: { type: 'string' },
+        confirm: { type: 'boolean', description: '建议 true' }
       },
-      required: ['chapterId']
+      required: ['path']
     }
   },
   {
-    name: 'get_project_outline',
-    description: '返回有序节点列表（标题 + 状态 + 内容摘要），便于规划多章写作。',
-    inputSchema: { type: 'object', properties: {} }
+    name: 'web_search',
+    description:
+      '在互联网上检索信息，返回标题、链接、摘要。需在设置中配置搜索服务商 API Key。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '搜索关键词' },
+        limit: { type: 'number', description: '1–10，默认 5' }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'web_fetch',
+    description: '读取指定 URL 的网页正文（去噪纯文本）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        maxChars: { type: 'number', description: '默认 8000' }
+      },
+      required: ['url']
+    }
+  },
+  {
+    name: 'todo',
+    description:
+      '维护本会话任务待办。每次传入完整 todos 数组覆盖。status: pending|in_progress|completed|cancelled。多步任务用此跟踪进度。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        todos: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              content: { type: 'string' },
+              status: {
+                type: 'string',
+                enum: ['pending', 'in_progress', 'completed', 'cancelled']
+              }
+            },
+            required: ['content']
+          }
+        }
+      },
+      required: ['todos']
+    }
   }
 ]

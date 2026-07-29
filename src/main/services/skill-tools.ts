@@ -163,7 +163,7 @@ export function buildSkillTools(): AnySkillTool[] {
   return [
     {
       name: 'list_skills',
-      label: '列出技能',
+      label: 'list_skills',
       description:
         '列出当前助手可用的技能。遇到任务可能匹配某个技能时，先调用此工具查看技能名称和适用场景，再用 read_skill 读取具体说明。',
       parameters: listSkillsParams,
@@ -191,7 +191,7 @@ export function buildSkillTools(): AnySkillTool[] {
     },
     {
       name: 'read_skill',
-      label: '读取技能',
+      label: 'read_skill',
       description:
         '读取某个可用技能的完整 SKILL.md 说明。只能读取 list_skills 列出的技能，用于在执行匹配任务前加载具体流程、约束和参考资料位置。',
       parameters: readSkillParams,
@@ -229,7 +229,7 @@ export function buildSkillTools(): AnySkillTool[] {
     },
     {
       name: 'read_skill_file',
-      label: '读取技能文件',
+      label: 'read_skill_file',
       description:
         '读取某个可用技能目录内的子文件，例如 references 下的说明。路径必须是 read_skill 返回目录树中的相对路径，不能越过技能目录。',
       parameters: readSkillFileParams,
@@ -276,7 +276,7 @@ export function buildSkillTools(): AnySkillTool[] {
     },
     {
       name: 'write_skill',
-      label: '写入技能',
+      label: 'write_skill',
       description:
         '创建、编辑或删除自定义技能（仅 custom，不能改内置）。' +
         'create: 新建技能目录与 SKILL.md；' +

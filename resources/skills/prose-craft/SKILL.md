@@ -29,18 +29,18 @@ metadata:
 - **只写在节点/实体的 content 里**；系统会维护 `entityRefs` / `beatRefs`
 - **文章 content 必须是纯文本**，禁止任何 `[@…](beat|entity:…)`
 - 文章与图谱的关系写在元数据：
-  - `sourceBeatIds`：取材/覆盖的源节点（写完可据此 `update_beat_status`）
+  - `sourceBeatIds`：取材/覆盖的源节点（写完可据此 `edit({ path: "beats/{id}", status })`）
   - `entityRefs`：文中涉及的实体 id
   - `beatRefs`：文中涉及的其他节点 id
 
 ### 工具怎么用
 
-1. 摸结构：`get_project_outline` / `list_beats` / `list_entities` / `list_chapters`
-2. 读详情：`read_beat` / `read_entity` / `read_chapter`
+1. 摸结构：`list({ path: "outline" })` / `list({ path: "beats" })` / `list({ path: "entities" })` / `list({ path: "chapters" })`
+2. 读详情：`read({ path: "beats/{id}" })` / `read({ path: "entities/{id}" })` / `read({ path: "chapters/{id}" })`
    - 读节点/实体时看 **outbound（出链）/ inbound（入链）/ suggestedReads**，顺藤摸瓜，勿编造未读设定
-3. 写结构/设定：`create_beat` `update_beat` `create_entity` `update_entity`（content 里用双链互联）
-4. 写正文：`write_chapter` / `update_chapter`（纯文本 + 元数据关联）
-5. 推进节点：`update_beat_status`（文章产出后，源节点常 `outline→draft` 或 `draft→final`）
+3. 写结构/设定：`write({ type: "beat", ... })` `write/edit path=beats/{id}` `write({ type: "entity", ... })` `write/edit path=entities/{id}`（content 里用双链互联）
+4. 写正文：`write({ type: "chapter", ... })` / `write/edit path=chapters/{id}`（纯文本 + 元数据关联）
+5. 推进节点：`edit({ path: "beats/{id}", status })`（文章产出后，源节点常 `outline→draft` 或 `draft→final`）
 6. 技能：`list_skills` → `read_skill` → `read_skill_file`
 
 ### 硬约束
@@ -52,9 +52,9 @@ metadata:
 
 ## Inputs To Read
 
-- 章纲：`read_beat`（看双链出场表）
-- 人设：`read_entity`（出链关系）
-- 上下文：`get_project_outline`、近文 `read_chapter`
+- 章纲：`read({ path: "beats/{id}" })`（看双链出场表）
+- 人设：`read({ path: "entities/{id}" })`（出链关系）
+- 上下文：`list({ path: "outline" })`、近文 `read({ path: "chapters/{id}" })`
 
 ## 落笔前
 
@@ -98,6 +98,6 @@ metadata:
 
 ## Outputs / Write-Back
 
-- `write_chapter` / `update_chapter` + 元数据
-- 提纲修正：`update_beat`（可双链）
-- `update_beat_status` → draft
+- `write({ type: "chapter", ... })` / `write/edit path=chapters/{id}` + 元数据
+- 提纲修正：`write/edit path=beats/{id}`（可双链）
+- `edit({ path: "beats/{id}", status })` → draft

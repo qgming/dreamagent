@@ -14,6 +14,9 @@ import {
   type DreamToolContext
 } from './pi-agent-tools'
 import { buildSkillTools } from './skill-tools'
+import { buildWebTools } from './web-tools'
+import { buildTodoTools } from './todo-tools'
+import type { TodoService } from './todo-service'
 import { readPinsFromBranch } from './pi-session-parser'
 
 type DreamHarness = AgentHarness<DreamToolContext>
@@ -39,7 +42,8 @@ export class HarnessManager {
     private readonly projects: ProjectService,
     private readonly sessions: PiSessionService,
     private readonly modelsService: PiModelsService,
-    private readonly skills: SkillService
+    private readonly skills: SkillService,
+    private readonly todos: TodoService
   ) {
     this.toolRuntime = new AgentToolRuntime(projects)
   }
@@ -191,13 +195,19 @@ export class HarnessManager {
 
     const systemPrompt = [basePrompt, skillsBlock].filter(Boolean).join('\n\n')
 
-    const tools = [...buildDreamAgentTools(), ...buildSkillTools()]
+    const tools = [
+      ...buildDreamAgentTools(),
+      ...buildSkillTools(),
+      ...buildWebTools(),
+      ...buildTodoTools()
+    ]
     const toolContext: DreamToolContext = {
       projectId,
       sessionId,
       runtime: this.toolRuntime,
       skills: piSkills,
-      skillService: this.skills
+      skillService: this.skills,
+      todoService: this.todos
     }
 
     // pi 0.82：不再传 env；工具上下文经 toolContext 注入
@@ -210,12 +220,16 @@ export class HarnessManager {
       systemPrompt,
       resources: { skills: piSkills },
       // 中等思考档：支持 reasoning 的模型会流式输出 thinking 块
-      thinkingLevel: 'medium'
-    })
-
-    harness.setStreamOptions({
-      cacheRetention: 'short',
-      metadata: { sessionId, projectId }
+      thinkingLevel: 'medium',
+      // 流式请求默认重试（pi-ai 默认 maxRetries=0）
+      streamOptions: {
+        cacheRetention: 'short',
+        metadata: { sessionId, projectId },
+        maxRetries: 5,
+        // 服务端要求过长等待时仍有上限，避免卡死
+        maxRetryDelayMs: 30_000,
+        timeoutMs: 180_000
+      }
     })
 
     return harness

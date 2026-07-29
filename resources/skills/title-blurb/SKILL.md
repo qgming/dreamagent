@@ -29,18 +29,18 @@ metadata:
 - **只写在节点/实体的 content 里**；系统会维护 `entityRefs` / `beatRefs`
 - **文章 content 必须是纯文本**，禁止任何 `[@…](beat|entity:…)`
 - 文章与图谱的关系写在元数据：
-  - `sourceBeatIds`：取材/覆盖的源节点（写完可据此 `update_beat_status`）
+  - `sourceBeatIds`：取材/覆盖的源节点（写完可据此 `edit({ path: "beats/{id}", status })`）
   - `entityRefs`：文中涉及的实体 id
   - `beatRefs`：文中涉及的其他节点 id
 
 ### 工具怎么用
 
-1. 摸结构：`get_project_outline` / `list_beats` / `list_entities` / `list_chapters`
-2. 读详情：`read_beat` / `read_entity` / `read_chapter`
+1. 摸结构：`list({ path: "outline" })` / `list({ path: "beats" })` / `list({ path: "entities" })` / `list({ path: "chapters" })`
+2. 读详情：`read({ path: "beats/{id}" })` / `read({ path: "entities/{id}" })` / `read({ path: "chapters/{id}" })`
    - 读节点/实体时看 **outbound（出链）/ inbound（入链）/ suggestedReads**，顺藤摸瓜，勿编造未读设定
-3. 写结构/设定：`create_beat` `update_beat` `create_entity` `update_entity`（content 里用双链互联）
-4. 写正文：`write_chapter` / `update_chapter`（纯文本 + 元数据关联）
-5. 推进节点：`update_beat_status`（文章产出后，源节点常 `outline→draft` 或 `draft→final`）
+3. 写结构/设定：`write({ type: "beat", ... })` `write/edit path=beats/{id}` `write({ type: "entity", ... })` `write/edit path=entities/{id}`（content 里用双链互联）
+4. 写正文：`write({ type: "chapter", ... })` / `write/edit path=chapters/{id}`（纯文本 + 元数据关联）
+5. 推进节点：`edit({ path: "beats/{id}", status })`（文章产出后，源节点常 `outline→draft` 或 `draft→final`）
 6. 技能：`list_skills` → `read_skill` → `read_skill_file`
 
 ### 硬约束
@@ -52,8 +52,8 @@ metadata:
 
 ## Inputs To Read
 
-- `get_project_outline`
-- 定位/卖点类 `read_beat`；主角等 `read_entity`（姓名勿与书名设定冲突）
+- `list({ path: "outline" })`
+- 定位/卖点类 `read({ path: "beats/{id}" })`；主角等 `read({ path: "entities/{id}" })`（姓名勿与书名设定冲突）
 - 用户平台与禁区
 - `references/title-blurb-formulas.md`
 
@@ -67,9 +67,9 @@ metadata:
 
 ## Write-Back
 
-- `create_beat` / `update_beat`，标题如「作品定位 / 书名简介」
+- `write({ type: "beat", ... })` / `write/edit path=beats/{id}`，标题如「作品定位 / 书名简介」
 - content 可含：书名候选、选定简介、标签；用双链挂 `[@主角](entity:…)`
-- **不要** `write_chapter` 把简介当成正文文章（除非用户要独立文案稿）
+- **不要** `write({ type: "chapter", ... })` 把简介当成正文文章（除非用户要独立文案稿）
 - 项目 `description` 若需改，说明让用户在项目设置保存，或仅在定位节点存一份
 
 ## Quality Gates

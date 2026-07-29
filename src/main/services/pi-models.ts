@@ -61,8 +61,9 @@ export class PiModelsService {
       reasoning: true,
       input: ['text'],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 128000,
-      maxTokens: 8192
+      contextWindow: 200000,
+      // 提高上限，避免 thinking + 工具参数阶段过早截断看起来像「思考中断」
+      maxTokens: 32768
     }
 
     const models = createModels() as MutableModels

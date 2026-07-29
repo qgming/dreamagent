@@ -10,6 +10,7 @@ import type {
   UiToolCallPart
 } from '@shared/ui-chat'
 import type { ProjectSnapshot } from '@shared/project-types'
+import type { TodoItem } from '@shared/todos'
 import { useProjectStore } from './project-store'
 
 /** 右侧详情目标 */
@@ -23,6 +24,8 @@ interface CreateState {
   session: SessionView | null
   /** 会话列表摘要（左栏） */
   sessionSummaries: SessionSummary[]
+  /** 当前会话 Agent 待办（todo 工具） */
+  todos: TodoItem[]
   rightPanelOpen: boolean
   /** true = 用户手动开关，右栏走 spring；false = 进页/会话恢复等硬切 */
   rightPanelAnimate: boolean
@@ -53,6 +56,7 @@ interface CreateState {
   setLeftBeatsOpen: (open: boolean) => void
   setLeftEntitiesOpen: (open: boolean) => void
   setLeftListTab: (tab: LeftListTab) => void
+  setTodos: (todos: TodoItem[]) => void
   /** 供 ExternalStore 直接改消息（一般不调用） */
   setMessages: (messages: UiChatMessage[]) => void
   reset: () => void
@@ -62,6 +66,7 @@ const initialState = {
   activeSessionId: null as string | null,
   session: null as SessionView | null,
   sessionSummaries: [] as SessionSummary[],
+  todos: [] as TodoItem[],
   rightPanelOpen: false,
   rightPanelAnimate: false,
   detailTarget: null as DetailTarget | null,
@@ -267,7 +272,8 @@ function ensureAgentSubscription(
                   : m.beatStatusUpdates
               }
             })
-          }
+          },
+          ...(event.todos ? { todos: event.todos } : {})
         })
         break
       }
@@ -322,9 +328,25 @@ function ensureAgentSubscription(
         void get().refreshSessionList()
         break
       }
-      case 'error':
-        set({ sending: false, runId: null, error: event.message })
+      case 'error': {
+        const sess = get().session
+        if (sess) {
+          set({
+            sending: false,
+            runId: null,
+            error: event.message,
+            session: {
+              ...sess,
+              messages: sess.messages.map((m) =>
+                m.status === 'streaming' ? { ...m, status: 'error' as const } : m
+              )
+            }
+          })
+        } else {
+          set({ sending: false, runId: null, error: event.message })
+        }
         break
+      }
       case 'aborted': {
         const sess = get().session
         if (sess) {
@@ -450,6 +472,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         detailTarget: null,
         rightPanelOpen: false,
         rightPanelAnimate: false,
+        todos: [],
         error: null
       })
       await get().refreshSessionList()
@@ -475,6 +498,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         detailTarget: chapId ? { type: 'chapter', id: chapId } : get().detailTarget,
         rightPanelOpen: chapId ? true : get().rightPanelOpen,
         rightPanelAnimate: false,
+        todos: [],
         error: null,
         sending: false,
         runId: null
@@ -674,6 +698,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
   setLeftBeatsOpen: (open) => set({ leftBeatsOpen: open }),
   setLeftEntitiesOpen: (open) => set({ leftEntitiesOpen: open }),
   setLeftListTab: (tab) => set({ leftListTab: tab }),
+  setTodos: (todos) => set({ todos }),
 
   setMessages: (messages) => {
     const sess = get().session

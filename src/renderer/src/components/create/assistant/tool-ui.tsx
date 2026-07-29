@@ -1,21 +1,14 @@
 /**
  * 工具调用卡片（assistant-ui ToolCallMessagePart）
- * - 单行：类型图标 + 名称 + 摘要 + 快捷操作 + 状态点
+ * - 单行：统一图标 + 英文工具名 + 摘要 + 状态点
  * - 点击整行打开模态窗查看完整输出 / 报错（内容可选中）
  */
 import { useMemo, useState } from 'react'
-import {
-  FileText,
-  CircleDot,
-  Users,
-  Trash2,
-  Plus,
-  Pencil,
-  Wrench
-} from 'lucide-react'
+import { CheckCircle2, Circle, CircleDot, FileText, ListTodo, Loader2, Minus, Users, Wrench } from 'lucide-react'
 import type { ToolCallMessagePartProps } from '@assistant-ui/react'
 import { useCreateStore } from '@/stores/create-store'
 import { cn } from '@/lib/utils'
+import type { TodoItem, TodoStatus } from '@shared/todos'
 import {
   Modal,
   ModalBody,
@@ -26,29 +19,8 @@ import {
 } from '@/components/ui/modal'
 import { Button } from '@/components/ui/button'
 
-const TOOL_LABELS: Record<string, string> = {
-  list_beats: '列出节点',
-  read_beat: '读取节点',
-  create_beat: '创建节点',
-  update_beat: '更新节点',
-  delete_beat: '删除节点',
-  list_entities: '列出实体',
-  read_entity: '读取实体',
-  create_entity: '创建实体',
-  update_entity: '更新实体',
-  delete_entity: '删除实体',
-  update_beat_status: '更新节点状态',
-  write_chapter: '写文章',
-  list_chapters: '列出文章',
-  read_chapter: '读取文章',
-  update_chapter: '更新文章',
-  delete_chapter: '删除文章',
-  get_project_outline: '项目节点'
-}
-
 type ToolVisualStatus = 'running' | 'done' | 'error'
 
-/** 状态点颜色：统一用小圆点 */
 const STATUS_DOT: Record<ToolVisualStatus, string> = {
   running: 'bg-sky-500 animate-pulse',
   done: 'bg-emerald-500',
@@ -61,18 +33,6 @@ const STATUS_LABEL: Record<ToolVisualStatus, string> = {
   error: '失败'
 }
 
-function toolIcon(name: string): React.ReactNode {
-  // 比思考过程卡片小一号；图标用前景黑/深色
-  const cls = 'size-3 shrink-0 text-foreground'
-  if (name.includes('delete')) return <Trash2 className={cls} />
-  if (name.includes('create') || name === 'write_chapter') return <Plus className={cls} />
-  if (name.includes('update')) return <Pencil className={cls} />
-  if (name.includes('entity')) return <Users className={cls} />
-  if (name.includes('beat') || name.includes('outline')) return <CircleDot className={cls} />
-  if (name.includes('chapter')) return <FileText className={cls} />
-  return <Wrench className={cls} />
-}
-
 function extractId(details: unknown, prefixes: string[]): string | null {
   if (!details || typeof details !== 'object') return null
   const d = details as Record<string, unknown>
@@ -80,6 +40,20 @@ function extractId(details: unknown, prefixes: string[]): string | null {
     d.data && typeof d.data === 'object' ? (d.data as Record<string, unknown>) : d
   const id = data.id
   if (typeof id === 'string' && prefixes.some((p) => id.startsWith(p))) return id
+  return null
+}
+
+/** 从 path 参数解析 id（新通用工具面） */
+function idFromPathArg(args: unknown, prefixes: string[]): string | null {
+  if (!args || typeof args !== 'object') return null
+  const pathVal = (args as { path?: unknown }).path
+  if (typeof pathVal !== 'string' || !pathVal.trim()) return null
+  const raw = pathVal.trim().replace(/\\/g, '/')
+  const seg = raw.includes(':')
+    ? raw.split(':').pop()
+    : raw.split('/').filter(Boolean).pop()
+  if (!seg) return null
+  if (prefixes.some((p) => seg.startsWith(p))) return seg
   return null
 }
 
@@ -100,6 +74,63 @@ function resolveVisualStatus(
   if (statusType === 'running') return 'running'
   if (statusType === 'incomplete' || details?.ok === false) return 'error'
   return 'done'
+}
+
+function extractTodos(details: unknown): TodoItem[] | null {
+  if (!details || typeof details !== 'object') return null
+  const d = details as Record<string, unknown>
+  const data = (d.data && typeof d.data === 'object' ? d.data : d) as Record<string, unknown>
+  if (!Array.isArray(data.todos)) return null
+  return data.todos.filter(
+    (t): t is TodoItem =>
+      Boolean(t) &&
+      typeof t === 'object' &&
+      typeof (t as TodoItem).id === 'string' &&
+      typeof (t as TodoItem).content === 'string' &&
+      typeof (t as TodoItem).status === 'string'
+  )
+}
+
+function TodoStatusIcon({ status }: { status: TodoStatus }): React.JSX.Element {
+  const cls = 'size-3.5 shrink-0'
+  switch (status) {
+    case 'completed':
+      return <CheckCircle2 className={cn(cls, 'text-emerald-500')} />
+    case 'in_progress':
+      return <Loader2 className={cn(cls, 'animate-spin text-sky-500')} />
+    case 'cancelled':
+      return <Minus className={cn(cls, 'text-muted-foreground')} />
+    default:
+      return <Circle className={cn(cls, 'text-muted-foreground')} />
+  }
+}
+
+function TodoListView({ todos }: { todos: TodoItem[] }): React.JSX.Element {
+  if (todos.length === 0) {
+    return <p className="text-sm text-muted-foreground">（空清单）</p>
+  }
+  return (
+    <ul className="space-y-1.5">
+      {todos.map((t) => (
+        <li
+          key={t.id}
+          className={cn(
+            'flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-1.5 text-sm',
+            t.status === 'completed' && 'opacity-70',
+            t.status === 'cancelled' && 'opacity-50 line-through'
+          )}
+        >
+          <TodoStatusIcon status={t.status} />
+          <div className="min-w-0 flex-1">
+            <p className="leading-snug">{t.content}</p>
+            <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+              {t.id} · {t.status}
+            </p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 export function ToolCallPart(props: ToolCallMessagePartProps): React.JSX.Element {
@@ -134,30 +165,43 @@ export function ToolCallPart(props: ToolCallMessagePartProps): React.JSX.Element
       : null
 
   const chapterId =
-    toolName === 'write_chapter' ||
-    toolName === 'update_chapter' ||
-    toolName === 'read_chapter'
-      ? extractId(details, ['chap_'])
-      : null
-  const beatId =
-    toolName.includes('beat') && !toolName.startsWith('list')
-      ? extractId(details, ['beat_']) ||
-        (typeof (args as { beatId?: string })?.beatId === 'string'
-          ? (args as { beatId: string }).beatId
-          : null)
-      : null
-  const entityId =
-    toolName.includes('entity') && !toolName.startsWith('list')
-      ? extractId(details, ['ent_']) ||
-        (typeof (args as { entityId?: string })?.entityId === 'string'
-          ? (args as { entityId: string }).entityId
-          : null)
-      : null
+    extractId(details, ['chap_']) ||
+    idFromPathArg(args, ['chap_']) ||
+    (typeof (args as { chapterId?: string })?.chapterId === 'string'
+      ? (args as { chapterId: string }).chapterId
+      : null)
 
-  const label = TOOL_LABELS[toolName] ?? toolName
-  const canOpenBeat = Boolean(beatId && !toolName.startsWith('delete'))
-  const canOpenEntity = Boolean(entityId && !toolName.startsWith('delete'))
-  const hasActions = Boolean(chapterId || canOpenBeat || canOpenEntity)
+  const beatId =
+    extractId(details, ['beat_']) ||
+    idFromPathArg(args, ['beat_']) ||
+    (typeof (args as { beatId?: string })?.beatId === 'string'
+      ? (args as { beatId: string }).beatId
+      : null)
+
+  const entityId =
+    extractId(details, ['ent_']) ||
+    idFromPathArg(args, ['ent_']) ||
+    (typeof (args as { entityId?: string })?.entityId === 'string'
+      ? (args as { entityId: string }).entityId
+      : null)
+
+  const isDelete =
+    toolName === 'delete' || toolName.startsWith('delete_') || toolName.includes('delete')
+
+  const canOpenChapter = Boolean(chapterId && !isDelete)
+  const canOpenBeat = Boolean(beatId && !isDelete)
+  const canOpenEntity = Boolean(entityId && !isDelete)
+  const hasActions = Boolean(canOpenChapter || canOpenBeat || canOpenEntity)
+
+  // 直接显示英文工具名
+  const label = toolName
+  const todoItems = toolName === 'todo' ? extractTodos(details) : null
+  const icon =
+    toolName === 'todo' ? (
+      <ListTodo className="size-3 shrink-0 text-foreground" />
+    ) : (
+      <Wrench className="size-3 shrink-0 text-foreground" />
+    )
 
   const resultPreview = useMemo(() => {
     if (visual === 'running') return null
@@ -169,43 +213,42 @@ export function ToolCallPart(props: ToolCallMessagePartProps): React.JSX.Element
 
   return (
     <>
-      {/*
-        比思考过程卡片再小一号：text-[11px] + size-3 图标
-      */}
-      <button
-        className={cn(
-          'my-1.5 flex w-full items-center gap-1.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-1.5 text-left text-[11px]',
-          'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35'
-        )}
-        onClick={() => setOpen(true)}
-        title="点击查看工具输出"
-        type="button"
-      >
-        {/* 左侧：类型图标 */}
-        {toolIcon(toolName)}
-
-        {/* 名称：黑色/前景色 */}
-        <span className="shrink-0 text-[11px] font-medium text-foreground">{label}</span>
-
-        {/* 摘要 */}
-        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
-          {summary}
-        </span>
-
-        {/* 最右侧：状态点（快捷操作仅在模态窗） */}
-        <span
-          className={cn('size-1.5 shrink-0 rounded-full', STATUS_DOT[visual])}
-          title={STATUS_LABEL[visual]}
-        />
-      </button>
+      <div className="my-1.5 w-full">
+        <button
+          className={cn(
+            'flex w-full items-center gap-1.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-1.5 text-left text-[11px]',
+            'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35',
+            todoItems && todoItems.length > 0 && 'rounded-b-none border-b-0'
+          )}
+          onClick={() => setOpen(true)}
+          title="点击查看工具输出"
+          type="button"
+        >
+          {icon}
+          <span className="shrink-0 font-mono text-[11px] font-medium text-foreground">
+            {label}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+            {summary}
+          </span>
+          <span
+            className={cn('size-1.5 shrink-0 rounded-full', STATUS_DOT[visual])}
+            title={STATUS_LABEL[visual]}
+          />
+        </button>
+        {todoItems && todoItems.length > 0 ? (
+          <div className="rounded-b-lg border border-border/70 border-t-border/40 bg-muted/20 px-3 py-2">
+            <TodoListView todos={todoItems} />
+          </div>
+        ) : null}
+      </div>
 
       <Modal open={open} onOpenChange={setOpen}>
-        {/* select-text 覆盖 body 的 user-select:none，允许复制 */}
         <ModalContent className="select-text" size="lg" showCloseButton>
           <ModalHeader>
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">{toolIcon(toolName)}</span>
-              <ModalTitle className="select-text">{label}</ModalTitle>
+              <span className="text-muted-foreground">{icon}</span>
+              <ModalTitle className="select-text font-mono text-base">{label}</ModalTitle>
               <span
                 className={cn('size-2 rounded-full', STATUS_DOT[visual])}
                 title={STATUS_LABEL[visual]}
@@ -237,6 +280,15 @@ export function ToolCallPart(props: ToolCallMessagePartProps): React.JSX.Element
               </div>
             </section>
 
+            {todoItems ? (
+              <section className="space-y-1.5">
+                <h3 className="text-xs font-medium text-muted-foreground">待办清单</h3>
+                <div className="rounded-xl border border-border bg-muted/30 p-3">
+                  <TodoListView todos={todoItems} />
+                </div>
+              </section>
+            ) : null}
+
             <section className="space-y-1.5">
               <h3 className="text-xs font-medium text-muted-foreground">输入参数</h3>
               <pre className="app-scrollbar max-h-48 overflow-auto rounded-xl border border-border bg-muted/30 p-3 text-[11px] leading-relaxed text-foreground select-text">
@@ -261,7 +313,7 @@ export function ToolCallPart(props: ToolCallMessagePartProps): React.JSX.Element
 
             {hasActions ? (
               <section className="flex flex-wrap gap-2 pt-1">
-                {chapterId ? (
+                {canOpenChapter && chapterId ? (
                   <Button
                     onClick={() => {
                       setOpen(false)
