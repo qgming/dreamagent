@@ -44,6 +44,8 @@ interface CreateState {
   deleteSession: (id: string) => Promise<void>
   refreshSessionList: () => Promise<void>
   sendMessage: (text: string) => Promise<void>
+  /** 重新生成：以 parentId（用户消息 id）为锚点 */
+  regenerateMessage: (userMessageId: string) => Promise<void>
   cancelTurn: () => Promise<void>
   pinBeat: (id: string) => Promise<void>
   unpinBeat: (id: string) => Promise<void>
@@ -132,6 +134,17 @@ function ensureAgentSubscription(
       case 'turn_start':
         set({ runId: event.runId, sending: true, error: null })
         break
+      case 'branch_reset': {
+        const sess = get().session
+        if (!sess) break
+        set({
+          session: {
+            ...sess,
+            messages: event.messages
+          }
+        })
+        break
+      }
       case 'user_message': {
         const sess = get().session
         if (!sess) break
@@ -601,6 +614,50 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         error: error instanceof Error ? error.message : String(error)
       })
       // 回读会话
+      try {
+        const view = await window.api.session.open(projectId, activeSessionId)
+        set({ session: view })
+      } catch {
+        // ignore
+      }
+    }
+  },
+
+  regenerateMessage: async (userMessageId) => {
+    ensureAgentSubscription(get, set)
+    const projectId = useProjectStore.getState().activeProjectId
+    const { activeSessionId, sending, session } = get()
+    if (!projectId || !activeSessionId || sending || !session) return
+    if (!userMessageId?.trim()) return
+
+    // 本地先截断到该用户消息（含该条），等 branch_reset / 流式事件再校准
+    const idx = session.messages.findIndex((m) => m.id === userMessageId)
+    if (idx < 0) {
+      set({ error: '找不到要重新生成的用户消息' })
+      return
+    }
+    // 保留到 userMessageId 为止（含），去掉其后所有
+    const truncated = session.messages.slice(0, idx + 1)
+
+    set({
+      sending: true,
+      error: null,
+      session: { ...session, messages: truncated }
+    })
+
+    try {
+      const { runId } = await window.api.agent.regenerateTurn({
+        projectId,
+        sessionId: activeSessionId,
+        userMessageId
+      })
+      set({ runId })
+    } catch (error) {
+      set({
+        sending: false,
+        runId: null,
+        error: error instanceof Error ? error.message : String(error)
+      })
       try {
         const view = await window.api.session.open(projectId, activeSessionId)
         set({ session: view })

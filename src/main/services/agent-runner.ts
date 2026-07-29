@@ -6,6 +6,7 @@ import { createId } from '../../shared/ids'
 import type { AgentStreamEvent } from '../../shared/agent-events'
 import type {
   AgentCancelTurnInput,
+  AgentRegenerateTurnInput,
   AgentStartTurnInput,
   AgentStartTurnResult,
   UiBeatStatusUpdate,
@@ -18,6 +19,10 @@ import type { ProjectService } from './project-service'
 import type { PiSessionService } from './pi-session-service'
 import type { LlmSettingsService } from './llm-settings-service'
 import type { HarnessManager } from './harness-manager'
+import type { AgentHarness } from '@earendil-works/pi-agent-core'
+import type { DreamToolContext } from './pi-agent-tools'
+
+type DreamHarness = AgentHarness<DreamToolContext>
 
 interface ActiveRun {
   runId: string
@@ -81,7 +86,41 @@ export class AgentRunner {
     if (!userMessage) throw new Error('消息不能为空')
 
     await this.llm.assertConfigured()
+    const run = this.beginRun(projectId, sessionId, sender)
 
+    // 异步执行，立即返回 runId
+    void this.executeTurn(run, userMessage).catch((error) => {
+      this.handleRunError(run, error)
+    })
+
+    return { runId: run.runId }
+  }
+
+  /**
+   * 重新生成：navigateTree 回到用户消息，截断其后分支，再 prompt 同一条用户文本
+   */
+  async regenerateTurn(
+    input: AgentRegenerateTurnInput,
+    sender: WebContents
+  ): Promise<AgentStartTurnResult> {
+    const { projectId, sessionId, userMessageId } = input
+    if (!userMessageId?.trim()) throw new Error('缺少用户消息 id')
+
+    await this.llm.assertConfigured()
+    const run = this.beginRun(projectId, sessionId, sender)
+
+    void this.executeRegenerate(run, userMessageId.trim()).catch((error) => {
+      this.handleRunError(run, error)
+    })
+
+    return { runId: run.runId }
+  }
+
+  private beginRun(
+    projectId: string,
+    sessionId: string,
+    sender: WebContents
+  ): ActiveRun {
     const key = this.sessionKey(projectId, sessionId)
     const prev = this.active.get(key)
     if (prev) {
@@ -92,24 +131,84 @@ export class AgentRunner {
     const runId = createId('run')
     const run: ActiveRun = { runId, projectId, sessionId, sender, aborted: false }
     this.active.set(key, run)
+    return run
+  }
 
-    // 异步执行，立即返回 runId
-    void this.executeTurn(run, userMessage).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('[agent-runner]', message)
-      if (!run.aborted) {
-        this.emit(sender, {
-          type: 'error',
-          projectId,
-          sessionId,
-          runId,
-          message
-        })
-      }
-      if (this.active.get(key)?.runId === runId) this.active.delete(key)
+  private handleRunError(run: ActiveRun, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[agent-runner]', message)
+    const key = this.sessionKey(run.projectId, run.sessionId)
+    if (!run.aborted) {
+      this.emit(run.sender, {
+        type: 'error',
+        projectId: run.projectId,
+        sessionId: run.sessionId,
+        runId: run.runId,
+        message
+      })
+    }
+    if (this.active.get(key)?.runId === run.runId) this.active.delete(key)
+  }
+
+  private async executeRegenerate(run: ActiveRun, userMessageId: string): Promise<void> {
+    const { projectId, sessionId, runId, sender } = run
+    const key = this.sessionKey(projectId, sessionId)
+
+    this.emit(sender, { type: 'turn_start', projectId, sessionId, runId })
+
+    // 每次 recreate，保证 system prompt / tools / model 最新
+    const harness = await this.harnesses.recreate(projectId, sessionId)
+
+    // 定位用户消息：navigateTree 对 user 会把 leaf 移到其 parent，并返回 editorText
+    const nav = (await harness.navigateTree(userMessageId)) as {
+      cancelled?: boolean
+      editorText?: string
+    }
+    if (nav?.cancelled) {
+      throw new Error('重新生成已取消')
+    }
+
+    // 截断后的会话投影同步到 UI（补回即将重发的用户消息，避免中间闪一下）
+    const truncated = await this.sessions.open(projectId, sessionId)
+
+    let userText = typeof nav?.editorText === 'string' ? nav.editorText.trim() : ''
+    if (!userText) {
+      const hit = truncated.messages.find((m) => m.id === userMessageId)
+      const part = hit?.parts?.find((p) => p.type === 'text')
+      userText = part && part.type === 'text' ? part.text.trim() : ''
+    }
+    if (!userText) {
+      throw new Error('无法读取原用户消息内容，重新生成失败')
+    }
+
+    const restoredUser: UiChatMessage = {
+      id: userMessageId,
+      role: 'user',
+      createdAt: new Date().toISOString(),
+      parts: [{ type: 'text', text: userText }],
+      status: 'complete'
+    }
+
+    this.emit(sender, {
+      type: 'branch_reset',
+      projectId,
+      sessionId,
+      runId,
+      messages: [...truncated.messages, restoredUser]
     })
 
-    return { runId }
+    if (run.aborted) {
+      this.emit(sender, { type: 'aborted', projectId, sessionId, runId })
+      if (this.active.get(key)?.runId === runId) this.active.delete(key)
+      return
+    }
+
+    // 不再重复发 user_message 乐观事件（已在 branch_reset 中）
+    await this.executeTurn(run, userText, {
+      harnessAlreadyCreated: true,
+      harness,
+      skipOptimisticUser: true
+    })
   }
 
   async cancelTurn(input: AgentCancelTurnInput): Promise<void> {
@@ -130,30 +229,46 @@ export class AgentRunner {
     })
   }
 
-  private async executeTurn(run: ActiveRun, userText: string): Promise<void> {
+  private async executeTurn(
+    run: ActiveRun,
+    userText: string,
+    options?: {
+      harnessAlreadyCreated?: boolean
+      skipOptimisticUser?: boolean
+      harness?: DreamHarness
+    }
+  ): Promise<void> {
     const { projectId, sessionId, runId, sender } = run
     const key = this.sessionKey(projectId, sessionId)
 
-    this.emit(sender, { type: 'turn_start', projectId, sessionId, runId })
+    // regenerate 路径已发过 turn_start
+    if (!options?.harnessAlreadyCreated) {
+      this.emit(sender, { type: 'turn_start', projectId, sessionId, runId })
+    }
 
     // 乐观用户消息（真实落盘由 harness.prompt 完成）
-    const userMsg: UiChatMessage = {
-      id: createId('msg'),
-      role: 'user',
-      createdAt: new Date().toISOString(),
-      parts: [{ type: 'text', text: userText }],
-      status: 'complete'
+    if (!options?.skipOptimisticUser) {
+      const userMsg: UiChatMessage = {
+        id: createId('msg'),
+        role: 'user',
+        createdAt: new Date().toISOString(),
+        parts: [{ type: 'text', text: userText }],
+        status: 'complete'
+      }
+      this.emit(sender, {
+        type: 'user_message',
+        projectId,
+        sessionId,
+        runId,
+        message: userMsg
+      })
     }
-    this.emit(sender, {
-      type: 'user_message',
-      projectId,
-      sessionId,
-      runId,
-      message: userMsg
-    })
 
     // 每次 recreate，保证 system prompt / tools / model 最新
-    const harness = await this.harnesses.recreate(projectId, sessionId)
+    const harness =
+      options?.harnessAlreadyCreated && options.harness
+        ? options.harness
+        : await this.harnesses.recreate(projectId, sessionId)
 
     const assistantMessageId = createId('msg')
     let assistantStarted = false

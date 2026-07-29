@@ -162,6 +162,9 @@ const sessionApi = {
 const agentApi = {
   startTurn: (input: AgentStartTurnInput): Promise<AgentStartTurnResult> =>
     ipcRenderer.invoke('agent:startTurn', input),
+  regenerateTurn: (
+    input: import('../shared/ui-chat').AgentRegenerateTurnInput
+  ): Promise<AgentStartTurnResult> => ipcRenderer.invoke('agent:regenerateTurn', input),
   cancelTurn: (input: AgentCancelTurnInput): Promise<void> =>
     ipcRenderer.invoke('agent:cancelTurn', input),
   listTools: (): Promise<AgentToolDefinition[]> => ipcRenderer.invoke('agent:listTools'),

@@ -1,98 +1,81 @@
 /**
- * 创作页中栏 Thread：assistant-ui 原语
- * - 流式 Markdown
- * - 思考/推理折叠块
- * - 工具调用卡片
- * - 新 Composer：技能/节点/实体上下文
+ * 创作页中栏 Thread（参考 @assistant-ui/thread 布局）
+ * - 新对话：欢迎语 + Composer 垂直居中
+ * - 有消息：消息列表 + 底部 sticky 悬浮 Composer
+ * - Streamdown / Reasoning / ToolGroup / Sources / 操作栏
  */
-import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef } from 'react'
 import {
+  Component,
+  type ErrorInfo,
+  type ReactNode,
+  useMemo
+} from 'react'
+import {
+  ActionBarPrimitive,
+  AuiIf,
   MessagePrimitive,
   ThreadPrimitive,
+  groupPartByType,
   useAuiState,
-  useMessagePartText
+  type AssistantState
 } from '@assistant-ui/react'
-import { CircleDot, Sparkles, Users, Zap } from 'lucide-react'
+import {
+  ArrowDownIcon,
+  CheckIcon,
+  CopyIcon,
+  RefreshCwIcon
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useCreateStore } from '@/stores/create-store'
 import { Button } from '@/components/ui/button'
-import { MarkdownText } from './markdown-text'
-import { ReasoningPart } from './reasoning'
-import { ToolCallPart } from './tool-ui'
-import { CreateComposer } from './CreateComposer'
+import { DirectiveText } from '@/components/assistant-ui/directive-text'
+import { StreamdownText } from '@/components/assistant-ui/streamdown-text'
 import {
-  contextKindLabel,
-  parseUserMessage,
-  type ComposerContextKind
-} from './composer-context'
+  Reasoning,
+  ReasoningContent,
+  ReasoningRoot,
+  ReasoningText,
+  ReasoningTrigger
+} from '@/components/assistant-ui/reasoning'
+import { ToolFallback } from '@/components/assistant-ui/tool-fallback'
+import {
+  ToolGroupContent,
+  ToolGroupRoot,
+  ToolGroupTrigger
+} from '@/components/assistant-ui/tool-group'
+import { Sources } from '@/components/assistant-ui/sources'
+import { MessageTiming } from '@/components/assistant-ui/message-timing'
+import { DotMatrix } from '@/components/assistant-ui/dot-matrix'
+import { UserMessageAttachments } from '@/components/assistant-ui/attachment'
+import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
+import { CreateComposer } from './CreateComposer'
 
-/** 助手消息 parts 组件映射 */
-const assistantPartsComponents = {
-  Text: MarkdownText,
-  Reasoning: ReasoningPart,
-  tools: { Fallback: ToolCallPart }
+/** 分组：连续 reasoning / tool-call */
+const assistantGroupBy = groupPartByType({
+  reasoning: ['group-reasoning'],
+  'tool-call': ['group-tool']
+})
+
+/**
+ * 新对话视图：无消息（加载中也当新对话，避免闪一下底部 dock）
+ * 对齐官方 thread 的 isNewChatView
+ */
+function isNewChatView(s: AssistantState): boolean {
+  return s.thread.messages.length === 0
 }
 
-function chipTone(kind: ComposerContextKind): string {
-  switch (kind) {
-    case 'skill':
-      return 'border-violet-500/30 bg-violet-500/15 text-violet-100'
-    case 'beat':
-      return 'border-sky-500/30 bg-sky-500/15 text-sky-100'
-    case 'entity':
-      return 'border-rose-500/30 bg-rose-500/15 text-rose-100'
-  }
-}
-
-function ChipGlyph({ kind }: { kind: ComposerContextKind }): React.JSX.Element {
-  const cls = 'size-3 shrink-0 opacity-90'
-  if (kind === 'skill') return <Zap className={cls} />
-  if (kind === 'beat') return <CircleDot className={cls} />
-  return <Users className={cls} />
-}
-
-/** 用户文本 part：解析上下文 chip + 可选中正文 */
-function UserTextPart(): React.JSX.Element | null {
-  const { text } = useMessagePartText()
-  const parsed = useMemo(() => parseUserMessage(text ?? ''), [text])
-
-  if (!text) return null
-
-  return (
-    <div className="select-text space-y-2" data-message-selectable>
-      {parsed.items.length > 0 ? (
-        <div className="flex flex-wrap gap-1">
-          {parsed.items.map((item) => (
-            <span
-              key={`${item.kind}:${item.id}`}
-              className={cn(
-                'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium',
-                chipTone(item.kind)
-              )}
-              title={`${contextKindLabel(item.kind)} ${item.label} (${item.id})`}
-            >
-              <ChipGlyph kind={item.kind} />
-              <span className="min-w-0 truncate">{item.label}</span>
-            </span>
-          ))}
-        </div>
-      ) : null}
-      <p className="whitespace-pre-wrap leading-relaxed select-text">{parsed.body}</p>
-    </div>
-  )
-}
-
-/** 用户气泡：可选择文本；展示上下文 chip */
+/** 用户气泡：浅色背景 + directive chip */
 function UserBubble(): React.JSX.Element {
   return (
-    <MessagePrimitive.Root className="flex justify-end">
+    <MessagePrimitive.Root className="flex flex-col items-end gap-1">
+      <UserMessageAttachments />
       <div
         className="max-w-[85%] rounded-2xl bg-primary px-3.5 py-2 text-sm text-primary-foreground select-text"
         data-message-selectable
       >
         <MessagePrimitive.Parts
           components={{
-            Text: UserTextPart
+            Text: DirectiveText
           }}
         />
       </div>
@@ -100,91 +83,125 @@ function UserBubble(): React.JSX.Element {
   )
 }
 
-function AssistantBubble(): React.JSX.Element {
-  // 有思考 / 工具卡片时撑满最大宽度，避免窄气泡挤压卡片
-  const expandWidth = useAuiState((s) => {
-    const parts = s.message.parts ?? s.message.content ?? []
-    return parts.some(
-      (p: { type?: string }) => p.type === 'tool-call' || p.type === 'reasoning'
-    )
-  })
-
+/** 助手操作栏：复制 + 重新生成 + 耗时（默认永久显示） */
+function AssistantActionBar(): React.JSX.Element {
   return (
-    <MessagePrimitive.Root className="flex w-full justify-start gap-2">
-      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
-        <Sparkles className="size-3.5 text-muted-foreground" />
-      </div>
-      <div
-        className={cn(
-          'min-w-0 rounded-2xl bg-muted/60 px-3.5 py-2 select-text',
-          expandWidth ? 'w-full max-w-[min(100%,42rem)]' : 'max-w-[85%]'
-        )}
-        data-message-selectable
+    <ActionBarPrimitive.Root
+      hideWhenRunning
+      autohide="never"
+      className="mt-1.5 flex items-center gap-0.5 text-muted-foreground"
+    >
+      <ActionBarPrimitive.Copy
+        className="group/copy flex size-7 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground data-[copied]:text-emerald-600"
+        title="复制"
+        aria-label="复制消息"
       >
-        <MessagePrimitive.Parts components={assistantPartsComponents} />
-      </div>
-    </MessagePrimitive.Root>
+        <CopyIcon className="size-3.5 group-data-[copied]/copy:hidden" />
+        <CheckIcon className="hidden size-3.5 group-data-[copied]/copy:inline" />
+      </ActionBarPrimitive.Copy>
+      <ActionBarPrimitive.Reload
+        className="flex size-7 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
+        title="重新生成"
+        aria-label="重新生成消息"
+      >
+        <RefreshCwIcon className="size-3.5" />
+      </ActionBarPrimitive.Reload>
+      <MessageTiming side="top" />
+    </ActionBarPrimitive.Root>
   )
 }
 
-function EmptyState(): React.JSX.Element {
-  const sendMessage = useCreateStore((s) => s.sendMessage)
-  const sending = useCreateStore((s) => s.sending)
-  const setLeftBeatsOpen = useCreateStore((s) => s.setLeftBeatsOpen)
-
+/** 流式指示：DotMatrix */
+function StreamingIndicator(): React.JSX.Element {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 px-6 py-10 text-center">
-      <div className="flex size-12 items-center justify-center rounded-2xl bg-muted">
-        <Sparkles className="size-6 text-muted-foreground" />
-      </div>
-      <div>
-        <h2 className="text-base font-semibold">开始一次创作</h2>
-        <p className="mt-1 max-w-xs text-xs text-muted-foreground">
-          描述你想写的内容。可用 + 附加技能 / 节点 / 实体；左侧可展开节点与实体。
-        </p>
-      </div>
-      <div className="flex flex-wrap justify-center gap-2">
-        <Button
-          disabled={sending}
-          onClick={() => void sendMessage('按节点写一篇文章')}
-          size="sm"
-          type="button"
-          variant="secondary"
-        >
-          写一篇：开场
-        </Button>
-        <Button
-          disabled={sending}
-          onClick={() => void sendMessage('查看项目节点，并列出主要节点与实体')}
-          size="sm"
-          type="button"
-          variant="secondary"
-        >
-          查看节点
-        </Button>
-        <Button
-          onClick={() => setLeftBeatsOpen(true)}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          展开节点
-        </Button>
-      </div>
+    <div className="flex items-center gap-2 py-1 text-muted-foreground">
+      <DotMatrix state="thinking" label="思考中" className="size-4" />
+      <span className="text-xs">思考中…</span>
     </div>
   )
 }
 
-function ScrollToBottom(): React.JSX.Element {
-  const ref = useRef<HTMLDivElement>(null)
-  const messages = useCreateStore((s) => s.session?.messages)
-  const sending = useCreateStore((s) => s.sending)
+/** AI 消息：无背景卡片、无头像 */
+function AssistantBubble(): React.JSX.Element {
+  return (
+    <MessagePrimitive.Root className="flex w-full flex-col items-start">
+      <div
+        className="flex w-full max-w-[min(100%,42rem)] min-w-0 flex-col gap-2 select-text"
+        data-message-selectable
+      >
+        <MessagePrimitive.GroupedParts groupBy={assistantGroupBy} indicator="empty">
+          {({ part, children }) => {
+            switch (part.type) {
+              case 'group-reasoning': {
+                const running = part.status?.type === 'running'
+                return (
+                  <ReasoningRoot variant="ghost" streaming={running} className="mb-0">
+                    <ReasoningTrigger active={running} />
+                    <ReasoningContent aria-busy={running}>
+                      <ReasoningText>{children}</ReasoningText>
+                    </ReasoningContent>
+                  </ReasoningRoot>
+                )
+              }
+              case 'group-tool': {
+                const running = part.status?.type === 'running'
+                const count = part.indices?.length ?? 1
+                return (
+                  <ToolGroupRoot variant="ghost" defaultOpen={running}>
+                    <ToolGroupTrigger count={count} active={running} />
+                    <ToolGroupContent>{children}</ToolGroupContent>
+                  </ToolGroupRoot>
+                )
+              }
+              case 'text':
+                return <StreamdownText />
+              case 'reasoning':
+                return <Reasoning {...part} />
+              case 'tool-call':
+                return part.toolUI ?? <ToolFallback {...part} />
+              case 'source':
+                return (
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Sources {...part} />
+                  </div>
+                )
+              case 'indicator':
+                return <StreamingIndicator />
+              default:
+                return null
+            }
+          }}
+        </MessagePrimitive.GroupedParts>
+      </div>
+      <AssistantActionBar />
+    </MessagePrimitive.Root>
+  )
+}
 
-  useEffect(() => {
-    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages, sending])
+/** 空对话欢迎：仅一句问候（对齐官方 How can I help you today?） */
+function ThreadWelcome(): React.JSX.Element {
+  return (
+    <div className="aui-thread-welcome mb-6 flex flex-col items-center px-4 text-center">
+      <h1 className="fade-in slide-in-from-bottom-1 animate-in fill-mode-both text-2xl font-semibold tracking-tight duration-200">
+        今天想写点什么？
+      </h1>
+    </div>
+  )
+}
 
-  return <div ref={ref} />
+/** 回到底部 */
+function ThreadScrollToBottom(): React.JSX.Element {
+  return (
+    <ThreadPrimitive.ScrollToBottom asChild>
+      <TooltipIconButton
+        tooltip="回到底部"
+        variant="outline"
+        className="absolute -top-12 z-10 self-center rounded-full border bg-background/90 p-3 shadow-sm backdrop-blur disabled:invisible dark:bg-background/80"
+      >
+        <ArrowDownIcon className="size-4" />
+      </TooltipIconButton>
+    </ThreadPrimitive.ScrollToBottom>
+  )
 }
 
 /** 捕获 assistant-ui 运行时错误，避免整页白屏 */
@@ -224,39 +241,86 @@ class ThreadErrorBoundary extends Component<
 }
 
 /**
- * 完整中栏：消息列表 + Composer
+ * 完整中栏：消息列表 + 居中/沉底 Composer
  */
 export function CreateAssistantThread(): React.JSX.Element {
   const error = useCreateStore((s) => s.error)
+  // 用 aui 状态驱动布局，避免和 store 消息不同步
+  const isEmpty = useAuiState(isNewChatView)
+
+  const rootStyle = useMemo(
+    () =>
+      ({
+        ['--thread-max-width' as string]: '42rem',
+        ['--composer-radius' as string]: '1.25rem',
+        ['--composer-padding' as string]: '8px'
+      }) as React.CSSProperties,
+    []
+  )
 
   return (
     <ThreadErrorBoundary>
-      <ThreadPrimitive.Root className="flex h-full min-h-0 flex-1 flex-col bg-background">
-        <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto app-scrollbar px-4 py-4">
-          <ThreadPrimitive.Empty>
-            <EmptyState />
-          </ThreadPrimitive.Empty>
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
-            <ThreadPrimitive.Messages>
-              {({ message }) =>
-                message.role === 'user' ? (
-                  <UserBubble key={message.id} />
-                ) : (
-                  <AssistantBubble key={message.id} />
-                )
-              }
-            </ThreadPrimitive.Messages>
-            <ScrollToBottom />
+      <ThreadPrimitive.Root
+        className="aui-root aui-thread-root flex h-full min-h-0 flex-1 flex-col bg-background"
+        style={rootStyle}
+      >
+        <ThreadPrimitive.Viewport
+          turnAnchor="top"
+          className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto app-scrollbar scroll-smooth"
+        >
+          <div
+            className={cn(
+              'mx-auto flex w-full max-w-[var(--thread-max-width)] flex-1 flex-col px-4 pt-4',
+              isEmpty && 'justify-center'
+            )}
+          >
+            {/* 新对话欢迎 */}
+            <AuiIf condition={isNewChatView}>
+              <ThreadWelcome />
+            </AuiIf>
+
+            {/* 消息列表（空时 empty:hidden） */}
+            <div
+              data-slot="aui_message-group"
+              className={cn(
+                'mb-4 flex flex-col gap-y-6 empty:hidden',
+                !isEmpty && 'pb-2'
+              )}
+            >
+              <ThreadPrimitive.Messages>
+                {({ message }) =>
+                  message.role === 'user' ? (
+                    <UserBubble key={message.id} />
+                  ) : (
+                    <AssistantBubble key={message.id} />
+                  )
+                }
+              </ThreadPrimitive.Messages>
+            </div>
+
+            {error ? (
+              <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive select-text">
+                {error}
+              </div>
+            ) : null}
+
+            {/*
+              官方 thread 模式：
+              - 空对话：footer 在 justify-center 列内，Composer 居中
+              - 有消息：footer sticky bottom + mt-auto，悬浮在视口底部
+            */}
+            <ThreadPrimitive.ViewportFooter
+              className={cn(
+                'aui-thread-viewport-footer relative flex flex-col gap-3 overflow-visible pb-4 md:pb-5',
+                !isEmpty &&
+                  'sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background/95 to-background/0 pt-6'
+              )}
+            >
+              {!isEmpty ? <ThreadScrollToBottom /> : null}
+              <CreateComposer centered={isEmpty} />
+            </ThreadPrimitive.ViewportFooter>
           </div>
         </ThreadPrimitive.Viewport>
-
-        {error ? (
-          <div className="border-t border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive select-text">
-            {error}
-          </div>
-        ) : null}
-
-        <CreateComposer />
       </ThreadPrimitive.Root>
     </ThreadErrorBoundary>
   )

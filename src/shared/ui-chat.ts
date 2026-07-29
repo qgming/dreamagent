@@ -94,6 +94,14 @@ export interface AgentStartTurnResult {
   runId: string
 }
 
+/** 重新生成：以某条用户消息为锚点，截断其后分支并再跑一轮 */
+export interface AgentRegenerateTurnInput {
+  projectId: string
+  sessionId: string
+  /** 用户消息 id（assistant 的 parentId / session entry id） */
+  userMessageId: string
+}
+
 export interface AgentCancelTurnInput {
   projectId: string
   sessionId: string

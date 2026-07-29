@@ -17,6 +17,14 @@ export type AgentStreamEvent =
       runId: string
     }
   | {
+      /** 重新生成前：会话分支已截断，用最新投影替换 UI 消息列表 */
+      type: 'branch_reset'
+      projectId: string
+      sessionId: string
+      runId: string
+      messages: UiChatMessage[]
+    }
+  | {
       type: 'user_message'
       projectId: string
       sessionId: string

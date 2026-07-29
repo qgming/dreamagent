@@ -1,364 +1,268 @@
 /**
- * 创作页 Composer（assistant-ui ComposerPrimitive）
- * - 顶部 chip：技能 / 节点 / 实体
- * - 底部：+ 菜单选择上下文 + Input + Send/Cancel
- * - 发送时把上下文拼进文本；用户气泡再解析展示
+ * 创作页 Composer（对齐官方 thread 简洁布局）
+ * - 附件 + 输入 + 底栏操作
+ * - 加号右侧 @ 按钮触发提及
+ * - 无 Enter 提示小字
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   ComposerPrimitive,
-  useAui
+  unstable_useMentionAdapter,
+  useAui,
+  type Unstable_MentionCategory
 } from '@assistant-ui/react'
 import {
+  ArrowUp,
+  AtSign,
   CircleDot,
-  Plus,
-  Send,
+  FileText,
+  Sparkles,
   Square,
   Users,
-  X,
+  Wrench,
   Zap
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu'
 import { useCreateStore } from '@/stores/create-store'
 import { useProjectStore } from '@/stores/project-store'
 import { skillLabel, useSkillsStore } from '@/stores/skills-store'
+import { AGENT_TOOL_DEFINITIONS } from '@shared/agent-tools'
 import {
-  formatComposerPayload,
-  type ComposerContextItem,
-  type ComposerContextKind
-} from './composer-context'
+  ComposerAddAttachment,
+  ComposerAttachments
+} from '@/components/assistant-ui/attachment'
+import { ComposerTriggerPopover } from '@/components/assistant-ui/composer-trigger-popover'
+import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
 
-function chipClass(kind: ComposerContextKind): string {
-  switch (kind) {
-    case 'skill':
-      return 'border-violet-500/25 bg-violet-500/10 text-violet-700 dark:text-violet-300'
-    case 'beat':
-      return 'border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-300'
-    case 'entity':
-      return 'border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300'
-  }
+const MENTION_ICONS = {
+  skill: Zap,
+  beat: CircleDot,
+  entity: Users,
+  tool: Wrench,
+  article: FileText
 }
 
-function ChipIcon({ kind }: { kind: ComposerContextKind }): React.JSX.Element {
-  const cls = 'size-3 shrink-0 opacity-80'
-  if (kind === 'skill') return <Zap className={cls} />
-  if (kind === 'beat') return <CircleDot className={cls} />
-  return <Users className={cls} />
-}
-
-function ContextChip({
-  item,
-  onRemove
-}: {
-  item: ComposerContextItem
-  onRemove: () => void
-}): React.JSX.Element {
-  return (
-    <span
-      className={cn(
-        'inline-flex max-w-[12rem] items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium',
-        chipClass(item.kind)
-      )}
-      title={`${item.label} (${item.id})`}
-    >
-      <ChipIcon kind={item.kind} />
-      <span className="min-w-0 truncate">{item.label}</span>
-      <button
-        className="rounded-full p-0.5 opacity-70 hover:bg-black/5 hover:opacity-100 dark:hover:bg-white/10"
-        type="button"
-        onClick={onRemove}
-        aria-label={`移除 ${item.label}`}
-      >
-        <X className="size-3" />
-      </button>
-    </span>
-  )
+export type CreateComposerProps = {
+  /** 空对话居中态 */
+  centered?: boolean
+  className?: string
 }
 
 /**
- * 自定义发送区：ComposerPrimitive + 上下文 chip
+ * 自定义发送区
  */
-export function CreateComposer(): React.JSX.Element {
+export function CreateComposer({
+  centered = false,
+  className
+}: CreateComposerProps): React.JSX.Element {
   const aui = useAui()
   const sending = useCreateStore((s) => s.sending)
   const cancelTurn = useCreateStore((s) => s.cancelTurn)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
 
   const snapshot = useProjectStore((s) => s.snapshot)
   const skills = useSkillsStore((s) => s.skills)
   const loadSkills = useSkillsStore((s) => s.load)
   const skillsStatus = useSkillsStore((s) => s.status)
 
-  const [items, setItems] = useState<ComposerContextItem[]>([])
-  const [pickerQuery, setPickerQuery] = useState('')
-
   useEffect(() => {
     if (skillsStatus === 'idle') void loadSkills()
   }, [skillsStatus, loadSkills])
 
-  const enabledSkills = useMemo(
-    () => skills.filter((s) => s.enabled && s.isValid),
-    [skills]
-  )
+  const categories = useMemo((): Unstable_MentionCategory[] => {
+    const enabledSkills = skills.filter((s) => s.enabled && s.isValid)
+    const beats =
+      snapshot?.index.beats.order
+        .map((id) => snapshot.beats[id])
+        .filter(Boolean)
+        .map((b) => ({
+          id: b.id,
+          type: 'beat',
+          label: b.title || '未命名节点',
+          description: b.status,
+          icon: 'beat'
+        })) ?? []
 
-  const beats = useMemo(() => {
-    if (!snapshot) return []
-    return snapshot.index.beats.order
-      .map((id) => snapshot.beats[id])
-      .filter(Boolean)
-      .map((b) => ({ id: b.id, label: b.title || '未命名节点' }))
-  }, [snapshot])
+    const entities =
+      snapshot?.index.entities.order
+        .map((id) => snapshot.entities[id])
+        .filter(Boolean)
+        .map((e) => ({
+          id: e.id,
+          type: 'entity',
+          label: e.name || '未命名实体',
+          description: e.status,
+          icon: 'entity'
+        })) ?? []
 
-  const entities = useMemo(() => {
-    if (!snapshot) return []
-    return snapshot.index.entities.order
-      .map((id) => snapshot.entities[id])
-      .filter(Boolean)
-      .map((e) => ({ id: e.id, label: e.name || '未命名实体' }))
-  }, [snapshot])
+    const articles =
+      snapshot?.index.chapters?.order
+        .map((id) => snapshot.chapters[id])
+        .filter(Boolean)
+        .map((c) => ({
+          id: c.id,
+          type: 'article',
+          label: c.title || '未命名文章',
+          description: c.status,
+          icon: 'article'
+        })) ?? []
 
-  const q = pickerQuery.trim().toLowerCase()
-  const filteredSkills = useMemo(() => {
-    if (!q) return enabledSkills.slice(0, 40)
-    return enabledSkills
-      .filter((s) => {
-        const hay = `${skillLabel(s)} ${s.name} ${s.description}`.toLowerCase()
-        return hay.includes(q)
-      })
-      .slice(0, 40)
-  }, [enabledSkills, q])
+    const tools = AGENT_TOOL_DEFINITIONS.map((t) => ({
+      id: t.name,
+      type: 'tool',
+      label: t.name,
+      description: t.description,
+      icon: 'tool'
+    }))
 
-  const filteredBeats = useMemo(() => {
-    if (!q) return beats.slice(0, 40)
-    return beats.filter((b) => b.label.toLowerCase().includes(q)).slice(0, 40)
-  }, [beats, q])
+    return [
+      {
+        id: 'skill',
+        label: '技能',
+        items: enabledSkills.map((s) => ({
+          id: s.id,
+          type: 'skill',
+          label: skillLabel(s),
+          description: s.description || s.name,
+          icon: 'skill'
+        }))
+      },
+      { id: 'beat', label: '节点', items: beats },
+      { id: 'entity', label: '实体', items: entities },
+      { id: 'tool', label: '工具', items: tools },
+      { id: 'article', label: '文章', items: articles }
+    ]
+  }, [skills, snapshot])
 
-  const filteredEntities = useMemo(() => {
-    if (!q) return entities.slice(0, 40)
-    return entities.filter((e) => e.label.toLowerCase().includes(q)).slice(0, 40)
-  }, [entities, q])
+  const mention = unstable_useMentionAdapter({
+    categories,
+    includeModelContextTools: false,
+    iconMap: MENTION_ICONS,
+    fallbackIcon: Sparkles
+  })
 
-  const addItem = (item: ComposerContextItem): void => {
-    setItems((prev) => {
-      if (prev.some((x) => x.kind === item.kind && x.id === item.id)) return prev
-      return [...prev, item]
-    })
-  }
+  /** 在光标处插入 @，打开提及 popover */
+  const insertMentionTrigger = useCallback(() => {
+    const el = inputRef.current
+    const stateText = aui.composer.getState().text ?? ''
+    let next = stateText
+    let caret = stateText.length
 
-  const removeItem = (kind: ComposerContextKind, id: string): void => {
-    setItems((prev) => prev.filter((x) => !(x.kind === kind && x.id === id)))
-  }
+    if (el) {
+      const start = el.selectionStart ?? stateText.length
+      const end = el.selectionEnd ?? start
+      const before = stateText.slice(0, start)
+      const after = stateText.slice(end)
+      // 前面不是空白/行首时补一个空格，避免粘成单词
+      const needSpace = before.length > 0 && !/\s$/.test(before)
+      const insert = `${needSpace ? ' ' : ''}@`
+      next = before + insert + after
+      caret = before.length + insert.length
+    } else {
+      const needSpace = stateText.length > 0 && !/\s$/.test(stateText)
+      next = `${stateText}${needSpace ? ' ' : ''}@`
+      caret = next.length
+    }
 
-  const handleSendClick = (): void => {
-    if (sending) return
-    const text = aui.composer.getState().text ?? ''
-    if (!text.trim() && items.length === 0) return
-    const payload = formatComposerPayload(text, items)
-    // 先写入拼装后的全文，再交给 assistant-ui 发送管线
-    aui.composer.setText(payload)
+    aui.composer.setText(next)
+    // 等 React 回填 value 后再聚焦并设光标，触发 popover 检测
     queueMicrotask(() => {
+      const target = inputRef.current
+      if (!target) return
+      target.focus()
       try {
-        aui.composer.send()
-      } finally {
-        setItems([])
+        target.setSelectionRange(caret, caret)
+      } catch {
+        // ignore
       }
+      // 再派一次 input 事件，确保 trigger 检测读到最新文本
+      target.dispatchEvent(new Event('input', { bubbles: true }))
     })
-  }
+  }, [aui])
 
   return (
-    <div className="border-t border-border px-3 py-3">
-      <ComposerPrimitive.Root className="mx-auto flex w-full max-w-2xl flex-col gap-2 rounded-2xl border border-border bg-card px-3 py-2 shadow-sm">
-        {items.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            {items.map((item) => (
-              <ContextChip
-                key={`${item.kind}:${item.id}`}
-                item={item}
-                onRemove={() => removeItem(item.kind, item.id)}
-              />
-            ))}
-          </div>
-        ) : null}
-
-        <ComposerPrimitive.Input
-          className="max-h-40 min-h-[40px] w-full resize-none bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground select-text"
-          placeholder="描述你想写的内容… 可用 + 附加技能 / 节点 / 实体"
-          rows={1}
-          // 关闭默认 Enter 提交，统一走拼装发送（含上下文 chip）
-          submitMode="none"
-          onKeyDown={(e) => {
-            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-            e.preventDefault()
-            handleSendClick()
-          }}
-        />
-
-        <div className="flex items-center gap-1.5 pb-0.5">
-          <DropdownMenu
-            onOpenChange={(open) => {
-              if (!open) setPickerQuery('')
-            }}
+    <div className={cn('w-full', className)}>
+      <ComposerPrimitive.Unstable_TriggerPopoverRoot>
+        <ComposerPrimitive.Root className="aui-composer-root relative mx-auto flex w-full max-w-[var(--thread-max-width,42rem)] flex-col">
+          <div
+            data-slot="aui_composer-shell"
+            className={cn(
+              'flex w-full flex-col gap-2 rounded-[var(--composer-radius,1.25rem)] border border-border/60 bg-card/95 p-2 shadow-sm backdrop-blur-md transition-[border-color,box-shadow]',
+              'focus-within:border-border focus-within:shadow-md',
+              'dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 dark:shadow-none',
+              centered && 'shadow-md'
+            )}
           >
-            <DropdownMenuTrigger asChild>
-              <Button
-                className="size-8 rounded-full"
-                size="icon-sm"
-                title="附加上下文"
-                type="button"
-                variant="ghost"
-              >
-                <Plus className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-72" side="top">
-              <DropdownMenuLabel>附加到本条消息</DropdownMenuLabel>
-              <div className="px-2 pb-2">
-                <input
-                  className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
-                  placeholder="筛选…"
-                  value={pickerQuery}
-                  onChange={(e) => setPickerQuery(e.target.value)}
-                  onKeyDown={(e) => e.stopPropagation()}
-                />
+            <ComposerAttachments />
+
+            <ComposerPrimitive.Input
+              ref={inputRef}
+              className="aui-composer-input max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-sm outline-none placeholder:text-muted-foreground/80 select-text"
+              placeholder="发送消息…"
+              rows={1}
+              autoFocus={centered}
+              enterKeyHint="send"
+              aria-label="消息输入"
+            />
+
+            <div className="relative flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-0.5">
+                <ComposerAddAttachment />
+                <TooltipIconButton
+                  tooltip="附加技能 / 节点 / 实体…"
+                  side="top"
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+                  aria-label="插入 @"
+                  onClick={insertMentionTrigger}
+                >
+                  <AtSign className="size-4" />
+                </TooltipIconButton>
               </div>
-              <DropdownMenuSeparator />
 
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <Zap className="size-3.5 text-violet-500" />
-                  技能
-                  <span className="ml-auto text-[10px] text-muted-foreground">
-                    {enabledSkills.length}
-                  </span>
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-64 w-64 overflow-y-auto">
-                  {filteredSkills.length === 0 ? (
-                    <div className="px-2 py-3 text-xs text-muted-foreground">
-                      无已启用技能。请到技能库开启。
-                    </div>
-                  ) : (
-                    filteredSkills.map((s) => (
-                      <DropdownMenuItem
-                        key={s.id}
-                        onSelect={() =>
-                          addItem({
-                            kind: 'skill',
-                            id: s.id,
-                            label: skillLabel(s)
-                          })
-                        }
-                      >
-                        <span className="min-w-0 flex-1 truncate">{skillLabel(s)}</span>
-                        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                          {s.name}
-                        </span>
-                      </DropdownMenuItem>
-                    ))
+              {sending ? (
+                <button
+                  className={cn(
+                    'flex size-8 shrink-0 items-center justify-center rounded-full',
+                    'bg-muted text-foreground hover:bg-muted/80'
                   )}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <CircleDot className="size-3.5 text-sky-500" />
-                  节点
-                  <span className="ml-auto text-[10px] text-muted-foreground">
-                    {beats.length}
-                  </span>
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-64 w-64 overflow-y-auto">
-                  {filteredBeats.length === 0 ? (
-                    <div className="px-2 py-3 text-xs text-muted-foreground">
-                      暂无节点
-                    </div>
-                  ) : (
-                    filteredBeats.map((b) => (
-                      <DropdownMenuItem
-                        key={b.id}
-                        onSelect={() =>
-                          addItem({ kind: 'beat', id: b.id, label: b.label })
-                        }
-                      >
-                        <span className="min-w-0 flex-1 truncate">{b.label}</span>
-                      </DropdownMenuItem>
-                    ))
-                  )}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <Users className="size-3.5 text-rose-500" />
-                  实体
-                  <span className="ml-auto text-[10px] text-muted-foreground">
-                    {entities.length}
-                  </span>
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-64 w-64 overflow-y-auto">
-                  {filteredEntities.length === 0 ? (
-                    <div className="px-2 py-3 text-xs text-muted-foreground">
-                      暂无实体
-                    </div>
-                  ) : (
-                    filteredEntities.map((e) => (
-                      <DropdownMenuItem
-                        key={e.id}
-                        onSelect={() =>
-                          addItem({ kind: 'entity', id: e.id, label: e.label })
-                        }
-                      >
-                        <span className="min-w-0 flex-1 truncate">{e.label}</span>
-                      </DropdownMenuItem>
-                    ))
-                  )}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <span className="min-w-0 flex-1 text-[11px] text-muted-foreground">
-            Enter 发送 · Shift+Enter 换行
-          </span>
-
-          {sending ? (
-            <button
-              className={cn(
-                'flex size-9 shrink-0 items-center justify-center rounded-full',
-                'bg-muted text-foreground hover:bg-muted/80'
+                  onClick={() => void cancelTurn()}
+                  title="停止"
+                  type="button"
+                >
+                  <Square className="size-3.5 fill-current" />
+                </button>
+              ) : (
+                <ComposerPrimitive.Send asChild>
+                  <button
+                    className={cn(
+                      'flex size-8 shrink-0 items-center justify-center rounded-full',
+                      'bg-primary text-primary-foreground hover:bg-primary/90',
+                      'disabled:opacity-40'
+                    )}
+                    title="发送"
+                    type="button"
+                  >
+                    <ArrowUp className="size-4" />
+                  </button>
+                </ComposerPrimitive.Send>
               )}
-              onClick={() => void cancelTurn()}
-              title="停止"
-              type="button"
-            >
-              <Square className="size-3.5 fill-current" />
-            </button>
-          ) : (
-            <button
-              className={cn(
-                'flex size-9 shrink-0 items-center justify-center rounded-full',
-                'bg-primary text-primary-foreground hover:bg-primary/90',
-                'disabled:opacity-40'
-              )}
-              title="发送"
-              type="button"
-              onClick={handleSendClick}
-            >
-              <Send className="size-4" />
-            </button>
-          )}
-        </div>
-      </ComposerPrimitive.Root>
+            </div>
+          </div>
+
+          <ComposerTriggerPopover
+            char="@"
+            {...mention}
+            iconMap={MENTION_ICONS}
+            fallbackIcon={Sparkles}
+            backLabel="返回"
+            emptyCategoriesLabel="暂无可用分类"
+            emptyItemsLabel="无匹配项"
+          />
+        </ComposerPrimitive.Root>
+      </ComposerPrimitive.Unstable_TriggerPopoverRoot>
     </div>
   )
 }

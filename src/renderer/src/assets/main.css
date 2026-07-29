@@ -1,5 +1,10 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import 'tw-shimmer';
+
+/* Streamdown 控件 / caret 需要扫描 node_modules 中的 Tailwind class */
+@source '../../../../node_modules/streamdown/dist/*.js';
+@source '../../../../node_modules/@assistant-ui/react-streamdown/dist/*.js';
 
 /* ============================
  * 设计 Token（对齐 polaragent 风格）
@@ -26,6 +31,24 @@
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
+
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  }
+
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+    to {
+      height: 0;
+    }
+  }
 }
 
 /* 浅色主题 */
@@ -177,3 +200,7 @@ button {
   scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-width: thin;
 }
+
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));

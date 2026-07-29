@@ -118,6 +118,9 @@ export interface SessionApi {
 
 export interface AgentApi {
   startTurn: (input: AgentStartTurnInput) => Promise<AgentStartTurnResult>
+  regenerateTurn: (
+    input: import('../shared/ui-chat').AgentRegenerateTurnInput
+  ) => Promise<AgentStartTurnResult>
   cancelTurn: (input: AgentCancelTurnInput) => Promise<void>
   listTools: () => Promise<AgentToolDefinition[]>
   onEvent: (handler: (event: AgentStreamEvent) => void) => () => void
