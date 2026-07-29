@@ -14,10 +14,14 @@ import type {
   Beat,
   BeatStatus,
   Chapter,
+  CreateBeatInput,
+  CreateEntityInput,
   Entity,
   EntityStatus,
   ProjectSnapshot,
-  UpdateChapterInput
+  UpdateBeatInput,
+  UpdateChapterInput,
+  UpdateEntityInput
 } from '../../shared/project-types'
 import type { ProjectService } from './project-service'
 
@@ -95,10 +99,30 @@ export class AgentToolRuntime {
           return await this.listBeats(projectId, input.status as BeatStatus | undefined)
         case 'read_beat':
           return await this.readBeat(projectId, String(input.beatId ?? ''))
+        case 'create_beat':
+          return await this.createBeat(projectId, input as unknown as CreateBeatInput)
+        case 'update_beat':
+          return await this.updateBeatTool(
+            projectId,
+            String(input.beatId ?? ''),
+            input as UpdateBeatInput
+          )
+        case 'delete_beat':
+          return await this.deleteBeat(projectId, String(input.beatId ?? ''))
         case 'list_entities':
           return await this.listEntities(projectId, input.status as EntityStatus | undefined)
         case 'read_entity':
           return await this.readEntity(projectId, String(input.entityId ?? ''))
+        case 'create_entity':
+          return await this.createEntity(projectId, input as unknown as CreateEntityInput)
+        case 'update_entity':
+          return await this.updateEntityTool(
+            projectId,
+            String(input.entityId ?? ''),
+            input as UpdateEntityInput
+          )
+        case 'delete_entity':
+          return await this.deleteEntity(projectId, String(input.entityId ?? ''))
         case 'update_beat_status':
           return await this.updateBeatStatus(
             projectId,
@@ -117,6 +141,8 @@ export class AgentToolRuntime {
             String(input.chapterId ?? ''),
             input as UpdateChapterInput
           )
+        case 'delete_chapter':
+          return await this.deleteChapter(projectId, String(input.chapterId ?? ''))
         case 'get_project_outline':
           return await this.getOutline(projectId)
         default:
@@ -253,6 +279,144 @@ export class AgentToolRuntime {
     }
   }
 
+  private async createBeat(
+    projectId: string,
+    input: CreateBeatInput
+  ): Promise<AgentToolResult<Beat>> {
+    const title = String(input?.title ?? '').trim()
+    if (!title) return { ok: false, summary: '缺少 title', error: 'invalid_input' }
+    const before = await this.projects.openProject(projectId)
+    const beforeIds = new Set(Object.keys(before.beats))
+    const snap = await this.projects.createBeat(projectId, {
+      title,
+      content: input.content,
+      status: input.status,
+      afterId: input.afterId
+    })
+    const created = Object.values(snap.beats).find((b) => b && !beforeIds.has(b.id))
+    return {
+      ok: true,
+      summary: `已创建节点「${created?.title ?? title}」`,
+      data: created
+    }
+  }
+
+  private async updateBeatTool(
+    projectId: string,
+    beatId: string,
+    patch: UpdateBeatInput
+  ): Promise<AgentToolResult<Beat>> {
+    if (!beatId) return { ok: false, summary: '缺少 beatId', error: 'missing_beatId' }
+    const clean: UpdateBeatInput = {}
+    if (typeof patch.title === 'string') clean.title = patch.title
+    if (typeof patch.content === 'string') clean.content = patch.content
+    if (patch.status) clean.status = patch.status
+    if (Object.keys(clean).length === 0) {
+      return { ok: false, summary: '没有可更新的字段', error: 'empty_patch' }
+    }
+    const snap = await this.projects.updateBeat(projectId, beatId, clean)
+    const beat = snap.beats[beatId]
+    return {
+      ok: true,
+      summary: `已更新节点「${beat?.title ?? beatId}」`,
+      data: beat
+    }
+  }
+
+  private async deleteBeat(
+    projectId: string,
+    beatId: string
+  ): Promise<AgentToolResult<{ id: string; title?: string }>> {
+    if (!beatId) return { ok: false, summary: '缺少 beatId', error: 'missing_beatId' }
+    const snap = await this.projects.openProject(projectId)
+    const beat = snap.beats[beatId]
+    if (!beat) return { ok: false, summary: `节点不存在: ${beatId}`, error: 'not_found' }
+    const title = beat.title
+    await this.projects.deleteBeat(projectId, beatId)
+    return {
+      ok: true,
+      summary: `已删除节点「${title || '未命名'}」`,
+      data: { id: beatId, title }
+    }
+  }
+
+  private async createEntity(
+    projectId: string,
+    input: CreateEntityInput
+  ): Promise<AgentToolResult<Entity>> {
+    const name = String(input?.name ?? '').trim()
+    if (!name) return { ok: false, summary: '缺少 name', error: 'invalid_input' }
+    const before = await this.projects.openProject(projectId)
+    const beforeIds = new Set(Object.keys(before.entities))
+    const snap = await this.projects.createEntity(projectId, {
+      name,
+      content: input.content,
+      status: input.status
+    })
+    const created = Object.values(snap.entities).find((e) => e && !beforeIds.has(e.id))
+    return {
+      ok: true,
+      summary: `已创建实体「${created?.name ?? name}」`,
+      data: created
+    }
+  }
+
+  private async updateEntityTool(
+    projectId: string,
+    entityId: string,
+    patch: UpdateEntityInput
+  ): Promise<AgentToolResult<Entity>> {
+    if (!entityId) return { ok: false, summary: '缺少 entityId', error: 'missing_entityId' }
+    const clean: UpdateEntityInput = {}
+    if (typeof patch.name === 'string') clean.name = patch.name
+    if (typeof patch.content === 'string') clean.content = patch.content
+    if (patch.status) clean.status = patch.status
+    if (Object.keys(clean).length === 0) {
+      return { ok: false, summary: '没有可更新的字段', error: 'empty_patch' }
+    }
+    const snap = await this.projects.updateEntity(projectId, entityId, clean)
+    const entity = snap.entities[entityId]
+    return {
+      ok: true,
+      summary: `已更新实体「${entity?.name ?? entityId}」`,
+      data: entity
+    }
+  }
+
+  private async deleteEntity(
+    projectId: string,
+    entityId: string
+  ): Promise<AgentToolResult<{ id: string; name?: string }>> {
+    if (!entityId) return { ok: false, summary: '缺少 entityId', error: 'missing_entityId' }
+    const snap = await this.projects.openProject(projectId)
+    const entity = snap.entities[entityId]
+    if (!entity) return { ok: false, summary: `实体不存在: ${entityId}`, error: 'not_found' }
+    const name = entity.name
+    await this.projects.deleteEntity(projectId, entityId)
+    return {
+      ok: true,
+      summary: `已删除实体「${name || '未命名'}」`,
+      data: { id: entityId, name }
+    }
+  }
+
+  private async deleteChapter(
+    projectId: string,
+    chapterId: string
+  ): Promise<AgentToolResult<{ id: string; title?: string }>> {
+    if (!chapterId) return { ok: false, summary: '缺少 chapterId', error: 'missing_chapterId' }
+    const snap = await this.projects.openProject(projectId)
+    const chapter = snap.chapters[chapterId]
+    if (!chapter) return { ok: false, summary: `文章不存在: ${chapterId}`, error: 'not_found' }
+    const title = chapter.title
+    await this.projects.deleteChapter(projectId, chapterId)
+    return {
+      ok: true,
+      summary: `已删除文章「${title || '未命名'}」`,
+      data: { id: chapterId, title }
+    }
+  }
+
   private async updateBeatStatus(
     projectId: string,
     beatId: string,
@@ -384,6 +548,6 @@ export class AgentToolRuntime {
         status: b.status,
         summary: plainSummary(b.content)
       }))
-    return { ok: true, summary: `大纲 ${items.length} 项`, data: items }
+    return { ok: true, summary: `节点 ${items.length} 项`, data: items }
   }
 }

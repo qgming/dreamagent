@@ -11,14 +11,19 @@ import { CreatePage } from '@/pages/CreatePage'
 import { EntitiesPage } from '@/pages/EntitiesPage'
 import { HomePage, useBootstrapLibrary } from '@/pages/HomePage'
 import { OverviewPage } from '@/pages/OverviewPage'
-import { useProjectStore } from '@/stores/project-store'
+import { useProjectStore, type ProjectView } from '@/stores/project-store'
+
+const SIDEBAR_SPRING = { type: 'spring' as const, stiffness: 380, damping: 36 }
 
 /**
- * 应用外壳：标题栏 + 侧边栏（带动画） + 主内容区
- * 进入「创作」时沉浸式自动收起侧栏，离开时恢复
+ * 应用外壳：标题栏 + 侧边栏 + 主内容区
+ * - 进/出「创作」：侧栏硬切（无动画），创作页立刻占满
+ * - 标题栏手动折叠：保留弹簧动画
  */
 export function AppShell(): React.JSX.Element {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  /** true = 手动折叠可用 spring；false = 进/出创作硬切，不走 motion */
+  const [animateSidebar, setAnimateSidebar] = useState(true)
   const collapsedBeforeCreate = useRef(false)
   const wasCreate = useRef(false)
   useTheme()
@@ -31,49 +36,66 @@ export function AppShell(): React.JSX.Element {
 
   const isCreate = Boolean(activeProjectId && snapshot && projectView === 'create')
 
-  useEffect(() => {
-    if (isCreate && !wasCreate.current) {
-      // 进入创作：记下当前开合，强制收起
-      setSidebarCollapsed((prev) => {
-        collapsedBeforeCreate.current = prev
-        return true
-      })
+  // 进/出创作：同帧硬切侧栏，不排队 spring
+  if (isCreate !== wasCreate.current) {
+    if (isCreate) {
+      collapsedBeforeCreate.current = sidebarCollapsed
       wasCreate.current = true
-    } else if (!isCreate && wasCreate.current) {
-      setSidebarCollapsed(collapsedBeforeCreate.current)
+      setAnimateSidebar(false)
+      if (!sidebarCollapsed) setSidebarCollapsed(true)
+    } else {
       wasCreate.current = false
+      setAnimateSidebar(false)
+      const restore = collapsedBeforeCreate.current
+      if (sidebarCollapsed !== restore) setSidebarCollapsed(restore)
     }
-  }, [isCreate])
+  }
 
   useEffect(() => {
     const title = snapshot?.meta.title ? `${snapshot.meta.title} - 造梦师` : '造梦师'
     void window.api?.window?.setTitle?.(title)
   }, [snapshot?.meta.title])
 
+  const handleToggleSidebar = (): void => {
+    setAnimateSidebar(true)
+    setSidebarCollapsed((value) => !value)
+  }
+
+  const showSidebar = !sidebarCollapsed
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <TitleBar
+        onToggleSidebar={handleToggleSidebar}
         sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
       />
 
       <div className="flex min-h-0 flex-1">
-        <AnimatePresence initial={false}>
-          {!sidebarCollapsed ? (
-            <motion.div
-              animate={{ width: 240, opacity: 1 }}
-              className="h-full shrink-0 overflow-hidden"
-              exit={{ width: 0, opacity: 0 }}
-              initial={{ width: 0, opacity: 0 }}
-              key="sidebar"
-              transition={{ type: 'spring', stiffness: 380, damping: 36 }}
-            >
-              <div className="h-full w-60">
-                <AppSidebar />
-              </div>
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
+        {/* 进/出创作：DOM 硬切，创作区立刻最大宽度 */}
+        {!animateSidebar ? (
+          showSidebar ? (
+            <div className="h-full w-60 shrink-0 overflow-hidden">
+              <AppSidebar />
+            </div>
+          ) : null
+        ) : (
+          <AnimatePresence initial={false}>
+            {showSidebar ? (
+              <motion.div
+                animate={{ width: 240, opacity: 1 }}
+                className="h-full shrink-0 overflow-hidden"
+                exit={{ width: 0, opacity: 0 }}
+                initial={{ width: 0, opacity: 0 }}
+                key="sidebar"
+                transition={SIDEBAR_SPRING}
+              >
+                <div className="h-full w-60">
+                  <AppSidebar />
+                </div>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        )}
 
         <main className="relative min-w-0 flex-1 overflow-hidden bg-background">
           {error ? (
@@ -82,19 +104,11 @@ export function AppShell(): React.JSX.Element {
             </div>
           ) : null}
 
-          {activeProjectId && snapshot ? (
-            projectView === 'overview' ? (
-              <OverviewPage />
-            ) : projectView === 'beats' ? (
-              <BeatsPage />
-            ) : projectView === 'entities' ? (
-              <EntitiesPage />
-            ) : (
-              <CreatePage />
-            )
-          ) : (
-            <HomePage />
-          )}
+          <MainView
+            activeProjectId={activeProjectId}
+            hasSnapshot={Boolean(snapshot)}
+            projectView={projectView}
+          />
         </main>
       </div>
 
@@ -103,4 +117,22 @@ export function AppShell(): React.JSX.Element {
       <ConfirmDialog />
     </div>
   )
+}
+
+function MainView({
+  activeProjectId,
+  projectView,
+  hasSnapshot
+}: {
+  activeProjectId: string | null
+  projectView: ProjectView
+  hasSnapshot: boolean
+}): React.JSX.Element {
+  if (activeProjectId && hasSnapshot) {
+    if (projectView === 'overview') return <OverviewPage />
+    if (projectView === 'beats') return <BeatsPage />
+    if (projectView === 'entities') return <EntitiesPage />
+    return <CreatePage />
+  }
+  return <HomePage />
 }

@@ -78,6 +78,9 @@ function refsFromContent(
  * 项目服务：节点 / 实体 / 章节；双链 beat↔entity / beat↔beat / entity↔entity / chapter
  */
 export class ProjectService {
+  /** 按项目目录串行化 index.json 写入，避免 Windows 并发 rename ENOENT */
+  private indexWriteQueues = new Map<string, Promise<void>>()
+
   constructor(private readonly library: LibraryService) {}
 
   paths(dirPath: string) {
@@ -88,7 +91,10 @@ export class ProjectService {
       entities: path.join(dirPath, 'entities'),
       documents: path.join(dirPath, 'documents'),
       chapters: path.join(dirPath, 'documents', 'chapters'),
-      conversations: path.join(dirPath, 'conversations')
+      /** @deprecated 旧会话 JSON；新会话走 pi sessions */
+      conversations: path.join(dirPath, 'conversations'),
+      /** pi JsonlSessionRepo 根目录 */
+      sessions: path.join(dirPath, 'sessions')
     }
   }
 
@@ -133,12 +139,27 @@ export class ProjectService {
     const clean: ProjectIndex = {
       version: INDEX_SCHEMA_VERSION,
       beats: { order: [...index.beats.order] },
-      entities: { order: [...index.entities.order] },
+      entities: { order: [...(index.entities?.order ?? [])] },
       chapters: { order: [...(index.chapters?.order ?? [])] },
       conversations: { order: [...(index.conversations?.order ?? [])] },
       updatedAt: nowIso()
     }
-    await writeJsonAtomic(this.paths(dirPath).index, clean)
+
+    const prev = this.indexWriteQueues.get(dirPath) ?? Promise.resolve()
+    const next = prev
+      .catch(() => undefined)
+      .then(async () => {
+        await writeJsonAtomic(this.paths(dirPath).index, clean)
+      })
+    this.indexWriteQueues.set(
+      dirPath,
+      next.finally(() => {
+        if (this.indexWriteQueues.get(dirPath) === next) {
+          this.indexWriteQueues.delete(dirPath)
+        }
+      })
+    )
+    await next
   }
 
   private async touchProject(dirPath: string): Promise<ProjectMeta> {
@@ -214,6 +235,7 @@ export class ProjectService {
     await ensureDir(p.documents)
     await ensureDir(p.chapters)
     await ensureDir(p.conversations)
+    await ensureDir(p.sessions)
 
     const ts = nowIso()
     const meta: ProjectMeta = {
@@ -257,6 +279,7 @@ export class ProjectService {
     const p = this.paths(dirPath)
     await ensureDir(p.chapters)
     await ensureDir(p.conversations)
+    await ensureDir(p.sessions)
 
     // v1 → v2：节点状态语义变更（旧 draft 与新 draft 撞名，必须按版本一次性迁移）
     const needsV2Migration = (meta.version ?? 1) < 2
@@ -353,8 +376,20 @@ export class ProjectService {
       await this.writeMeta(dirPath, meta)
     }
 
-    // 保证 index 含 chapters/conversations 字段写回
-    await this.writeIndex(dirPath, index)
+    // 仅当 order 有变化时才写回 index，减少 Windows 上 index.json 并发 rename 冲突
+    const prevRaw = await readJsonFile<ProjectIndex>(this.paths(dirPath).index)
+    const orderChanged =
+      !prevRaw ||
+      JSON.stringify(prevRaw.beats?.order ?? []) !== JSON.stringify(index.beats.order) ||
+      JSON.stringify(prevRaw.entities?.order ?? []) !== JSON.stringify(index.entities.order) ||
+      JSON.stringify(prevRaw.chapters?.order ?? []) !== JSON.stringify(index.chapters.order) ||
+      JSON.stringify(prevRaw.conversations?.order ?? []) !==
+        JSON.stringify(index.conversations?.order ?? []) ||
+      (prevRaw.version ?? 0) < INDEX_SCHEMA_VERSION
+
+    if (orderChanged || needsV2Migration) {
+      await this.writeIndex(dirPath, index)
+    }
 
     return { meta, index, beats, entities, chapters, conversationSummaries, dirPath }
   }
@@ -833,6 +868,22 @@ export class ProjectService {
       }
     }
 
+    await this.writeIndex(dirPath, index)
+    await this.touchProject(dirPath)
+    return this.loadSnapshot(dirPath)
+  }
+
+  async reorderChapters(projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    const index = await this.readIndex(dirPath)
+
+    const currentSet = new Set(index.chapters.order)
+    const nextSet = new Set(orderedIds)
+    if (currentSet.size !== nextSet.size || [...currentSet].some((id) => !nextSet.has(id))) {
+      throw new Error('重排失败：文章有序 id 列表与当前集合不一致')
+    }
+
+    index.chapters.order = [...orderedIds]
     await this.writeIndex(dirPath, index)
     await this.touchProject(dirPath)
     return this.loadSnapshot(dirPath)

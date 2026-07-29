@@ -40,16 +40,15 @@ export function AppSidebar(): React.JSX.Element {
 
   const toggleProjectExpanded = useProjectStore((s) => s.toggleProjectExpanded)
   const openProject = useProjectStore((s) => s.openProject)
-  const setProjectView = useProjectStore((s) => s.setProjectView)
   const openCreateProjectModal = useProjectStore((s) => s.openCreateProjectModal)
   const openEditProjectModal = useProjectStore((s) => s.openEditProjectModal)
   const deleteProject = useProjectStore((s) => s.deleteProject)
   const closeProject = useProjectStore((s) => s.closeProject)
 
   const openView = (projectId: string, view: ProjectView): void => {
+    // 同步切换：进创作立刻满宽，不排队 transition
     if (snapshot?.meta.id === projectId) {
       useProjectStore.setState({ activeProjectId: projectId, projectView: view })
-      setProjectView(view)
       return
     }
     void openProject(projectId, view)

@@ -1,6 +1,5 @@
 /**
- * Agent 内置工具契约（UI / runtime / 未来 LLM 共用）
- * 本阶段由 placeholder-runner 启发式调用，不接真实 LLM。
+ * Agent 内置工具契约（UI / runtime / LLM 共用）
  */
 
 import type { BeatStatus, ChapterStatus, EntityStatus } from './project-types'
@@ -8,13 +7,20 @@ import type { BeatStatus, ChapterStatus, EntityStatus } from './project-types'
 export type AgentToolName =
   | 'list_beats'
   | 'read_beat'
+  | 'create_beat'
+  | 'update_beat'
+  | 'delete_beat'
   | 'list_entities'
   | 'read_entity'
+  | 'create_entity'
+  | 'update_entity'
+  | 'delete_entity'
   | 'update_beat_status'
   | 'write_chapter'
   | 'list_chapters'
   | 'read_chapter'
   | 'update_chapter'
+  | 'delete_chapter'
   | 'get_project_outline'
 
 export interface AgentToolDefinition {
@@ -91,7 +97,21 @@ export interface AgentToolResult<T = unknown> {
   error?: string
 }
 
-/** 供 agent:listTools 与未来 LLM 使用 */
+/** 图谱会变更的写工具（runner 用于刷新 snapshot） */
+export const GRAPH_MUTATING_TOOLS: ReadonlySet<AgentToolName> = new Set([
+  'create_beat',
+  'update_beat',
+  'delete_beat',
+  'create_entity',
+  'update_entity',
+  'delete_entity',
+  'update_beat_status',
+  'write_chapter',
+  'update_chapter',
+  'delete_chapter'
+])
+
+/** 供 agent:listTools 与 LLM 使用 */
 export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'list_beats',
@@ -115,6 +135,57 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
       type: 'object',
       properties: {
         beatId: { type: 'string', description: '节点 id' }
+      },
+      required: ['beatId']
+    }
+  },
+  {
+    name: 'create_beat',
+    description:
+      '新建节点。可写标题、正文（可含 [@名](entity:id) / [@名](beat:id) 双链）、初始状态。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '节点标题' },
+        content: { type: 'string', description: '节点正文，可含双链' },
+        status: {
+          type: 'string',
+          enum: ['idea', 'outline', 'draft', 'final'],
+          description: '默认 idea'
+        },
+        afterId: {
+          type: 'string',
+          description: '插入到该节点之后；省略则追加末尾'
+        }
+      },
+      required: ['title']
+    }
+  },
+  {
+    name: 'update_beat',
+    description:
+      '更新节点标题/正文/状态。改写 content 时双链会自动解析为 entityRefs/beatRefs。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        beatId: { type: 'string' },
+        title: { type: 'string' },
+        content: { type: 'string' },
+        status: {
+          type: 'string',
+          enum: ['idea', 'outline', 'draft', 'final']
+        }
+      },
+      required: ['beatId']
+    }
+  },
+  {
+    name: 'delete_beat',
+    description: '删除节点。会清理其他内容中的相关双链引用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        beatId: { type: 'string' }
       },
       required: ['beatId']
     }
@@ -144,8 +215,53 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     }
   },
   {
+    name: 'create_entity',
+    description: '新建实体（人物/地点/物品等设定）。可写名称、正文（可含双链）、状态。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '实体名称' },
+        content: { type: 'string', description: '设定正文，可含双链' },
+        status: {
+          type: 'string',
+          enum: ['active', 'dormant', 'archived'],
+          description: '默认 active'
+        }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'update_entity',
+    description: '更新实体名称/正文/状态。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entityId: { type: 'string' },
+        name: { type: 'string' },
+        content: { type: 'string' },
+        status: {
+          type: 'string',
+          enum: ['active', 'dormant', 'archived']
+        }
+      },
+      required: ['entityId']
+    }
+  },
+  {
+    name: 'delete_entity',
+    description: '删除实体。会清理其他内容中的相关双链引用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entityId: { type: 'string' }
+      },
+      required: ['entityId']
+    }
+  },
+  {
     name: 'update_beat_status',
-    description: '更新节点写作成熟度（idea→outline→draft→final）。不改写节点正文。',
+    description: '仅更新节点写作成熟度（idea→outline→draft→final）。不改写节点正文。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -161,7 +277,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'write_chapter',
     description:
-      '创建或覆盖文章（documents/chapters）。content 必须是纯正文，禁止双链语法；关联节点/实体通过 sourceBeatIds、entityRefs、beatRefs 元数据传递，供后续判断状态。不回写 beat.content。',
+      '创建或覆盖文章（documents/chapters）。content 必须是纯正文，禁止双链语法；关联节点/实体通过 sourceBeatIds、entityRefs、beatRefs 元数据传递。不回写 beat.content。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -211,8 +327,19 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     }
   },
   {
+    name: 'delete_chapter',
+    description: '删除文章。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chapterId: { type: 'string' }
+      },
+      required: ['chapterId']
+    }
+  },
+  {
     name: 'get_project_outline',
-    description: '返回有序节点大纲（标题 + 状态 + 内容摘要），便于规划多章写作。',
+    description: '返回有序节点列表（标题 + 状态 + 内容摘要），便于规划多章写作。',
     inputSchema: { type: 'object', properties: {} }
   }
 ]

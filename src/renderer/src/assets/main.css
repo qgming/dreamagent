@@ -122,7 +122,8 @@ textarea,
 }
 
 button {
-  font: inherit;
+  /* 只继承字体族；勿用 font 缩写，否则会盖掉按钮上的 text-sm / font-medium 等 utility */
+  font-family: inherit;
   /* 标题栏按钮不可拖拽 */
   -webkit-app-region: no-drag;
 }

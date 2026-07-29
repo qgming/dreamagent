@@ -13,28 +13,73 @@ export async function pathExists(target: string): Promise<boolean> {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 /**
- * 原子写入 JSON：先写临时文件再替换，避免半截文件
+ * 原子写入 JSON。
+ * Windows 上 rename 覆盖/并发极易 EPERM/ENOENT，采用：
+ * 写临时文件 → 多次 rename 重试 → 仍失败则 copyFile 覆盖 + 删临时文件。
  */
 export async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
   const dir = path.dirname(filePath)
   await fs.mkdir(dir, { recursive: true })
 
-  const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`)
+  const tmp = path.join(
+    dir,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
+  )
   const text = `${JSON.stringify(data, null, 2)}\n`
-
   await fs.writeFile(tmp, text, 'utf-8')
 
-  try {
-    // Windows 上目标存在时 rename 可能失败，先尝试直接替换
-    await fs.rename(tmp, filePath)
-  } catch {
+  const maxAttempts = 8
+  let lastError: unknown
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      await fs.unlink(filePath)
-    } catch {
-      // 目标本就不存在
+      // Node 16.9+：Windows 上 overwrite 更稳
+      await fs.rename(tmp, filePath)
+      return
+    } catch (error) {
+      lastError = error
+      const code = (error as NodeJS.ErrnoException).code
+      // 目标被占用 / 并发写入：稍等再试
+      if (
+        code === 'EPERM' ||
+        code === 'EACCES' ||
+        code === 'EEXIST' ||
+        code === 'EBUSY' ||
+        code === 'ENOENT'
+      ) {
+        try {
+          await fs.unlink(filePath)
+        } catch {
+          // 目标本就不存在或仍被锁
+        }
+        await sleep(15 * (attempt + 1))
+        continue
+      }
+      break
     }
-    await fs.rename(tmp, filePath)
+  }
+
+  // 回退：直接覆盖写目标，再删临时文件
+  try {
+    await fs.copyFile(tmp, filePath)
+    try {
+      await fs.unlink(tmp)
+    } catch {
+      // 忽略临时文件清理失败
+    }
+    return
+  } catch (copyError) {
+    try {
+      await fs.unlink(tmp)
+    } catch {
+      // 忽略
+    }
+    throw copyError ?? lastError
   }
 }
 

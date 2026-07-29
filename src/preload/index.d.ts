@@ -1,14 +1,19 @@
 import type { AgentToolDefinition } from '../shared/agent-tools'
+import type { AgentStreamEvent } from '../shared/agent-events'
+import type { LlmPublicSettings, LlmSettingsPatch } from '../shared/llm-settings'
 import type {
-  AgentRunTurnInput,
-  AgentRunTurnResult,
+  AgentCancelTurnInput,
+  AgentStartTurnInput,
+  AgentStartTurnResult,
+  CreateSessionInput,
+  SessionSummary,
+  SessionView,
+  UpdateSessionInput
+} from '../shared/ui-chat'
+import type {
   Chapter,
-  Conversation,
-  ConversationMessage,
-  ConversationSummary,
   CreateBeatInput,
   CreateChapterInput,
-  CreateConversationInput,
   CreateEntityInput,
   CreateProjectInput,
   ProjectMeta,
@@ -17,7 +22,6 @@ import type {
   ReorderBeatsInput,
   UpdateBeatInput,
   UpdateChapterInput,
-  UpdateConversationInput,
   UpdateEntityInput
 } from '../shared/project-types'
 
@@ -76,36 +80,40 @@ export interface ProjectApi {
   ) => Promise<ProjectSnapshot>
   deleteChapter: (projectId: string, chapterId: string) => Promise<ProjectSnapshot>
   getChapter: (projectId: string, chapterId: string) => Promise<Chapter>
+  reorderChapters: (projectId: string, orderedIds: string[]) => Promise<ProjectSnapshot>
 }
 
-export interface ConversationApi {
-  list: (projectId: string) => Promise<ConversationSummary[]>
-  create: (projectId: string, input?: CreateConversationInput) => Promise<Conversation>
-  open: (projectId: string, conversationId: string) => Promise<Conversation>
-  appendMessages: (
-    projectId: string,
-    conversationId: string,
-    messages: ConversationMessage[]
-  ) => Promise<Conversation>
+export interface SessionApi {
+  list: (projectId: string) => Promise<SessionSummary[]>
+  create: (projectId: string, input?: CreateSessionInput) => Promise<SessionView>
+  open: (projectId: string, sessionId: string) => Promise<SessionView>
   update: (
     projectId: string,
-    conversationId: string,
-    patch: UpdateConversationInput
-  ) => Promise<Conversation>
-  delete: (projectId: string, conversationId: string) => Promise<void>
+    sessionId: string,
+    patch: UpdateSessionInput
+  ) => Promise<SessionView>
+  delete: (projectId: string, sessionId: string) => Promise<void>
 }
 
 export interface AgentApi {
-  runTurn: (input: AgentRunTurnInput) => Promise<AgentRunTurnResult>
+  startTurn: (input: AgentStartTurnInput) => Promise<AgentStartTurnResult>
+  cancelTurn: (input: AgentCancelTurnInput) => Promise<void>
   listTools: () => Promise<AgentToolDefinition[]>
+  onEvent: (handler: (event: AgentStreamEvent) => void) => () => void
+}
+
+export interface SettingsApi {
+  getLlm: () => Promise<LlmPublicSettings>
+  setLlm: (patch: LlmSettingsPatch) => Promise<LlmPublicSettings>
 }
 
 export interface DreamAgentApi {
   app: AppApi
   window: WindowApi
   project: ProjectApi
-  conversation: ConversationApi
+  session: SessionApi
   agent: AgentApi
+  settings: SettingsApi
 }
 
 declare global {

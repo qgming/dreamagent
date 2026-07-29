@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
   GripVertical,
@@ -26,6 +26,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import {
+  SortableHandle,
+  SortableItem,
+  SortableList
+} from '@/components/ui/sortable-list'
 import { BACKLINK_CHIP } from '@/lib/mention-styles'
 import { cn } from '@/lib/utils'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
@@ -93,20 +98,22 @@ export function EntitiesPage(): React.JSX.Element {
               暂无实体。人物、地点、物品都可建在这里。
             </p>
           ) : (
-            <ul className="space-y-0.5">
-              {entities.map((entity, index) => (
+            <SortableList
+              className="space-y-0.5"
+              ids={entities.map((e) => e.id)}
+              onReorder={handleReorder}
+            >
+              {entities.map((entity) => (
                 <EntityListRow
                   active={selectedEntityId === entity.id}
                   entity={entity}
-                  index={index}
                   key={entity.id}
                   onDelete={() => handleDelete(entity)}
                   onEdit={() => openEditEntityModal(entity.id)}
-                  onReorder={handleReorder}
                   onSelect={() => setSelectedEntityId(entity.id)}
                 />
               ))}
-            </ul>
+            </SortableList>
           )}
         </div>
       </div>
@@ -127,63 +134,33 @@ export function EntitiesPage(): React.JSX.Element {
 
 function EntityListRow({
   entity,
-  index,
   active,
   onSelect,
   onEdit,
-  onDelete,
-  onReorder
+  onDelete
 }: {
   entity: Entity
-  index: number
   active: boolean
   onSelect: () => void
   onEdit: () => void
   onDelete: () => void
-  onReorder: (from: number, to: number) => void
 }): React.JSX.Element {
-  const [dragging, setDragging] = useState(false)
-  const [over, setOver] = useState(false)
   const archived = entity.status === 'archived'
 
   return (
-    <li
+    <SortableItem
       className={cn(
         'group flex items-center gap-0.5 rounded-md px-1 py-1 text-sm transition-colors',
         active
           ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
           : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-        archived && !active && 'opacity-55',
-        over && 'ring-1 ring-ring/50',
-        dragging && 'opacity-50'
+        archived && !active && 'opacity-55'
       )}
-      draggable
-      onDragEnd={() => {
-        setDragging(false)
-        setOver(false)
-      }}
-      onDragLeave={() => setOver(false)}
-      onDragOver={(e: DragEvent) => {
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
-        setOver(true)
-      }}
-      onDragStart={(e: DragEvent) => {
-        setDragging(true)
-        e.dataTransfer.effectAllowed = 'move'
-        e.dataTransfer.setData('text/plain', String(index))
-      }}
-      onDrop={(e: DragEvent) => {
-        e.preventDefault()
-        setOver(false)
-        const from = Number(e.dataTransfer.getData('text/plain'))
-        if (Number.isNaN(from) || from === index) return
-        onReorder(from, index)
-      }}
+      id={entity.id}
     >
-      <span className="flex size-5 shrink-0 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing">
+      <SortableHandle className="size-5 shrink-0 text-muted-foreground">
         <GripVertical className="size-3.5" />
-      </span>
+      </SortableHandle>
       <button className="min-w-0 flex-1 truncate text-left" onClick={onSelect} type="button">
         {entity.name || '未命名实体'}
       </button>
@@ -220,7 +197,7 @@ function EntityListRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </span>
-    </li>
+    </SortableItem>
   )
 }
 

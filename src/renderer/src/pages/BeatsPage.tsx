@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
   GripVertical,
@@ -26,6 +26,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import {
+  SortableHandle,
+  SortableItem,
+  SortableList
+} from '@/components/ui/sortable-list'
 import { BACKLINK_CHIP } from '@/lib/mention-styles'
 import { cn } from '@/lib/utils'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
@@ -92,20 +97,22 @@ export function BeatsPage(): React.JSX.Element {
               暂无节点，点击上方新建
             </p>
           ) : (
-            <ul className="space-y-0.5">
-              {beats.map((beat, index) => (
+            <SortableList
+              className="space-y-0.5"
+              ids={beats.map((b) => b.id)}
+              onReorder={handleReorder}
+            >
+              {beats.map((beat) => (
                 <BeatListRow
                   active={selectedBeatId === beat.id}
                   beat={beat}
-                  index={index}
                   key={beat.id}
                   onDelete={() => handleDelete(beat)}
                   onEdit={() => openEditBeatModal(beat.id)}
-                  onReorder={handleReorder}
                   onSelect={() => setSelectedBeatId(beat.id)}
                 />
               ))}
-            </ul>
+            </SortableList>
           )}
         </div>
       </div>
@@ -126,61 +133,30 @@ export function BeatsPage(): React.JSX.Element {
 
 function BeatListRow({
   beat,
-  index,
   active,
   onSelect,
   onEdit,
-  onDelete,
-  onReorder
+  onDelete
 }: {
   beat: Beat
-  index: number
   active: boolean
   onSelect: () => void
   onEdit: () => void
   onDelete: () => void
-  onReorder: (from: number, to: number) => void
 }): React.JSX.Element {
-  const [dragging, setDragging] = useState(false)
-  const [over, setOver] = useState(false)
-
   return (
-    <li
+    <SortableItem
       className={cn(
         'group flex items-center gap-0.5 rounded-md px-1 py-1 text-sm transition-colors',
         active
           ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-        over && 'ring-1 ring-ring/50',
-        dragging && 'opacity-50'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
       )}
-      draggable
-      onDragEnd={() => {
-        setDragging(false)
-        setOver(false)
-      }}
-      onDragLeave={() => setOver(false)}
-      onDragOver={(e: DragEvent) => {
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
-        setOver(true)
-      }}
-      onDragStart={(e: DragEvent) => {
-        setDragging(true)
-        e.dataTransfer.effectAllowed = 'move'
-        e.dataTransfer.setData('text/plain', String(index))
-      }}
-      onDrop={(e: DragEvent) => {
-        e.preventDefault()
-        setOver(false)
-        const from = Number(e.dataTransfer.getData('text/plain'))
-        if (Number.isNaN(from) || from === index) return
-        onReorder(from, index)
-      }}
+      id={beat.id}
     >
-      <span className="flex size-5 shrink-0 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing">
+      <SortableHandle className="size-5 shrink-0 text-muted-foreground">
         <GripVertical className="size-3.5" />
-      </span>
+      </SortableHandle>
       <button className="min-w-0 flex-1 truncate text-left" onClick={onSelect} type="button">
         {beat.title || '未命名节点'}
       </button>
@@ -217,7 +193,7 @@ function BeatListRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </span>
-    </li>
+    </SortableItem>
   )
 }
 

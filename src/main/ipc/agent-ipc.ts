@@ -1,7 +1,10 @@
-import { ipcMain } from 'electron'
+import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { AGENT_TOOL_DEFINITIONS } from '../../shared/agent-tools'
-import type { AgentRunTurnInput } from '../../shared/project-types'
-import type { AgentPlaceholderRunner } from '../services/agent-placeholder-runner'
+import type {
+  AgentCancelTurnInput,
+  AgentStartTurnInput
+} from '../../shared/ui-chat'
+import type { AgentRunner } from '../services/agent-runner'
 
 function handle<T>(fn: () => Promise<T>): Promise<T> {
   return fn().catch((error: unknown) => {
@@ -12,11 +15,15 @@ function handle<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Agent IPC：占位 runTurn + 工具列表
+ * Agent IPC：startTurn / cancelTurn / listTools
  */
-export function registerAgentIpc(runner: AgentPlaceholderRunner): void {
-  ipcMain.handle('agent:runTurn', (_e, input: AgentRunTurnInput) =>
-    handle(() => runner.runTurn(input))
+export function registerAgentIpc(runner: AgentRunner): void {
+  ipcMain.handle('agent:startTurn', (event: IpcMainInvokeEvent, input: AgentStartTurnInput) =>
+    handle(() => runner.startTurn(input, event.sender))
+  )
+
+  ipcMain.handle('agent:cancelTurn', (_e, input: AgentCancelTurnInput) =>
+    handle(() => runner.cancelTurn(input))
   )
 
   ipcMain.handle('agent:listTools', () => AGENT_TOOL_DEFINITIONS)

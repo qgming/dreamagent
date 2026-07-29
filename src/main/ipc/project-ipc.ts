@@ -120,4 +120,8 @@ export function registerProjectIpc(projectService: ProjectService): void {
   ipcMain.handle('chapter:get', (_e, projectId: string, chapterId: string) =>
     handle(() => projectService.getChapter(String(projectId), String(chapterId)))
   )
+
+  ipcMain.handle('chapter:reorder', (_e, projectId: string, orderedIds: string[]) =>
+    handle(() => projectService.reorderChapters(String(projectId), orderedIds))
+  )
 }

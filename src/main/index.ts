@@ -2,11 +2,15 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { LibraryService } from './services/library-service'
 import { ProjectService } from './services/project-service'
-import { ConversationService } from './services/conversation-service'
-import { AgentPlaceholderRunner } from './services/agent-placeholder-runner'
+import { LlmSettingsService } from './services/llm-settings-service'
+import { PiModelsService } from './services/pi-models'
+import { PiSessionService } from './services/pi-session-service'
+import { HarnessManager } from './services/harness-manager'
+import { AgentRunner } from './services/agent-runner'
 import { registerProjectIpc } from './ipc/project-ipc'
-import { registerConversationIpc } from './ipc/conversation-ipc'
+import { registerSessionIpc } from './ipc/session-ipc'
 import { registerAgentIpc } from './ipc/agent-ipc'
+import { registerSettingsIpc } from './ipc/settings-ipc'
 
 /** 是否为开发环境 */
 const isDev = !app.isPackaged
@@ -123,15 +127,25 @@ app.whenReady().then(async () => {
   // 窗口控制 IPC
   registerWindowIpc()
 
-  // 项目库 / 节点 / 实体 / 章节 / 会话 / Agent IPC
+  // 项目库 / 节点 / 实体 / 章节 / pi 会话 / Agent / 设置
   const libraryService = new LibraryService()
   await libraryService.init()
   const projectService = new ProjectService(libraryService)
-  const conversationService = new ConversationService(projectService)
-  const agentRunner = new AgentPlaceholderRunner(projectService, conversationService)
+  const llmSettings = new LlmSettingsService()
+  const piModels = new PiModelsService(llmSettings)
+  const sessionService = new PiSessionService(projectService)
+  const harnessManager = new HarnessManager(projectService, sessionService, piModels)
+  const agentRunner = new AgentRunner(
+    projectService,
+    sessionService,
+    llmSettings,
+    harnessManager
+  )
+
   registerProjectIpc(projectService)
-  registerConversationIpc(conversationService)
+  registerSessionIpc(sessionService)
   registerAgentIpc(agentRunner)
+  registerSettingsIpc(llmSettings)
 
   createWindow()
 

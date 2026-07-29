@@ -83,6 +83,7 @@ interface ProjectState {
   createChapter: (input: CreateChapterInput) => Promise<void>
   updateChapter: (chapterId: string, patch: UpdateChapterInput) => Promise<void>
   deleteChapter: (chapterId: string) => Promise<void>
+  reorderChapters: (orderedIds: string[]) => Promise<void>
   /** 外部（create-store）写入 snapshot */
   applyExternalSnapshot: (snap: ProjectSnapshot) => void
 }
@@ -175,6 +176,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const prevId = get().activeProjectId
       const snap = await window.api.project.open(projectId)
       applySnapshot(set, get, snap)
+      // 同步切视图：进创作立刻满宽出现，不做 transition 延迟
       set({
         projectView: view,
         selectedBeatId: snap.index.beats.order[0] ?? null,
@@ -269,6 +271,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ expandedProjectIds: [...setIds] })
   },
 
+  // 同步切页：进创作立刻满宽出现
   setProjectView: (view) => set({ projectView: view }),
   setSelectedBeatId: (id) => set({ selectedBeatId: id }),
   setSelectedEntityId: (id) => set({ selectedEntityId: id }),
@@ -453,6 +456,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       applySnapshot(set, get, snap)
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
+    }
+  },
+
+  reorderChapters: async (orderedIds) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.reorderChapters(activeProjectId, orderedIds)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      const snap = await window.api.project.open(activeProjectId)
+      applySnapshot(set, get, snap)
     }
   },
 

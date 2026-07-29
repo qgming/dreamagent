@@ -1,15 +1,20 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AgentToolDefinition } from '../shared/agent-tools'
+import type { AgentStreamEvent } from '../shared/agent-events'
+import type { LlmPublicSettings, LlmSettingsPatch } from '../shared/llm-settings'
 import type {
-  AgentRunTurnInput,
-  AgentRunTurnResult,
+  AgentCancelTurnInput,
+  AgentStartTurnInput,
+  AgentStartTurnResult,
+  CreateSessionInput,
+  SessionSummary,
+  SessionView,
+  UpdateSessionInput
+} from '../shared/ui-chat'
+import type {
   Chapter,
-  Conversation,
-  ConversationMessage,
-  ConversationSummary,
   CreateBeatInput,
   CreateChapterInput,
-  CreateConversationInput,
   CreateEntityInput,
   CreateProjectInput,
   ProjectMeta,
@@ -18,7 +23,6 @@ import type {
   ReorderBeatsInput,
   UpdateBeatInput,
   UpdateChapterInput,
-  UpdateConversationInput,
   UpdateEntityInput
 } from '../shared/project-types'
 
@@ -108,50 +112,66 @@ const projectApi = {
   deleteChapter: (projectId: string, chapterId: string): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke('chapter:delete', projectId, chapterId),
   getChapter: (projectId: string, chapterId: string): Promise<Chapter> =>
-    ipcRenderer.invoke('chapter:get', projectId, chapterId)
+    ipcRenderer.invoke('chapter:get', projectId, chapterId),
+  reorderChapters: (projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('chapter:reorder', projectId, orderedIds)
 }
 
 /**
- * 会话 API
+ * Pi Session API
  */
-const conversationApi = {
-  list: (projectId: string): Promise<ConversationSummary[]> =>
-    ipcRenderer.invoke('conversation:list', projectId),
-  create: (projectId: string, input?: CreateConversationInput): Promise<Conversation> =>
-    ipcRenderer.invoke('conversation:create', projectId, input),
-  open: (projectId: string, conversationId: string): Promise<Conversation> =>
-    ipcRenderer.invoke('conversation:open', projectId, conversationId),
-  appendMessages: (
-    projectId: string,
-    conversationId: string,
-    messages: ConversationMessage[]
-  ): Promise<Conversation> =>
-    ipcRenderer.invoke('conversation:appendMessages', projectId, conversationId, messages),
+const sessionApi = {
+  list: (projectId: string): Promise<SessionSummary[]> =>
+    ipcRenderer.invoke('session:list', projectId),
+  create: (projectId: string, input?: CreateSessionInput): Promise<SessionView> =>
+    ipcRenderer.invoke('session:create', projectId, input),
+  open: (projectId: string, sessionId: string): Promise<SessionView> =>
+    ipcRenderer.invoke('session:open', projectId, sessionId),
   update: (
     projectId: string,
-    conversationId: string,
-    patch: UpdateConversationInput
-  ): Promise<Conversation> =>
-    ipcRenderer.invoke('conversation:update', projectId, conversationId, patch),
-  delete: (projectId: string, conversationId: string): Promise<void> =>
-    ipcRenderer.invoke('conversation:delete', projectId, conversationId)
+    sessionId: string,
+    patch: UpdateSessionInput
+  ): Promise<SessionView> => ipcRenderer.invoke('session:update', projectId, sessionId, patch),
+  delete: (projectId: string, sessionId: string): Promise<void> =>
+    ipcRenderer.invoke('session:delete', projectId, sessionId)
 }
 
 /**
- * Agent API（本阶段占位 runner）
+ * Agent API（流式）
  */
 const agentApi = {
-  runTurn: (input: AgentRunTurnInput): Promise<AgentRunTurnResult> =>
-    ipcRenderer.invoke('agent:runTurn', input),
-  listTools: (): Promise<AgentToolDefinition[]> => ipcRenderer.invoke('agent:listTools')
+  startTurn: (input: AgentStartTurnInput): Promise<AgentStartTurnResult> =>
+    ipcRenderer.invoke('agent:startTurn', input),
+  cancelTurn: (input: AgentCancelTurnInput): Promise<void> =>
+    ipcRenderer.invoke('agent:cancelTurn', input),
+  listTools: (): Promise<AgentToolDefinition[]> => ipcRenderer.invoke('agent:listTools'),
+  onEvent: (handler: (event: AgentStreamEvent) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, event: AgentStreamEvent): void => {
+      handler(event)
+    }
+    ipcRenderer.on('agent:event', listener)
+    return () => {
+      ipcRenderer.removeListener('agent:event', listener)
+    }
+  }
+}
+
+/**
+ * 设置 API
+ */
+const settingsApi = {
+  getLlm: (): Promise<LlmPublicSettings> => ipcRenderer.invoke('settings:getLlm'),
+  setLlm: (patch: LlmSettingsPatch): Promise<LlmPublicSettings> =>
+    ipcRenderer.invoke('settings:setLlm', patch)
 }
 
 const api = {
   app: appApi,
   window: windowApi,
   project: projectApi,
-  conversation: conversationApi,
-  agent: agentApi
+  session: sessionApi,
+  agent: agentApi,
+  settings: settingsApi
 }
 
 try {

@@ -70,7 +70,7 @@ export interface Chapter {
   /** 纯正文，不含 [@…](beat|entity:…) 双链 */
   content: string
   status: ChapterStatus
-  /** 取材 / 覆盖的大纲节点（供 Agent 判断节点状态） */
+  /** 取材 / 覆盖的源节点（供 Agent 判断节点状态） */
   sourceBeatIds: string[]
   /** 文中涉及的实体 id（元数据，非正文双链） */
   entityRefs: string[]
