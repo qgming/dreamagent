@@ -9,6 +9,9 @@ import { createId, toBeatFileName, toEntityFileName, toFolderName } from '../../
 import {
   INDEX_SCHEMA_VERSION,
   PROJECT_SCHEMA_VERSION,
+  migrateLegacyBeatStatus,
+  normalizeBeatStatus,
+  normalizeEntityStatus,
   type Beat,
   type CreateBeatInput,
   type CreateEntityInput,
@@ -200,35 +203,58 @@ export class ProjectService {
     const meta = await this.readMeta(dirPath)
     const index = await this.readIndex(dirPath)
     const p = this.paths(dirPath)
+    // v1 → v2：节点状态语义变更（旧 draft 与新 draft 撞名，必须按版本一次性迁移）
+    const needsV2Migration = (meta.version ?? 1) < 2
 
     const beats: Record<string, Beat> = {}
-    for (const file of await listFileNames(p.beats)) {
-      const beat = await readJsonFile<Beat>(path.join(p.beats, file))
+    const beatFiles = await listFileNames(p.beats)
+    for (const file of beatFiles) {
+      const full = path.join(p.beats, file)
+      const beat = await readJsonFile<Beat>(full)
       if (!beat?.id) continue
       const content = beat.content ?? ''
       const refs = refsFromContent(content, beat.id)
-      beats[beat.id] = {
+      const status = needsV2Migration
+        ? migrateLegacyBeatStatus(beat.status)
+        : normalizeBeatStatus(beat.status)
+      const next: Beat = {
         ...beat,
         fileName: beat.fileName || file,
         content,
-        status: beat.status ?? 'draft',
+        status,
         entityRefs: beat.entityRefs ?? refs.entityRefs,
         beatRefs: beat.beatRefs ?? refs.beatRefs
+      }
+      beats[beat.id] = next
+      // 迁移后写回，避免下次再走旧映射
+      if (needsV2Migration && beat.status !== status) {
+        await writeJsonAtomic(full, next)
       }
     }
 
     const entities: Record<string, Entity> = {}
-    for (const file of await listFileNames(p.entities)) {
-      const entity = await readJsonFile<Entity>(path.join(p.entities, file))
+    const entityFiles = await listFileNames(p.entities)
+    for (const file of entityFiles) {
+      const full = path.join(p.entities, file)
+      const entity = await readJsonFile<Entity>(full)
       if (!entity?.id) continue
       const content = entity.content ?? ''
       const refs = refsFromContent(content, entity.id)
-      entities[entity.id] = {
+      const status = normalizeEntityStatus(
+        (entity as Entity & { status?: unknown }).status
+      )
+      const next: Entity = {
         ...entity,
         fileName: entity.fileName || file,
         content,
+        status,
         entityRefs: entity.entityRefs ?? refs.entityRefs,
         beatRefs: entity.beatRefs ?? refs.beatRefs
+      }
+      entities[entity.id] = next
+      // 旧实体无 status 字段时补写
+      if (needsV2Migration && (entity as Entity & { status?: unknown }).status !== status) {
+        await writeJsonAtomic(full, next)
       }
     }
 
@@ -239,6 +265,12 @@ export class ProjectService {
     index.entities.order = index.entities.order.filter((id) => entities[id])
     for (const id of Object.keys(entities)) {
       if (!index.entities.order.includes(id)) index.entities.order.push(id)
+    }
+
+    if (needsV2Migration) {
+      meta.version = PROJECT_SCHEMA_VERSION
+      meta.updatedAt = nowIso()
+      await this.writeMeta(dirPath, meta)
     }
 
     return { meta, index, beats, entities, dirPath }
@@ -280,7 +312,7 @@ export class ProjectService {
       title,
       fileName,
       content,
-      status: input.status ?? 'draft',
+      status: input.status ?? 'idea',
       entityRefs: refs.entityRefs,
       beatRefs: refs.beatRefs,
       createdAt: ts,
@@ -406,6 +438,7 @@ export class ProjectService {
       name,
       fileName,
       content,
+      status: input.status ?? 'active',
       entityRefs: refs.entityRefs,
       beatRefs: refs.beatRefs,
       createdAt: ts,
@@ -443,6 +476,7 @@ export class ProjectService {
       entity.entityRefs = refs.entityRefs
       entity.beatRefs = refs.beatRefs
     }
+    if (patch.status !== undefined) entity.status = patch.status
     entity.updatedAt = nowIso()
 
     if (nameChanged) {

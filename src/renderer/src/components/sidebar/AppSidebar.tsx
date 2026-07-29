@@ -3,6 +3,7 @@ import {
   ChevronRight,
   CircleDot,
   Home,
+  LayoutDashboard,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -181,6 +182,12 @@ export function AppSidebar(): React.JSX.Element {
                         transition={{ type: 'spring', stiffness: 380, damping: 34 }}
                       >
                         <div className="mb-1 ml-3 space-y-0.5 border-l border-border pl-2">
+                          <SubNavButton
+                            active={isActiveProject && projectView === 'overview'}
+                            icon={LayoutDashboard}
+                            label="概览"
+                            onClick={() => openView(project.id, 'overview')}
+                          />
                           <SubNavButton
                             active={isActiveProject && projectView === 'beats'}
                             icon={CircleDot}

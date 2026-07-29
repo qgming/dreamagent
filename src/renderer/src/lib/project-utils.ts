@@ -1,5 +1,5 @@
-import type { BeatStatus } from '@shared/project-types'
-import { BEAT_STATUS_LABELS } from '@shared/project-types'
+import type { BeatStatus, EntityStatus } from '@shared/project-types'
+import { BEAT_STATUS_LABELS, ENTITY_STATUS_LABELS } from '@shared/project-types'
 
 /**
  * 数组重排工具：把 fromIndex 项移到 toIndex
@@ -34,13 +34,24 @@ export function formatUpdatedAt(iso: string): string {
 
 /** 节点状态 → 圆点颜色 */
 export const BEAT_STATUS_DOT_CLASS: Record<BeatStatus, string> = {
-  draft: 'bg-muted-foreground/45',
-  outlined: 'bg-sky-500',
-  expanded: 'bg-amber-500',
-  polished: 'bg-emerald-500'
+  idea: 'bg-muted-foreground/45',
+  outline: 'bg-sky-500',
+  draft: 'bg-amber-500',
+  final: 'bg-emerald-500'
+}
+
+/** 实体状态 → 圆点颜色 */
+export const ENTITY_STATUS_DOT_CLASS: Record<EntityStatus, string> = {
+  active: 'bg-emerald-500',
+  dormant: 'bg-slate-400',
+  archived: 'bg-muted-foreground/35'
 }
 
 /** 状态圆点 title */
 export function beatStatusTitle(status: BeatStatus): string {
   return BEAT_STATUS_LABELS[status]
+}
+
+export function entityStatusTitle(status: EntityStatus): string {
+  return ENTITY_STATUS_LABELS[status]
 }

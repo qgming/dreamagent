@@ -10,6 +10,7 @@ import { BeatsPage } from '@/pages/BeatsPage'
 import { CreatePage } from '@/pages/CreatePage'
 import { EntitiesPage } from '@/pages/EntitiesPage'
 import { HomePage, useBootstrapLibrary } from '@/pages/HomePage'
+import { OverviewPage } from '@/pages/OverviewPage'
 import { useProjectStore } from '@/stores/project-store'
 
 /**
@@ -63,7 +64,9 @@ export function AppShell(): React.JSX.Element {
           ) : null}
 
           {activeProjectId && snapshot ? (
-            projectView === 'beats' ? (
+            projectView === 'overview' ? (
+              <OverviewPage />
+            ) : projectView === 'beats' ? (
               <BeatsPage />
             ) : projectView === 'entities' ? (
               <EntitiesPage />

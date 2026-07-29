@@ -40,6 +40,7 @@ export function NameFormModals(): React.JSX.Element {
             await createProject({ title })
           } else {
             await updateProjectMeta(projectForm.projectId, { title })
+            closeProjectFormModal()
           }
         }}
         open={projectOpen}

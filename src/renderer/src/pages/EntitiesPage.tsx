@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
+  ChevronDown,
   GripVertical,
   MoreHorizontal,
   Pencil,
   Plus,
   Trash2
 } from 'lucide-react'
-import type { Beat, Entity } from '@shared/project-types'
+import {
+  ENTITY_STATUS_LABELS,
+  ENTITY_STATUSES,
+  type Beat,
+  type Entity,
+  type EntityStatus
+} from '@shared/project-types'
 import { extractRefIds } from '@shared/mentions'
 import { MentionEditor } from '@/components/EntityMentionEditor'
 import { Button } from '@/components/ui/button'
@@ -14,13 +21,19 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { BACKLINK_CHIP } from '@/lib/mention-styles'
 import { cn } from '@/lib/utils'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
-import { arrayMove } from '@/lib/project-utils'
+import {
+  arrayMove,
+  ENTITY_STATUS_DOT_CLASS,
+  entityStatusTitle
+} from '@/lib/project-utils'
 import {
   getOrderedBeats,
   getOrderedEntities,
@@ -66,7 +79,7 @@ export function EntitiesPage(): React.JSX.Element {
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="flex w-72 shrink-0 flex-col border-r border-border bg-card/30">
+      <div className="flex w-60 shrink-0 flex-col border-r border-border bg-card/30">
         <div className={cn(TOOLBAR_CLASS, 'justify-between')}>
           <span className="text-sm font-medium">实体</span>
           <Button onClick={openCreateEntityModal} size="sm" type="button" variant="secondary">
@@ -131,6 +144,7 @@ function EntityListRow({
 }): React.JSX.Element {
   const [dragging, setDragging] = useState(false)
   const [over, setOver] = useState(false)
+  const archived = entity.status === 'archived'
 
   return (
     <li
@@ -139,6 +153,7 @@ function EntityListRow({
         active
           ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
           : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+        archived && !active && 'opacity-55',
         over && 'ring-1 ring-ring/50',
         dragging && 'opacity-50'
       )}
@@ -172,30 +187,39 @@ function EntityListRow({
       <button className="min-w-0 flex-1 truncate text-left" onClick={onSelect} type="button">
         {entity.name || '未命名实体'}
       </button>
-      <DropdownMenu>
-        <DropdownMenuTrigger
+      <span className="relative flex size-6 shrink-0 items-center justify-center">
+        <span
           className={cn(
-            'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none',
-            'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
-            'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
+            'size-2 rounded-full transition-opacity group-hover:opacity-0 group-focus-within:opacity-0',
+            ENTITY_STATUS_DOT_CLASS[entity.status]
           )}
-          title="更多"
-          type="button"
-        >
-          <MoreHorizontal className="size-3.5" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" side="bottom">
-          <DropdownMenuItem onSelect={onEdit}>
-            <Pencil className="size-3.5" />
-            编辑
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={onDelete} variant="destructive">
-            <Trash2 className="size-3.5" />
-            删除
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          title={entityStatusTitle(entity.status)}
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              'absolute inset-0 flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none',
+              'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
+              'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
+            )}
+            title="更多"
+            type="button"
+          >
+            <MoreHorizontal className="size-3.5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" side="bottom">
+            <DropdownMenuItem onSelect={onEdit}>
+              <Pencil className="size-3.5" />
+              编辑
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onDelete} variant="destructive">
+              <Trash2 className="size-3.5" />
+              删除
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </span>
     </li>
   )
 }
@@ -205,7 +229,7 @@ function EntityEditor({
   onChange
 }: {
   entity: Entity
-  onChange: (patch: Partial<Pick<Entity, 'name' | 'content'>>) => void
+  onChange: (patch: Partial<Pick<Entity, 'name' | 'content' | 'status'>>) => void
 }): React.JSX.Element {
   const snapshot = useProjectStore((s) => s.snapshot)
   const setSelectedBeatId = useProjectStore((s) => s.setSelectedBeatId)
@@ -214,21 +238,27 @@ function EntityEditor({
 
   const [name, setName] = useState(entity.name)
   const [content, setContent] = useState(entity.content)
+  const [status, setStatus] = useState<EntityStatus>(entity.status)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
 
   useEffect(() => {
     setName(entity.name)
     setContent(entity.content)
-  }, [entity.id, entity.name, entity.content])
+    setStatus(entity.status)
+  }, [entity.id, entity.name, entity.content, entity.status])
 
   useEffect(() => {
-    if (name === entity.name && content === entity.content) return
+    if (name === entity.name && content === entity.content && status === entity.status) return
     const timer = window.setTimeout(() => {
-      onChangeRef.current({ name, content })
+      const patch: Partial<Pick<Entity, 'name' | 'content' | 'status'>> = {}
+      if (name !== entity.name) patch.name = name
+      if (content !== entity.content) patch.content = content
+      if (status !== entity.status) patch.status = status
+      if (Object.keys(patch).length > 0) onChangeRef.current(patch)
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [name, content, entity.name, entity.content])
+  }, [name, content, status, entity.name, entity.content, entity.status])
 
   const linkedBeats = useMemo((): Beat[] => {
     if (!snapshot) return []
@@ -268,6 +298,31 @@ function EntityEditor({
           placeholder="实体名称"
           value={name}
         />
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              'inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs outline-none hover:bg-muted'
+            )}
+            type="button"
+          >
+            <span className={cn('size-2 shrink-0 rounded-full', ENTITY_STATUS_DOT_CLASS[status])} />
+            {ENTITY_STATUS_LABELS[status]}
+            <ChevronDown className="size-3.5 opacity-60" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuRadioGroup
+              onValueChange={(v) => setStatus(v as EntityStatus)}
+              value={status}
+            >
+              {ENTITY_STATUSES.map((s) => (
+                <DropdownMenuRadioItem key={s} value={s}>
+                  <span className={cn('mr-1 size-2 rounded-full', ENTITY_STATUS_DOT_CLASS[s])} />
+                  {ENTITY_STATUS_LABELS[s]}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <MentionEditor

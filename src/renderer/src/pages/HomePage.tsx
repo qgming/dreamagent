@@ -57,7 +57,7 @@ export function HomePage(): React.JSX.Element {
                     'hover:border-ring/40 hover:bg-muted/40'
                   )}
                   key={p.id}
-                  onClick={() => void openProject(p.id, 'create')}
+                  onClick={() => void openProject(p.id, 'overview')}
                   type="button"
                 >
                   <span className="text-sm font-medium text-foreground">{p.title}</span>

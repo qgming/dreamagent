@@ -12,7 +12,7 @@ import type {
 } from '@shared/project-types'
 
 /** 项目内视图 */
-export type ProjectView = 'beats' | 'entities' | 'create'
+export type ProjectView = 'overview' | 'beats' | 'entities' | 'create'
 
 /** 项目表单模态：新建 或 编辑 */
 export type ProjectFormMode =
@@ -107,7 +107,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   snapshot: null,
   expandedProjectIds: [],
   activeProjectId: null,
-  projectView: 'create',
+  projectView: 'overview',
   selectedBeatId: null,
   selectedEntityId: null,
   createBeatsOpen: true,
@@ -146,7 +146,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const snap = await window.api.project.create(input)
       applySnapshot(set, get, snap)
       set({
-        projectView: 'create',
+        projectView: 'overview',
         selectedBeatId: null,
         selectedEntityId: null,
         loading: false,
@@ -163,7 +163,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  openProject: async (projectId, view = 'create') => {
+  openProject: async (projectId, view = 'overview') => {
     set({ loading: true, error: null })
     try {
       const snap = await window.api.project.open(projectId)
@@ -234,8 +234,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 updatedAt: meta.updatedAt
               }
             : item
-        ),
-        projectForm: null
+        )
+        // 不在此关闭 projectForm：弹窗由 NamePromptModal 自行关闭；
+        // 概览页内联保存也不应被打断
       })
       await get().refreshLibrary()
     } catch (error) {

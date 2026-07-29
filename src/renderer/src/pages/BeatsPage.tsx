@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import {
   BEAT_STATUS_LABELS,
+  BEAT_STATUSES,
   type Beat,
   type BeatStatus,
   type Entity
@@ -39,7 +40,6 @@ import {
   useProjectStore
 } from '@/stores/project-store'
 
-const STATUSES: BeatStatus[] = ['draft', 'outlined', 'expanded', 'polished']
 const TOOLBAR_CLASS =
   'flex h-11 shrink-0 items-center gap-2 border-b border-border px-3'
 
@@ -78,7 +78,7 @@ export function BeatsPage(): React.JSX.Element {
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="flex w-72 shrink-0 flex-col border-r border-border bg-card/30">
+      <div className="flex w-60 shrink-0 flex-col border-r border-border bg-card/30">
         <div className={cn(TOOLBAR_CLASS, 'justify-between')}>
           <span className="text-sm font-medium">节点</span>
           <Button onClick={openCreateBeatModal} size="sm" type="button" variant="secondary">
@@ -313,7 +313,7 @@ function BeatEditor({
               onValueChange={(v) => setStatus(v as BeatStatus)}
               value={status}
             >
-              {STATUSES.map((s) => (
+              {BEAT_STATUSES.map((s) => (
                 <DropdownMenuRadioItem key={s} value={s}>
                   <span className={cn('mr-1 size-2 rounded-full', BEAT_STATUS_DOT_CLASS[s])} />
                   {BEAT_STATUS_LABELS[s]}
