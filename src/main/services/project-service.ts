@@ -5,15 +5,26 @@ import {
   extractRefIds,
   renameLinksInContent
 } from '../../shared/mentions'
-import { createId, toBeatFileName, toEntityFileName, toFolderName } from '../../shared/ids'
+import {
+  createId,
+  toBeatFileName,
+  toChapterFileName,
+  toEntityFileName,
+  toFolderName
+} from '../../shared/ids'
 import {
   INDEX_SCHEMA_VERSION,
   PROJECT_SCHEMA_VERSION,
   migrateLegacyBeatStatus,
   normalizeBeatStatus,
+  normalizeChapterStatus,
   normalizeEntityStatus,
+  normalizeProjectIndex,
   type Beat,
+  type Chapter,
+  type ConversationSummary,
   type CreateBeatInput,
+  type CreateChapterInput,
   type CreateEntityInput,
   type CreateProjectInput,
   type Entity,
@@ -22,6 +33,7 @@ import {
   type ProjectSnapshot,
   type ReorderBeatsInput,
   type UpdateBeatInput,
+  type UpdateChapterInput,
   type UpdateEntityInput
 } from '../../shared/project-types'
 import type { LibraryService } from './library-service'
@@ -43,11 +55,16 @@ function emptyIndex(): ProjectIndex {
     version: INDEX_SCHEMA_VERSION,
     beats: { order: [] },
     entities: { order: [] },
+    chapters: { order: [] },
+    conversations: { order: [] },
     updatedAt: nowIso()
   }
 }
 
-function refsFromContent(content: string, selfId?: string): {
+function refsFromContent(
+  content: string,
+  selfId?: string
+): {
   entityRefs: string[]
   beatRefs: string[]
 } {
@@ -58,18 +75,20 @@ function refsFromContent(content: string, selfId?: string): {
 }
 
 /**
- * 项目服务：节点 / 实体扁平列表；双链 beat↔entity / beat↔beat / entity↔entity
+ * 项目服务：节点 / 实体 / 章节；双链 beat↔entity / beat↔beat / entity↔entity / chapter
  */
 export class ProjectService {
   constructor(private readonly library: LibraryService) {}
 
-  private paths(dirPath: string) {
+  paths(dirPath: string) {
     return {
       meta: path.join(dirPath, 'project.json'),
       index: path.join(dirPath, 'index.json'),
       beats: path.join(dirPath, 'beats'),
       entities: path.join(dirPath, 'entities'),
-      documents: path.join(dirPath, 'documents')
+      documents: path.join(dirPath, 'documents'),
+      chapters: path.join(dirPath, 'documents', 'chapters'),
+      conversations: path.join(dirPath, 'conversations')
     }
   }
 
@@ -81,7 +100,11 @@ export class ProjectService {
     return path.join(dirPath, 'entities', fileName)
   }
 
-  private async resolveDir(projectId: string): Promise<string> {
+  private chapterPath(dirPath: string, fileName: string): string {
+    return path.join(dirPath, 'documents', 'chapters', fileName)
+  }
+
+  async resolveDir(projectId: string): Promise<string> {
     const dir = await this.library.findProjectDirById(projectId)
     if (!dir) throw new Error(`项目不存在: ${projectId}`)
     return dir
@@ -94,8 +117,12 @@ export class ProjectService {
   }
 
   private async readIndex(dirPath: string): Promise<ProjectIndex> {
-    const index = await readJsonFile<ProjectIndex>(this.paths(dirPath).index)
-    return index ?? emptyIndex()
+    const raw = await readJsonFile<Partial<ProjectIndex>>(this.paths(dirPath).index)
+    const { index, needsWrite } = normalizeProjectIndex(raw)
+    if (needsWrite) {
+      await this.writeIndex(dirPath, index)
+    }
+    return index
   }
 
   private async writeMeta(dirPath: string, meta: ProjectMeta): Promise<void> {
@@ -107,6 +134,8 @@ export class ProjectService {
       version: INDEX_SCHEMA_VERSION,
       beats: { order: [...index.beats.order] },
       entities: { order: [...index.entities.order] },
+      chapters: { order: [...(index.chapters?.order ?? [])] },
+      conversations: { order: [...(index.conversations?.order ?? [])] },
       updatedAt: nowIso()
     }
     await writeJsonAtomic(this.paths(dirPath).index, clean)
@@ -145,6 +174,19 @@ export class ProjectService {
     return null
   }
 
+  private async findChapterFile(
+    dirPath: string,
+    chapterId: string
+  ): Promise<{ filePath: string; fileName: string } | null> {
+    const files = await listFileNames(this.paths(dirPath).chapters)
+    for (const file of files) {
+      const full = path.join(this.paths(dirPath).chapters, file)
+      const chapter = await readJsonFile<Chapter>(full)
+      if (chapter?.id === chapterId) return { filePath: full, fileName: file }
+    }
+    return null
+  }
+
   // ── 项目 ──────────────────────────────────────────────
 
   async listProjects() {
@@ -170,6 +212,8 @@ export class ProjectService {
     await ensureDir(p.beats)
     await ensureDir(p.entities)
     await ensureDir(p.documents)
+    await ensureDir(p.chapters)
+    await ensureDir(p.conversations)
 
     const ts = nowIso()
     const meta: ProjectMeta = {
@@ -185,7 +229,15 @@ export class ProjectService {
     await this.writeMeta(dirPath, meta)
     await this.writeIndex(dirPath, emptyIndex())
 
-    return { meta, index: emptyIndex(), beats: {}, entities: {}, dirPath }
+    return {
+      meta,
+      index: emptyIndex(),
+      beats: {},
+      entities: {},
+      chapters: {},
+      conversationSummaries: [],
+      dirPath
+    }
   }
 
   async openProject(projectId: string): Promise<ProjectSnapshot> {
@@ -199,10 +251,13 @@ export class ProjectService {
     return this.loadSnapshot(dirPath)
   }
 
-  private async loadSnapshot(dirPath: string): Promise<ProjectSnapshot> {
+  async loadSnapshot(dirPath: string): Promise<ProjectSnapshot> {
     const meta = await this.readMeta(dirPath)
     const index = await this.readIndex(dirPath)
     const p = this.paths(dirPath)
+    await ensureDir(p.chapters)
+    await ensureDir(p.conversations)
+
     // v1 → v2：节点状态语义变更（旧 draft 与新 draft 撞名，必须按版本一次性迁移）
     const needsV2Migration = (meta.version ?? 1) < 2
 
@@ -226,7 +281,6 @@ export class ProjectService {
         beatRefs: beat.beatRefs ?? refs.beatRefs
       }
       beats[beat.id] = next
-      // 迁移后写回，避免下次再走旧映射
       if (needsV2Migration && beat.status !== status) {
         await writeJsonAtomic(full, next)
       }
@@ -252,10 +306,29 @@ export class ProjectService {
         beatRefs: entity.beatRefs ?? refs.beatRefs
       }
       entities[entity.id] = next
-      // 旧实体无 status 字段时补写
       if (needsV2Migration && (entity as Entity & { status?: unknown }).status !== status) {
         await writeJsonAtomic(full, next)
       }
+    }
+
+    const chapters: Record<string, Chapter> = {}
+    const chapterFiles = await listFileNames(p.chapters)
+    for (const file of chapterFiles) {
+      const full = path.join(p.chapters, file)
+      const chapter = await readJsonFile<Chapter>(full)
+      if (!chapter?.id) continue
+      const content = chapter.content ?? ''
+      // 文章正文为纯文本；关联仅读元数据（兼容旧文件曾从 content 解析的 refs）
+      const next: Chapter = {
+        ...chapter,
+        fileName: chapter.fileName || file,
+        content,
+        status: normalizeChapterStatus(chapter.status),
+        sourceBeatIds: chapter.sourceBeatIds ?? [],
+        entityRefs: chapter.entityRefs ?? [],
+        beatRefs: chapter.beatRefs ?? chapter.sourceBeatIds ?? []
+      }
+      chapters[chapter.id] = next
     }
 
     index.beats.order = index.beats.order.filter((id) => beats[id])
@@ -266,6 +339,13 @@ export class ProjectService {
     for (const id of Object.keys(entities)) {
       if (!index.entities.order.includes(id)) index.entities.order.push(id)
     }
+    index.chapters.order = (index.chapters?.order ?? []).filter((id) => chapters[id])
+    for (const id of Object.keys(chapters)) {
+      if (!index.chapters.order.includes(id)) index.chapters.order.push(id)
+    }
+
+    // 会话摘要：由 ConversationService 侧 list 时也可单独拉；此处扫描文件
+    const conversationSummaries = await this.loadConversationSummaries(dirPath, index)
 
     if (needsV2Migration) {
       meta.version = PROJECT_SCHEMA_VERSION
@@ -273,7 +353,51 @@ export class ProjectService {
       await this.writeMeta(dirPath, meta)
     }
 
-    return { meta, index, beats, entities, dirPath }
+    // 保证 index 含 chapters/conversations 字段写回
+    await this.writeIndex(dirPath, index)
+
+    return { meta, index, beats, entities, chapters, conversationSummaries, dirPath }
+  }
+
+  private async loadConversationSummaries(
+    dirPath: string,
+    index: ProjectIndex
+  ): Promise<ConversationSummary[]> {
+    const dir = this.paths(dirPath).conversations
+    await ensureDir(dir)
+    const files = await listFileNames(dir)
+    type ConvFile = {
+      id: string
+      title?: string
+      messages?: Array<{ content?: string; role?: string }>
+      createdAt?: string
+      updatedAt?: string
+    }
+    const map: Record<string, ConversationSummary> = {}
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      const full = path.join(dir, file)
+      const conv = await readJsonFile<ConvFile>(full)
+      if (!conv?.id) continue
+      const messages = conv.messages ?? []
+      const lastUser = [...messages].reverse().find((m) => m.role === 'user')
+      map[conv.id] = {
+        id: conv.id,
+        title: conv.title?.trim() || '新对话',
+        preview: lastUser?.content?.slice(0, 80),
+        messageCount: messages.length,
+        createdAt: conv.createdAt ?? nowIso(),
+        updatedAt: conv.updatedAt ?? conv.createdAt ?? nowIso()
+      }
+    }
+
+    // 以 index 顺序为主，磁盘孤儿追加
+    const order = [...(index.conversations?.order ?? [])]
+    for (const id of Object.keys(map)) {
+      if (!order.includes(id)) order.push(id)
+    }
+    index.conversations.order = order.filter((id) => map[id])
+    return index.conversations.order.map((id) => map[id]).filter(Boolean)
   }
 
   async updateProjectMeta(
@@ -400,9 +524,24 @@ export class ProjectService {
       breakLinksInContent(c, 'beat', beatId)
     )
 
+    // 清理章节 sourceBeatIds
+    await this.stripSourceBeatFromChapters(dirPath, beatId)
+
     await this.writeIndex(dirPath, index)
     await this.touchProject(dirPath)
     return this.loadSnapshot(dirPath)
+  }
+
+  private async stripSourceBeatFromChapters(dirPath: string, beatId: string): Promise<void> {
+    const p = this.paths(dirPath)
+    for (const file of await listFileNames(p.chapters)) {
+      const full = path.join(p.chapters, file)
+      const chapter = await readJsonFile<Chapter>(full)
+      if (!chapter?.sourceBeatIds?.includes(beatId)) continue
+      chapter.sourceBeatIds = chapter.sourceBeatIds.filter((id) => id !== beatId)
+      chapter.updatedAt = nowIso()
+      await writeJsonAtomic(full, chapter)
+    }
   }
 
   async reorderBeats(projectId: string, input: ReorderBeatsInput): Promise<ProjectSnapshot> {
@@ -526,7 +665,7 @@ export class ProjectService {
   }
 
   /**
-   * 改写全部节点与实体正文中的双链（排除 subject 自身文件）
+   * 改写全部节点、实体、章节正文中的双链（排除 subject 自身文件）
    */
   private async rewriteMentionsEverywhere(
     dirPath: string,
@@ -565,6 +704,18 @@ export class ProjectService {
       entity.updatedAt = nowIso()
       await writeJsonAtomic(full, entity)
     }
+
+    // 文章 content 为纯正文、无双链；仅清理旧数据中可能残留的 mention 语法，不改 refs 元数据
+    for (const file of await listFileNames(p.chapters)) {
+      const full = path.join(p.chapters, file)
+      const chapter = await readJsonFile<Chapter>(full)
+      if (!chapter) continue
+      const next = transform(chapter.content ?? '')
+      if (next === chapter.content) continue
+      chapter.content = next
+      chapter.updatedAt = nowIso()
+      await writeJsonAtomic(full, chapter)
+    }
   }
 
   async reorderEntities(projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> {
@@ -581,5 +732,131 @@ export class ProjectService {
     await this.writeIndex(dirPath, index)
     await this.touchProject(dirPath)
     return this.loadSnapshot(dirPath)
+  }
+
+  // ── 文章 ──────────────────────────────────────────────
+
+  async createChapter(projectId: string, input: CreateChapterInput): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    await ensureDir(this.paths(dirPath).chapters)
+
+    const ts = nowIso()
+    const id = createId('chap')
+    const title = input.title.trim() || '未命名文章'
+    const fileName = toChapterFileName(title, id)
+    // 正文保持纯文本；关联仅存元数据字段
+    const content = input.content ?? ''
+    const sourceBeatIds = input.sourceBeatIds ?? []
+    const beatRefs = input.beatRefs ?? sourceBeatIds
+    const entityRefs = input.entityRefs ?? []
+    const chapter: Chapter = {
+      id,
+      title,
+      fileName,
+      content,
+      status: input.status ?? 'draft',
+      sourceBeatIds,
+      entityRefs,
+      beatRefs,
+      conversationId: input.conversationId,
+      createdAt: ts,
+      updatedAt: ts
+    }
+
+    await writeJsonAtomic(this.chapterPath(dirPath, fileName), chapter)
+
+    const index = await this.readIndex(dirPath)
+    index.chapters.order = [...index.chapters.order.filter((x) => x !== id), id]
+    await this.writeIndex(dirPath, index)
+    await this.touchProject(dirPath)
+    return this.loadSnapshot(dirPath)
+  }
+
+  async updateChapter(
+    projectId: string,
+    chapterId: string,
+    patch: UpdateChapterInput
+  ): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    const located = await this.findChapterFile(dirPath, chapterId)
+    if (!located) throw new Error(`文章不存在: ${chapterId}`)
+
+    const chapter = await readJsonFile<Chapter>(located.filePath)
+    if (!chapter) throw new Error(`文章不存在: ${chapterId}`)
+
+    const titleChanged =
+      patch.title !== undefined && patch.title.trim() !== '' && patch.title !== chapter.title
+
+    if (patch.title !== undefined) chapter.title = patch.title.trim() || chapter.title
+    if (patch.content !== undefined) {
+      // 纯正文，不从 content 解析双链
+      chapter.content = patch.content
+    }
+    if (patch.status !== undefined) chapter.status = patch.status
+    if (patch.sourceBeatIds !== undefined) chapter.sourceBeatIds = patch.sourceBeatIds
+    if (patch.entityRefs !== undefined) chapter.entityRefs = patch.entityRefs
+    if (patch.beatRefs !== undefined) chapter.beatRefs = patch.beatRefs
+    if (patch.conversationId !== undefined) chapter.conversationId = patch.conversationId
+    chapter.updatedAt = nowIso()
+
+    if (titleChanged) {
+      const newFileName = toChapterFileName(chapter.title, chapter.id)
+      chapter.fileName = newFileName
+      await writeJsonAtomic(this.chapterPath(dirPath, newFileName), chapter)
+      if (newFileName !== located.fileName) {
+        try {
+          await fs.unlink(located.filePath)
+        } catch {
+          // 忽略
+        }
+      }
+    } else {
+      chapter.fileName = chapter.fileName || located.fileName
+      await writeJsonAtomic(located.filePath, chapter)
+    }
+
+    await this.touchProject(dirPath)
+    return this.loadSnapshot(dirPath)
+  }
+
+  async deleteChapter(projectId: string, chapterId: string): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    const index = await this.readIndex(dirPath)
+    const located = await this.findChapterFile(dirPath, chapterId)
+
+    index.chapters.order = index.chapters.order.filter((id) => id !== chapterId)
+    if (located) {
+      try {
+        await fs.unlink(located.filePath)
+      } catch {
+        // 忽略
+      }
+    }
+
+    await this.writeIndex(dirPath, index)
+    await this.touchProject(dirPath)
+    return this.loadSnapshot(dirPath)
+  }
+
+  async getChapter(projectId: string, chapterId: string): Promise<Chapter> {
+    const dirPath = await this.resolveDir(projectId)
+    const located = await this.findChapterFile(dirPath, chapterId)
+    if (!located) throw new Error(`文章不存在: ${chapterId}`)
+    const chapter = await readJsonFile<Chapter>(located.filePath)
+    if (!chapter) throw new Error(`文章不存在: ${chapterId}`)
+    return chapter
+  }
+
+  /** 供 ConversationService 写入 index.conversations.order */
+  async setConversationOrder(projectId: string, orderedIds: string[]): Promise<void> {
+    const dirPath = await this.resolveDir(projectId)
+    const index = await this.readIndex(dirPath)
+    index.conversations.order = orderedIds
+    await this.writeIndex(dirPath, index)
+  }
+
+  async touchProjectPublic(projectId: string): Promise<void> {
+    const dirPath = await this.resolveDir(projectId)
+    await this.touchProject(dirPath)
   }
 }

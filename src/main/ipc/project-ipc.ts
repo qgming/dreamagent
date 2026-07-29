@@ -2,11 +2,13 @@ import { ipcMain, shell } from 'electron'
 import type { ProjectService } from '../services/project-service'
 import type {
   CreateBeatInput,
+  CreateChapterInput,
   CreateEntityInput,
   CreateProjectInput,
   ProjectMeta,
   ReorderBeatsInput,
   UpdateBeatInput,
+  UpdateChapterInput,
   UpdateEntityInput
 } from '../../shared/project-types'
 
@@ -98,5 +100,24 @@ export function registerProjectIpc(projectService: ProjectService): void {
 
   ipcMain.handle('entity:reorder', (_e, projectId: string, orderedIds: string[]) =>
     handle(() => projectService.reorderEntities(String(projectId), orderedIds))
+  )
+
+  // 章节
+  ipcMain.handle('chapter:create', (_e, projectId: string, input: CreateChapterInput) =>
+    handle(() => projectService.createChapter(String(projectId), input))
+  )
+
+  ipcMain.handle(
+    'chapter:update',
+    (_e, projectId: string, chapterId: string, patch: UpdateChapterInput) =>
+      handle(() => projectService.updateChapter(String(projectId), String(chapterId), patch))
+  )
+
+  ipcMain.handle('chapter:delete', (_e, projectId: string, chapterId: string) =>
+    handle(() => projectService.deleteChapter(String(projectId), String(chapterId)))
+  )
+
+  ipcMain.handle('chapter:get', (_e, projectId: string, chapterId: string) =>
+    handle(() => projectService.getChapter(String(projectId), String(chapterId)))
   )
 }

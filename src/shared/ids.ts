@@ -41,3 +41,10 @@ export function toBeatFileName(title: string, beatId: string): string {
 export function toEntityFileName(name: string, entityId: string): string {
   return toNamedFileName(name, entityId, '未命名实体')
 }
+
+/** 文章文件名 */
+export function toChapterFileName(title: string, chapterId: string): string {
+  return toNamedFileName(title, chapterId, '未命名文章')
+}
+
+/** id 前缀约定：proj_ / beat_ / ent_ / chap_ / conv_ / msg_ / call_ */

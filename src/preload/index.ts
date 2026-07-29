@@ -1,6 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { AgentToolDefinition } from '../shared/agent-tools'
 import type {
+  AgentRunTurnInput,
+  AgentRunTurnResult,
+  Chapter,
+  Conversation,
+  ConversationMessage,
+  ConversationSummary,
   CreateBeatInput,
+  CreateChapterInput,
+  CreateConversationInput,
   CreateEntityInput,
   CreateProjectInput,
   ProjectMeta,
@@ -8,6 +17,8 @@ import type {
   ProjectSummary,
   ReorderBeatsInput,
   UpdateBeatInput,
+  UpdateChapterInput,
+  UpdateConversationInput,
   UpdateEntityInput
 } from '../shared/project-types'
 
@@ -40,7 +51,7 @@ const windowApi = {
 }
 
 /**
- * 项目库 / 项目 / 节点 / 实体 API
+ * 项目库 / 项目 / 节点 / 实体 / 章节 API
  */
 const projectApi = {
   getLibraryRoot: (): Promise<string> => ipcRenderer.invoke('library:getRoot'),
@@ -84,13 +95,63 @@ const projectApi = {
   deleteEntity: (projectId: string, entityId: string): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke('entity:delete', projectId, entityId),
   reorderEntities: (projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> =>
-    ipcRenderer.invoke('entity:reorder', projectId, orderedIds)
+    ipcRenderer.invoke('entity:reorder', projectId, orderedIds),
+
+  createChapter: (projectId: string, input: CreateChapterInput): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('chapter:create', projectId, input),
+  updateChapter: (
+    projectId: string,
+    chapterId: string,
+    patch: UpdateChapterInput
+  ): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('chapter:update', projectId, chapterId, patch),
+  deleteChapter: (projectId: string, chapterId: string): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('chapter:delete', projectId, chapterId),
+  getChapter: (projectId: string, chapterId: string): Promise<Chapter> =>
+    ipcRenderer.invoke('chapter:get', projectId, chapterId)
+}
+
+/**
+ * 会话 API
+ */
+const conversationApi = {
+  list: (projectId: string): Promise<ConversationSummary[]> =>
+    ipcRenderer.invoke('conversation:list', projectId),
+  create: (projectId: string, input?: CreateConversationInput): Promise<Conversation> =>
+    ipcRenderer.invoke('conversation:create', projectId, input),
+  open: (projectId: string, conversationId: string): Promise<Conversation> =>
+    ipcRenderer.invoke('conversation:open', projectId, conversationId),
+  appendMessages: (
+    projectId: string,
+    conversationId: string,
+    messages: ConversationMessage[]
+  ): Promise<Conversation> =>
+    ipcRenderer.invoke('conversation:appendMessages', projectId, conversationId, messages),
+  update: (
+    projectId: string,
+    conversationId: string,
+    patch: UpdateConversationInput
+  ): Promise<Conversation> =>
+    ipcRenderer.invoke('conversation:update', projectId, conversationId, patch),
+  delete: (projectId: string, conversationId: string): Promise<void> =>
+    ipcRenderer.invoke('conversation:delete', projectId, conversationId)
+}
+
+/**
+ * Agent API（本阶段占位 runner）
+ */
+const agentApi = {
+  runTurn: (input: AgentRunTurnInput): Promise<AgentRunTurnResult> =>
+    ipcRenderer.invoke('agent:runTurn', input),
+  listTools: (): Promise<AgentToolDefinition[]> => ipcRenderer.invoke('agent:listTools')
 }
 
 const api = {
   app: appApi,
   window: windowApi,
-  project: projectApi
+  project: projectApi,
+  conversation: conversationApi,
+  agent: agentApi
 }
 
 try {

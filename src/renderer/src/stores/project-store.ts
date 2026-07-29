@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type {
   CreateBeatInput,
+  CreateChapterInput,
   CreateEntityInput,
   CreateProjectInput,
   ProjectMeta,
@@ -8,6 +9,7 @@ import type {
   ProjectSummary,
   ReorderBeatsInput,
   UpdateBeatInput,
+  UpdateChapterInput,
   UpdateEntityInput
 } from '@shared/project-types'
 
@@ -38,8 +40,6 @@ interface ProjectState {
   projectView: ProjectView
   selectedBeatId: string | null
   selectedEntityId: string | null
-  createBeatsOpen: boolean
-  createEntitiesOpen: boolean
   projectForm: ProjectFormMode | null
   beatForm: BeatFormMode | null
   entityForm: EntityFormMode | null
@@ -60,8 +60,6 @@ interface ProjectState {
   setProjectView: (view: ProjectView) => void
   setSelectedBeatId: (id: string | null) => void
   setSelectedEntityId: (id: string | null) => void
-  setCreateBeatsOpen: (open: boolean) => void
-  setCreateEntitiesOpen: (open: boolean) => void
   openCreateProjectModal: () => void
   openEditProjectModal: (projectId: string) => void
   closeProjectFormModal: () => void
@@ -81,6 +79,12 @@ interface ProjectState {
   updateEntity: (entityId: string, patch: UpdateEntityInput) => Promise<void>
   deleteEntity: (entityId: string) => Promise<void>
   reorderEntities: (orderedIds: string[]) => Promise<void>
+
+  createChapter: (input: CreateChapterInput) => Promise<void>
+  updateChapter: (chapterId: string, patch: UpdateChapterInput) => Promise<void>
+  deleteChapter: (chapterId: string) => Promise<void>
+  /** 外部（create-store）写入 snapshot */
+  applyExternalSnapshot: (snap: ProjectSnapshot) => void
 }
 
 function applySnapshot(
@@ -91,7 +95,11 @@ function applySnapshot(
   const expanded = new Set(get().expandedProjectIds)
   expanded.add(snap.meta.id)
   set({
-    snapshot: snap,
+    snapshot: {
+      ...snap,
+      chapters: snap.chapters ?? {},
+      conversationSummaries: snap.conversationSummaries ?? []
+    },
     activeProjectId: snap.meta.id,
     expandedProjectIds: [...expanded],
     error: null
@@ -99,7 +107,7 @@ function applySnapshot(
 }
 
 /**
- * 项目 / 节点 / 实体 store
+ * 项目 / 节点 / 实体 / 章节 store
  */
 export const useProjectStore = create<ProjectState>((set, get) => ({
   library: [],
@@ -110,8 +118,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   projectView: 'overview',
   selectedBeatId: null,
   selectedEntityId: null,
-  createBeatsOpen: true,
-  createEntitiesOpen: true,
   projectForm: null,
   beatForm: null,
   entityForm: null,
@@ -166,6 +172,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   openProject: async (projectId, view = 'overview') => {
     set({ loading: true, error: null })
     try {
+      const prevId = get().activeProjectId
       const snap = await window.api.project.open(projectId)
       applySnapshot(set, get, snap)
       set({
@@ -174,6 +181,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         selectedEntityId: snap.index.entities.order[0] ?? null,
         loading: false
       })
+      if (prevId !== projectId) {
+        void import('./create-store').then(({ useCreateStore }) => {
+          useCreateStore.getState().reset()
+        })
+      }
     } catch (error) {
       set({
         loading: false,
@@ -189,6 +201,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       selectedBeatId: null,
       selectedEntityId: null
     })
+    // 动态导入避免循环依赖
+    void import('./create-store').then(({ useCreateStore }) => {
+      useCreateStore.getState().reset()
+    })
   },
 
   deleteProject: async (projectId) => {
@@ -202,6 +218,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           activeProjectId: null,
           selectedBeatId: null,
           selectedEntityId: null
+        })
+        void import('./create-store').then(({ useCreateStore }) => {
+          useCreateStore.getState().reset()
         })
       }
       set({
@@ -235,8 +254,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
               }
             : item
         )
-        // 不在此关闭 projectForm：弹窗由 NamePromptModal 自行关闭；
-        // 概览页内联保存也不应被打断
       })
       await get().refreshLibrary()
     } catch (error) {
@@ -255,8 +272,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setProjectView: (view) => set({ projectView: view }),
   setSelectedBeatId: (id) => set({ selectedBeatId: id }),
   setSelectedEntityId: (id) => set({ selectedEntityId: id }),
-  setCreateBeatsOpen: (open) => set({ createBeatsOpen: open }),
-  setCreateEntitiesOpen: (open) => set({ createEntitiesOpen: open }),
 
   openCreateProjectModal: () => set({ projectForm: { mode: 'create' } }),
   openEditProjectModal: (projectId) => {
@@ -293,8 +308,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const snap = await window.api.project.createBeat(activeProjectId, input)
       const newId = snap.index.beats.order[snap.index.beats.order.length - 1] ?? null
+      applySnapshot(set, get, snap)
       set({
-        snapshot: snap,
         selectedBeatId: newId ?? get().selectedBeatId,
         beatForm: null
       })
@@ -310,7 +325,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!activeProjectId) return
     try {
       const snap = await window.api.project.updateBeat(activeProjectId, beatId, patch)
-      set({ snapshot: snap, beatForm: null })
+      applySnapshot(set, get, snap)
+      set({ beatForm: null })
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
       throw error
@@ -326,7 +342,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         selectedBeatId && !snap.beats[selectedBeatId]
           ? (snap.index.beats.order[0] ?? null)
           : selectedBeatId
-      set({ snapshot: snap, selectedBeatId: nextSelected })
+      applySnapshot(set, get, snap)
+      set({ selectedBeatId: nextSelected })
       await get().refreshLibrary()
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
@@ -338,11 +355,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!activeProjectId) return
     try {
       const snap = await window.api.project.reorderBeats(activeProjectId, input)
-      set({ snapshot: snap })
+      applySnapshot(set, get, snap)
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
       const snap = await window.api.project.open(activeProjectId)
-      set({ snapshot: snap })
+      applySnapshot(set, get, snap)
     }
   },
 
@@ -352,7 +369,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const snap = await window.api.project.createEntity(activeProjectId, input)
       const newId = snap.index.entities.order[snap.index.entities.order.length - 1] ?? null
-      set({ snapshot: snap, selectedEntityId: newId, entityForm: null })
+      applySnapshot(set, get, snap)
+      set({ selectedEntityId: newId, entityForm: null })
       await get().refreshLibrary()
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
@@ -365,7 +383,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!activeProjectId) return
     try {
       const snap = await window.api.project.updateEntity(activeProjectId, entityId, patch)
-      set({ snapshot: snap, entityForm: null })
+      applySnapshot(set, get, snap)
+      set({ entityForm: null })
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
       throw error
@@ -381,7 +400,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         selectedEntityId && !snap.entities[selectedEntityId]
           ? (snap.index.entities.order[0] ?? null)
           : selectedEntityId
-      set({ snapshot: snap, selectedEntityId: nextSelected })
+      applySnapshot(set, get, snap)
+      set({ selectedEntityId: nextSelected })
       await get().refreshLibrary()
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
@@ -393,12 +413,51 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!activeProjectId) return
     try {
       const snap = await window.api.project.reorderEntities(activeProjectId, orderedIds)
-      set({ snapshot: snap })
+      applySnapshot(set, get, snap)
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
       const snap = await window.api.project.open(activeProjectId)
-      set({ snapshot: snap })
+      applySnapshot(set, get, snap)
     }
+  },
+
+  createChapter: async (input) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.createChapter(activeProjectId, input)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  },
+
+  updateChapter: async (chapterId, patch) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.updateChapter(activeProjectId, chapterId, patch)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  },
+
+  deleteChapter: async (chapterId) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.deleteChapter(activeProjectId, chapterId)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+    }
+  },
+
+  applyExternalSnapshot: (snap) => {
+    applySnapshot(set, get, snap)
   }
 }))
 
@@ -416,4 +475,11 @@ export function getOrderedEntities(snapshot: ProjectSnapshot | null) {
   return snapshot.index.entities.order
     .map((id) => snapshot.entities[id])
     .filter(Boolean)
+}
+
+/** 有序文章列表（按 index.chapters.order） */
+export function getOrderedChapters(snapshot: ProjectSnapshot | null) {
+  if (!snapshot) return []
+  const order = snapshot.index.chapters?.order ?? []
+  return order.map((id) => snapshot.chapters[id]).filter(Boolean)
 }

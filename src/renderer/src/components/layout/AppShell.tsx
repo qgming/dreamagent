@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { TitleBar } from '@/components/TitleBar'
 import { AppSidebar } from '@/components/sidebar/AppSidebar'
@@ -15,9 +15,12 @@ import { useProjectStore } from '@/stores/project-store'
 
 /**
  * 应用外壳：标题栏 + 侧边栏（带动画） + 主内容区
+ * 进入「创作」时沉浸式自动收起侧栏，离开时恢复
  */
 export function AppShell(): React.JSX.Element {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const collapsedBeforeCreate = useRef(false)
+  const wasCreate = useRef(false)
   useTheme()
   useBootstrapLibrary()
 
@@ -25,6 +28,22 @@ export function AppShell(): React.JSX.Element {
   const projectView = useProjectStore((s) => s.projectView)
   const snapshot = useProjectStore((s) => s.snapshot)
   const error = useProjectStore((s) => s.error)
+
+  const isCreate = Boolean(activeProjectId && snapshot && projectView === 'create')
+
+  useEffect(() => {
+    if (isCreate && !wasCreate.current) {
+      // 进入创作：记下当前开合，强制收起
+      setSidebarCollapsed((prev) => {
+        collapsedBeforeCreate.current = prev
+        return true
+      })
+      wasCreate.current = true
+    } else if (!isCreate && wasCreate.current) {
+      setSidebarCollapsed(collapsedBeforeCreate.current)
+      wasCreate.current = false
+    }
+  }, [isCreate])
 
   useEffect(() => {
     const title = snapshot?.meta.title ? `${snapshot.meta.title} - 造梦师` : '造梦师'

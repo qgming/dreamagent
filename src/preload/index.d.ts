@@ -1,5 +1,14 @@
+import type { AgentToolDefinition } from '../shared/agent-tools'
 import type {
+  AgentRunTurnInput,
+  AgentRunTurnResult,
+  Chapter,
+  Conversation,
+  ConversationMessage,
+  ConversationSummary,
   CreateBeatInput,
+  CreateChapterInput,
+  CreateConversationInput,
   CreateEntityInput,
   CreateProjectInput,
   ProjectMeta,
@@ -7,6 +16,8 @@ import type {
   ProjectSummary,
   ReorderBeatsInput,
   UpdateBeatInput,
+  UpdateChapterInput,
+  UpdateConversationInput,
   UpdateEntityInput
 } from '../shared/project-types'
 
@@ -56,12 +67,45 @@ export interface ProjectApi {
   ) => Promise<ProjectSnapshot>
   deleteEntity: (projectId: string, entityId: string) => Promise<ProjectSnapshot>
   reorderEntities: (projectId: string, orderedIds: string[]) => Promise<ProjectSnapshot>
+
+  createChapter: (projectId: string, input: CreateChapterInput) => Promise<ProjectSnapshot>
+  updateChapter: (
+    projectId: string,
+    chapterId: string,
+    patch: UpdateChapterInput
+  ) => Promise<ProjectSnapshot>
+  deleteChapter: (projectId: string, chapterId: string) => Promise<ProjectSnapshot>
+  getChapter: (projectId: string, chapterId: string) => Promise<Chapter>
+}
+
+export interface ConversationApi {
+  list: (projectId: string) => Promise<ConversationSummary[]>
+  create: (projectId: string, input?: CreateConversationInput) => Promise<Conversation>
+  open: (projectId: string, conversationId: string) => Promise<Conversation>
+  appendMessages: (
+    projectId: string,
+    conversationId: string,
+    messages: ConversationMessage[]
+  ) => Promise<Conversation>
+  update: (
+    projectId: string,
+    conversationId: string,
+    patch: UpdateConversationInput
+  ) => Promise<Conversation>
+  delete: (projectId: string, conversationId: string) => Promise<void>
+}
+
+export interface AgentApi {
+  runTurn: (input: AgentRunTurnInput) => Promise<AgentRunTurnResult>
+  listTools: () => Promise<AgentToolDefinition[]>
 }
 
 export interface DreamAgentApi {
   app: AppApi
   window: WindowApi
   project: ProjectApi
+  conversation: ConversationApi
+  agent: AgentApi
 }
 
 declare global {

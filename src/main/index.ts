@@ -2,7 +2,11 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { LibraryService } from './services/library-service'
 import { ProjectService } from './services/project-service'
+import { ConversationService } from './services/conversation-service'
+import { AgentPlaceholderRunner } from './services/agent-placeholder-runner'
 import { registerProjectIpc } from './ipc/project-ipc'
+import { registerConversationIpc } from './ipc/conversation-ipc'
+import { registerAgentIpc } from './ipc/agent-ipc'
 
 /** 是否为开发环境 */
 const isDev = !app.isPackaged
@@ -119,11 +123,15 @@ app.whenReady().then(async () => {
   // 窗口控制 IPC
   registerWindowIpc()
 
-  // 项目库 / 节点 / 实体 IPC
+  // 项目库 / 节点 / 实体 / 章节 / 会话 / Agent IPC
   const libraryService = new LibraryService()
   await libraryService.init()
   const projectService = new ProjectService(libraryService)
+  const conversationService = new ConversationService(projectService)
+  const agentRunner = new AgentPlaceholderRunner(projectService, conversationService)
   registerProjectIpc(projectService)
+  registerConversationIpc(conversationService)
+  registerAgentIpc(agentRunner)
 
   createWindow()
 
