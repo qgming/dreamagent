@@ -56,7 +56,8 @@ import {
   ENTITY_STATUS_DOT_CLASS,
   formatUpdatedAt
 } from '@/lib/project-utils'
-import { mentionChipStyles } from '@/lib/mention-styles'
+import { BACKLINK_CHIP, mentionChipStyles } from '@/lib/mention-styles'
+import { CollapsibleChipList } from '@/components/ui/collapsible-chip-list'
 import { computeBacklinks } from '@/lib/backlinks'
 import {
   getOrderedBeats,
@@ -1192,66 +1193,83 @@ function MetaLinks({
   inbound: ReturnType<typeof computeBacklinks>
   onOpen: (t: DetailTarget) => void
 }): React.JSX.Element {
-  const hasOut = outboundBeats.length + outboundEntities.length > 0
-  const hasIn =
-    inbound.beats.length + inbound.entities.length + inbound.chapters.length > 0
+  const outItems = [...outboundBeats, ...outboundEntities]
+  const inItems = [
+    ...inbound.beats.map((r) => ({ ...r, kind: 'beat' as const })),
+    ...inbound.entities.map((r) => ({ ...r, kind: 'entity' as const })),
+    ...inbound.chapters.map((r) => ({ ...r, kind: 'chapter' as const }))
+  ]
+  const hasOut = outItems.length > 0
+  const hasIn = inItems.length > 0
   if (!hasOut && !hasIn) return <></>
 
   return (
-    <div className="space-y-1.5 border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
+    <div className="space-y-2 border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
       {hasOut ? (
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="shrink-0">出链</span>
-          {[...outboundBeats, ...outboundEntities].map((r) => (
-            <button
-              className={cn(
-                'rounded px-1.5 py-0.5 font-medium',
-                r.type === 'beat'
-                  ? 'bg-[color-mix(in_oklab,#3b82f6_18%,transparent)] text-[#1d4ed8] dark:text-[#93c5fd]'
-                  : 'bg-[color-mix(in_oklab,#ef4444_16%,transparent)] text-[#b91c1c] dark:text-[#fca5a5]'
-              )}
-              key={`${r.type}-${r.id}`}
-              onClick={() => onOpen({ type: r.type, id: r.id })}
-              type="button"
-            >
-              @{r.label}
-            </button>
-          ))}
+        <div className="flex min-w-0 items-start gap-1.5">
+          <span className="mt-0.5 shrink-0 leading-5">出链</span>
+          <CollapsibleChipList
+            className="min-w-0 flex-1"
+            count={outItems.length}
+          >
+            {outboundBeats.map((r) => (
+              <button
+                className={BACKLINK_CHIP.beat}
+                key={`ob-${r.id}`}
+                onClick={() => onOpen({ type: 'beat', id: r.id })}
+                type="button"
+              >
+                <span className="truncate">@{r.label}</span>
+              </button>
+            ))}
+            {outboundEntities.map((r) => (
+              <button
+                className={BACKLINK_CHIP.entity}
+                key={`oe-${r.id}`}
+                onClick={() => onOpen({ type: 'entity', id: r.id })}
+                type="button"
+              >
+                <span className="truncate">@{r.label}</span>
+              </button>
+            ))}
+          </CollapsibleChipList>
         </div>
       ) : null}
       {hasIn ? (
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="shrink-0">入链</span>
-          {inbound.beats.map((r) => (
-            <button
-              className="rounded bg-[color-mix(in_oklab,#3b82f6_18%,transparent)] px-1.5 py-0.5 font-medium text-[#1d4ed8] dark:text-[#93c5fd]"
-              key={`ib-${r.id}`}
-              onClick={() => onOpen({ type: 'beat', id: r.id })}
-              type="button"
-            >
-              @{r.label}
-            </button>
-          ))}
-          {inbound.entities.map((r) => (
-            <button
-              className="rounded bg-[color-mix(in_oklab,#ef4444_16%,transparent)] px-1.5 py-0.5 font-medium text-[#b91c1c] dark:text-[#fca5a5]"
-              key={`ie-${r.id}`}
-              onClick={() => onOpen({ type: 'entity', id: r.id })}
-              type="button"
-            >
-              @{r.label}
-            </button>
-          ))}
-          {inbound.chapters.map((r) => (
-            <button
-              className="rounded bg-muted px-1.5 py-0.5 font-medium text-foreground"
-              key={`ic-${r.id}`}
-              onClick={() => onOpen({ type: 'chapter', id: r.id })}
-              type="button"
-            >
-              {r.label}
-            </button>
-          ))}
+        <div className="flex min-w-0 items-start gap-1.5">
+          <span className="mt-0.5 shrink-0 leading-5">入链</span>
+          <CollapsibleChipList className="min-w-0 flex-1" count={inItems.length}>
+            {inbound.beats.map((r) => (
+              <button
+                className={BACKLINK_CHIP.beat}
+                key={`ib-${r.id}`}
+                onClick={() => onOpen({ type: 'beat', id: r.id })}
+                type="button"
+              >
+                <span className="truncate">@{r.label}</span>
+              </button>
+            ))}
+            {inbound.entities.map((r) => (
+              <button
+                className={BACKLINK_CHIP.entity}
+                key={`ie-${r.id}`}
+                onClick={() => onOpen({ type: 'entity', id: r.id })}
+                type="button"
+              >
+                <span className="truncate">@{r.label}</span>
+              </button>
+            ))}
+            {inbound.chapters.map((r) => (
+              <button
+                className={BACKLINK_CHIP.article}
+                key={`ic-${r.id}`}
+                onClick={() => onOpen({ type: 'chapter', id: r.id })}
+                type="button"
+              >
+                <span className="truncate">{r.label}</span>
+              </button>
+            ))}
+          </CollapsibleChipList>
         </div>
       ) : null}
     </div>

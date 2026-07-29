@@ -64,13 +64,13 @@ function isNewChatView(s: AssistantState): boolean {
   return s.thread.messages.length === 0
 }
 
-/** 用户气泡：浅色背景 + directive chip */
+/** 用户气泡：浅灰/灰黑底 + 对应前景字 */
 function UserBubble(): React.JSX.Element {
   return (
     <MessagePrimitive.Root className="flex flex-col items-end gap-1">
       <UserMessageAttachments />
       <div
-        className="max-w-[85%] rounded-2xl bg-primary px-3.5 py-2 text-sm text-primary-foreground select-text"
+        className="max-w-[85%] rounded-2xl bg-user-bubble px-3.5 py-2 text-sm text-user-bubble-foreground select-text"
         data-message-selectable
       >
         <MessagePrimitive.Parts

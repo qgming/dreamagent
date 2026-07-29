@@ -1,63 +1,27 @@
 /**
- * 用户消息 directive 渲染：:type[label]{name=id} → 内联 chip
- * 官方 createDirectiveText + 项目图标 / 气泡色 / 旧 [上下文] 兼容
+ * 用户消息 directive 渲染：:type[label]{name=id} → 内联胶囊
+ * 与输入区插入预览共用 directive-chip 色板（bubble / surface）
  */
 "use client";
 
-import { memo, type FC } from "react";
+import { memo } from "react";
 import type { TextMessagePartComponent } from "@assistant-ui/react";
 import type { Unstable_DirectiveFormatter } from "@assistant-ui/react";
 import { unstable_defaultDirectiveFormatter } from "@assistant-ui/react";
-import { CircleDot, FileText, Users, Wrench, Zap } from "lucide-react";
-import { Badge } from "./badge";
 import { parseUserMessage } from "@/components/create/assistant/composer-context";
-import { cn } from "@/lib/utils";
-
-type IconComponent = FC<{ className?: string }>;
+import { DirectiveChip } from "./directive-chip-ui";
 
 export type CreateDirectiveTextOptions = {
-  /** 按 directive type 映射图标 */
-  iconMap?: Record<string, IconComponent>;
-  /** 未命中 iconMap 时的兜底图标 */
-  fallbackIcon?: IconComponent;
+  // 预留：自定义图标映射（当前统一走 DirectiveChip）
+  iconMap?: Record<string, unknown>;
+  fallbackIcon?: unknown;
 };
 
-const DEFAULT_ICON_MAP: Record<string, IconComponent> = {
-  skill: Zap,
-  beat: CircleDot,
-  entity: Users,
-  tool: Wrench,
-  article: FileText,
-  chapter: FileText,
-};
-
-/** 用户 primary 气泡上的 chip 色 */
-const chipTone = (type: string): string => {
-  switch (type) {
-    case "skill":
-      return "border-violet-500/40 bg-violet-500/20 text-violet-50";
-    case "beat":
-      return "border-sky-500/40 bg-sky-500/20 text-sky-50";
-    case "entity":
-      return "border-rose-500/40 bg-rose-500/20 text-rose-50";
-    case "tool":
-      return "border-amber-500/40 bg-amber-500/20 text-amber-50";
-    case "article":
-    case "chapter":
-      return "border-emerald-500/40 bg-emerald-500/20 text-emerald-50";
-    default:
-      return "border-white/20 bg-white/15 text-primary-foreground";
-  }
-};
-
-/** 工厂：绑定 formatter + 图标 */
+/** 工厂：绑定 formatter */
 export function createDirectiveText(
   formatter: Unstable_DirectiveFormatter,
-  options?: CreateDirectiveTextOptions,
+  _options?: CreateDirectiveTextOptions,
 ): TextMessagePartComponent {
-  const iconMap = { ...DEFAULT_ICON_MAP, ...options?.iconMap };
-  const fallbackIcon = options?.fallbackIcon;
-
   const Component: TextMessagePartComponent = ({ text }) => {
     const raw = text ?? "";
 
@@ -68,25 +32,15 @@ export function createDirectiveText(
         <div className="select-text space-y-2" data-message-selectable>
           {legacy.items.length > 0 ? (
             <div className="flex flex-wrap gap-1">
-              {legacy.items.map((item) => {
-                const Icon = iconMap[item.kind] ?? fallbackIcon;
-                return (
-                  <Badge
-                    key={`${item.kind}:${item.id}`}
-                    size="sm"
-                    className={cn(
-                      "aui-directive-chip items-baseline border text-[12px] leading-none [&_svg]:self-center",
-                      chipTone(item.kind),
-                    )}
-                    data-directive-type={item.kind}
-                    data-directive-id={item.id}
-                    aria-label={`${item.kind}: ${item.label}`}
-                  >
-                    {Icon ? <Icon /> : null}
-                    {item.label}
-                  </Badge>
-                );
-              })}
+              {legacy.items.map((item) => (
+                <DirectiveChip
+                  key={`${item.kind}:${item.id}`}
+                  type={item.kind}
+                  label={item.label}
+                  id={item.id}
+                  surface="bubble"
+                />
+              ))}
             </div>
           ) : null}
           {legacy.body ? (
@@ -123,23 +77,15 @@ export function createDirectiveText(
               </span>
             );
           }
-          const Icon = iconMap[seg.type] ?? fallbackIcon;
           return (
-            <Badge
+            <DirectiveChip
               key={i}
-              size="sm"
-              data-slot="directive-text-chip"
-              data-directive-type={seg.type}
-              data-directive-id={seg.id}
-              aria-label={`${seg.type}: ${seg.label}`}
-              className={cn(
-                "aui-directive-chip mx-0.5 inline-flex translate-y-[-1px] items-baseline border text-[12px] leading-none [&_svg]:self-center",
-                chipTone(seg.type),
-              )}
-            >
-              {Icon ? <Icon /> : null}
-              {seg.label}
-            </Badge>
+              type={seg.type}
+              label={seg.label}
+              id={seg.id}
+              surface="bubble"
+              className="mx-[0.1em]"
+            />
           );
         })}
       </p>
@@ -153,5 +99,5 @@ const DirectiveTextImpl = createDirectiveText(
   unstable_defaultDirectiveFormatter,
 );
 
-/** 用户消息 Text part：directive chip */
+/** 用户消息 Text part：directive 胶囊 */
 export const DirectiveText: TextMessagePartComponent = memo(DirectiveTextImpl);

@@ -1,8 +1,8 @@
 /**
- * 创作页 Composer（对齐官方 thread 简洁布局）
- * - 附件 + 输入 + 底栏操作
- * - 加号右侧 @ 按钮触发提及
- * - 无 Enter 提示小字
+ * 创作页 Composer
+ * - Lexical 行内 directive 胶囊（退格整颗删除）
+ * - 加号右侧 @ 按钮，与手输 @ 相同
+ * - 胶囊样式与用户消息一致（浅/深色）
  */
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import {
@@ -11,6 +11,7 @@ import {
   useAui,
   type Unstable_MentionCategory
 } from '@assistant-ui/react'
+import { LexicalComposerInput } from '@assistant-ui/react-lexical'
 import {
   ArrowUp,
   AtSign,
@@ -33,6 +34,7 @@ import {
 } from '@/components/assistant-ui/attachment'
 import { ComposerTriggerPopover } from '@/components/assistant-ui/composer-trigger-popover'
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
+import { LexicalDirectiveChip } from '@/components/assistant-ui/lexical-directive-chip'
 
 const MENTION_ICONS = {
   skill: Zap,
@@ -58,7 +60,8 @@ export function CreateComposer({
   const aui = useAui()
   const sending = useCreateStore((s) => s.sending)
   const cancelTurn = useCreateStore((s) => s.cancelTurn)
-  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  /** Lexical 根节点（contenteditable 在内部） */
+  const editorRootRef = useRef<HTMLDivElement | null>(null)
 
   const snapshot = useProjectStore((s) => s.snapshot)
   const skills = useSkillsStore((s) => s.skills)
@@ -141,43 +144,56 @@ export function CreateComposer({
     fallbackIcon: Sparkles
   })
 
-  /** 在光标处插入 @，打开提及 popover */
+  /**
+   * 在当前光标处插入 @，触发与手输相同的 mention popover。
+   * Lexical 使用 contenteditable，通过 execCommand / beforeinput 写入文本。
+   */
   const insertMentionTrigger = useCallback(() => {
-    const el = inputRef.current
-    const stateText = aui.composer.getState().text ?? ''
-    let next = stateText
-    let caret = stateText.length
+    const root = editorRootRef.current
+    const editable =
+      root?.querySelector<HTMLElement>('[contenteditable="true"]') ?? null
 
-    if (el) {
-      const start = el.selectionStart ?? stateText.length
-      const end = el.selectionEnd ?? start
-      const before = stateText.slice(0, start)
-      const after = stateText.slice(end)
-      // 前面不是空白/行首时补一个空格，避免粘成单词
-      const needSpace = before.length > 0 && !/\s$/.test(before)
-      const insert = `${needSpace ? ' ' : ''}@`
-      next = before + insert + after
-      caret = before.length + insert.length
-    } else {
-      const needSpace = stateText.length > 0 && !/\s$/.test(stateText)
-      next = `${stateText}${needSpace ? ' ' : ''}@`
-      caret = next.length
-    }
+    if (editable) {
+      editable.focus()
 
-    aui.composer.setText(next)
-    // 等 React 回填 value 后再聚焦并设光标，触发 popover 检测
-    queueMicrotask(() => {
-      const target = inputRef.current
-      if (!target) return
-      target.focus()
+      // 尽量在当前选区插入；若无选区则落到末尾
+      const sel = window.getSelection()
+      if (!sel || sel.rangeCount === 0 || !editable.contains(sel.anchorNode)) {
+        const range = document.createRange()
+        range.selectNodeContents(editable)
+        range.collapse(false)
+        sel?.removeAllRanges()
+        sel?.addRange(range)
+      }
+
+      // 前面不是空白时补空格，满足 detectTrigger 边界
+      let prefix = ''
       try {
-        target.setSelectionRange(caret, caret)
+        const r = sel?.getRangeAt(0)
+        if (r) {
+          const pre = r.cloneRange()
+          pre.selectNodeContents(editable)
+          pre.setEnd(r.startContainer, r.startOffset)
+          const before = pre.toString()
+          if (before.length > 0 && !/\s$/.test(before)) prefix = ' '
+        }
       } catch {
         // ignore
       }
-      // 再派一次 input 事件，确保 trigger 检测读到最新文本
-      target.dispatchEvent(new Event('input', { bubbles: true }))
-    })
+
+      const ok = document.execCommand('insertText', false, `${prefix}@`)
+      if (!ok) {
+        // 部分环境 execCommand 失败：退回 setText（会丢光标精度）
+        const stateText = aui.composer.getState().text ?? ''
+        const needSpace = stateText.length > 0 && !/\s$/.test(stateText)
+        aui.composer.setText(`${stateText}${needSpace ? ' ' : ''}@`)
+      }
+      return
+    }
+
+    const stateText = aui.composer.getState().text ?? ''
+    const needSpace = stateText.length > 0 && !/\s$/.test(stateText)
+    aui.composer.setText(`${stateText}${needSpace ? ' ' : ''}@`)
   }, [aui])
 
   return (
@@ -195,13 +211,20 @@ export function CreateComposer({
           >
             <ComposerAttachments />
 
-            <ComposerPrimitive.Input
-              ref={inputRef}
-              className="aui-composer-input max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-sm outline-none placeholder:text-muted-foreground/80 select-text"
+            {/* Lexical：directive 以行内容器渲染，退格整颗删除 */}
+            <LexicalComposerInput
+              ref={editorRootRef}
               placeholder="发送消息…"
-              rows={1}
               autoFocus={centered}
-              enterKeyHint="send"
+              submitMode="enter"
+              directiveChip={LexicalDirectiveChip}
+              className={cn(
+                // 覆盖默认 aui-lexical-editor 尺寸，贴合现有输入样式
+                'min-h-10 w-full px-2.5 py-1 text-sm outline-none',
+                '[&_.aui-lexical-input]:min-h-10 [&_.aui-lexical-input]:w-full [&_.aui-lexical-input]:outline-none',
+                '[&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:break-words',
+                '[&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:text-muted-foreground/80'
+              )}
               aria-label="消息输入"
             />
 

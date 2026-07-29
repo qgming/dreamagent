@@ -32,6 +32,7 @@ import {
   SortableList
 } from '@/components/ui/sortable-list'
 import { BACKLINK_CHIP } from '@/lib/mention-styles'
+import { CollapsibleChipList } from '@/components/ui/collapsible-chip-list'
 import { cn } from '@/lib/utils'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
 import {
@@ -321,45 +322,35 @@ function EntityEditor({
       {hasLinks ? (
         <div className="shrink-0 space-y-2 border-t border-border px-4 py-2">
           {linkedBeats.length > 0 ? (
-            <div>
-              <p className="mb-1 text-[10px] font-medium text-muted-foreground">
-                关联节点 · {linkedBeats.length}
-              </p>
-              <div className="flex flex-wrap gap-1">
-                {linkedBeats.map((b) => (
-                  <button
-                    className={BACKLINK_CHIP.cross}
-                    key={b.id}
-                    onClick={() => {
-                      setSelectedBeatId(b.id)
-                      setProjectView('beats')
-                    }}
-                    type="button"
-                  >
-                    <span className="truncate">@{b.title || '未命名节点'}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            <CollapsibleChipList count={linkedBeats.length} label="关联节点">
+              {linkedBeats.map((b) => (
+                <button
+                  className={BACKLINK_CHIP.cross}
+                  key={b.id}
+                  onClick={() => {
+                    setSelectedBeatId(b.id)
+                    setProjectView('beats')
+                  }}
+                  type="button"
+                >
+                  <span className="truncate">@{b.title || '未命名节点'}</span>
+                </button>
+              ))}
+            </CollapsibleChipList>
           ) : null}
           {linkedEntities.length > 0 ? (
-            <div>
-              <p className="mb-1 text-[10px] font-medium text-muted-foreground">
-                关联实体 · {linkedEntities.length}
-              </p>
-              <div className="flex flex-wrap gap-1">
-                {linkedEntities.map((e) => (
-                  <button
-                    className={BACKLINK_CHIP.entity}
-                    key={e.id}
-                    onClick={() => setSelectedEntityId(e.id)}
-                    type="button"
-                  >
-                    <span className="truncate">@{e.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            <CollapsibleChipList count={linkedEntities.length} label="关联实体">
+              {linkedEntities.map((e) => (
+                <button
+                  className={BACKLINK_CHIP.entity}
+                  key={e.id}
+                  onClick={() => setSelectedEntityId(e.id)}
+                  type="button"
+                >
+                  <span className="truncate">@{e.name}</span>
+                </button>
+              ))}
+            </CollapsibleChipList>
           ) : null}
         </div>
       ) : null}

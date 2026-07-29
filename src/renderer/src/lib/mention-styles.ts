@@ -1,13 +1,21 @@
 /**
- * 双链芯片全局样式（三色）
+ * 双链芯片样式（节点/实体正文 + 反链）
+ * 与 directive 胶囊统一：无边框、深背景、同色浅字
  * 蓝=节点↔节点 · 红=实体↔实体 · 绿=跨类型
+ */
+import { chipClassName, chipToneClass } from '@/components/assistant-ui/directive-chip'
+
+/**
+ * contenteditable 内 mention 的全局 CSS
+ * 背景深、文字同色更浅（非纯白）
  */
 export const mentionChipStyles = `
 .mention-chip {
   display: inline;
-  margin: 0 0.125rem;
-  padding: 0.1rem 0.35rem;
-  border-radius: 0.375rem;
+  margin: 0 0.1em;
+  padding: 0 0.35em;
+  border-radius: 0.3em;
+  border: none;
   font-weight: 500;
   font-size: inherit;
   line-height: inherit;
@@ -15,50 +23,69 @@ export const mentionChipStyles = `
   cursor: pointer;
   user-select: all;
 }
+/* 节点↔节点 · 蓝：深蓝底 + 浅蓝字 */
 .mention-chip--blue {
-  background: color-mix(in oklab, #3b82f6 22%, transparent);
-  color: #1d4ed8;
+  background: #2563eb;
+  color: #bfdbfe;
 }
 .dark .mention-chip--blue {
-  background: color-mix(in oklab, #60a5fa 28%, transparent);
-  color: #93c5fd;
+  background: #3b82f6;
+  color: #dbeafe;
 }
+/* 实体↔实体 · 红 */
 .mention-chip--red {
-  background: color-mix(in oklab, #ef4444 20%, transparent);
-  color: #b91c1c;
+  background: #e11d48;
+  color: #fecdd3;
 }
 .dark .mention-chip--red {
-  background: color-mix(in oklab, #f87171 26%, transparent);
-  color: #fca5a5;
+  background: #f43f5e;
+  color: #ffe4e6;
 }
+/* 跨类型 · 绿 */
 .mention-chip--green {
-  background: color-mix(in oklab, #22c55e 20%, transparent);
-  color: #15803d;
+  background: #059669;
+  color: #a7f3d0;
 }
 .dark .mention-chip--green {
-  background: color-mix(in oklab, #4ade80 26%, transparent);
-  color: #86efac;
+  background: #10b981;
+  color: #d1fae5;
 }
 .mention-chip:hover {
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ring) 50%, transparent);
+  filter: brightness(1.06);
+}
+.dark .mention-chip:hover {
+  filter: brightness(1.08);
 }
 `
 
-/** 底部反链色块：与正文 mention-chip 同量级（小内边距、继承字号） */
+/**
+ * 底部反链色块：与正文 mention / directive 同色系
+ * beat=蓝 · entity=红 · cross=绿
+ */
 export const BACKLINK_CHIP = {
-  beat:
-    'inline max-w-full truncate rounded-md px-1 py-0.5 text-[13px] font-medium leading-5 align-baseline transition-shadow ' +
-    'bg-[color-mix(in_oklab,#3b82f6_22%,transparent)] text-[#1d4ed8] ' +
-    'dark:bg-[color-mix(in_oklab,#60a5fa_28%,transparent)] dark:text-[#93c5fd] ' +
-    'hover:ring-1 hover:ring-ring/40',
-  entity:
-    'inline max-w-full truncate rounded-md px-1 py-0.5 text-[13px] font-medium leading-5 align-baseline transition-shadow ' +
-    'bg-[color-mix(in_oklab,#ef4444_20%,transparent)] text-[#b91c1c] ' +
-    'dark:bg-[color-mix(in_oklab,#f87171_26%,transparent)] dark:text-[#fca5a5] ' +
-    'hover:ring-1 hover:ring-ring/40',
-  cross:
-    'inline max-w-full truncate rounded-md px-1 py-0.5 text-[13px] font-medium leading-5 align-baseline transition-shadow ' +
-    'bg-[color-mix(in_oklab,#22c55e_20%,transparent)] text-[#15803d] ' +
-    'dark:bg-[color-mix(in_oklab,#4ade80_26%,transparent)] dark:text-[#86efac] ' +
-    'hover:ring-1 hover:ring-ring/40'
+  beat: cnBacklink('link-beat'),
+  entity: cnBacklink('link-entity'),
+  cross: cnBacklink('link-cross'),
+  /** 文章引用（出/入链里的 chapter） */
+  article: cnBacklinkArticle()
 } as const
+
+function cnBacklink(
+  tone: 'link-beat' | 'link-entity' | 'link-cross'
+): string {
+  return chipClassName(tone, {
+    surface: 'surface',
+    className:
+      'inline max-w-full cursor-pointer truncate text-[13px] leading-5 transition-[filter] hover:brightness-110'
+  })
+}
+
+function cnBacklinkArticle(): string {
+  return chipClassName('article', {
+    surface: 'surface',
+    className:
+      'inline max-w-full cursor-pointer truncate text-[13px] leading-5 transition-[filter] hover:brightness-110'
+  })
+}
+
+export { chipToneClass }
