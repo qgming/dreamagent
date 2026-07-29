@@ -1,0 +1,167 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* ============================
+ * 设计 Token（对齐 polaragent 风格）
+ * ============================ */
+@theme inline {
+  --font-sans: 'Segoe UI Variable', 'Microsoft YaHei UI', 'Segoe UI', 'PingFang SC', sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+}
+
+/* 浅色主题 */
+:root {
+  --background: #fbfbfa;
+  --foreground: #202421;
+  --card: #ffffff;
+  --card-foreground: #202421;
+  --popover: #ffffff;
+  --popover-foreground: #202421;
+  --primary: #151715;
+  --primary-foreground: #f8faf8;
+  --secondary: #eff1ee;
+  --secondary-foreground: #2d332f;
+  --muted: #f2f3f1;
+  --muted-foreground: #858b86;
+  --accent: #f1eafb;
+  --accent-foreground: #5b3a9e;
+  --destructive: #c94343;
+  --border: #e5e7e3;
+  --input: #dfe3df;
+  --ring: #9b6fe0;
+  --sidebar: #f5f5f3;
+  --sidebar-foreground: #4e554f;
+  --scrollbar-thumb: rgb(32 36 33 / 0.22);
+  --scrollbar-thumb-hover: rgb(32 36 33 / 0.36);
+}
+
+/* 深色主题 */
+.dark {
+  --background: #121212;
+  --foreground: #ededed;
+  --card: #1a1a1a;
+  --card-foreground: #ededed;
+  --popover: #1a1a1a;
+  --popover-foreground: #ededed;
+  --primary: #f5f5f5;
+  --primary-foreground: #121212;
+  --secondary: #242424;
+  --secondary-foreground: #e8e8e8;
+  --muted: #222222;
+  --muted-foreground: #9e9e9e;
+  --accent: #2e2342;
+  --accent-foreground: #c9aef5;
+  --destructive: #e05252;
+  --border: #2e2e2e;
+  --input: #363636;
+  --ring: #b898f0;
+  --sidebar: #161616;
+  --sidebar-foreground: #cacaca;
+  --scrollbar-thumb: rgb(237 237 237 / 0.18);
+  --scrollbar-thumb-hover: rgb(237 237 237 / 0.3);
+}
+
+/* ============================
+ * 全局基础
+ * ============================ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-width: 320px;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+/* 允许输入框选中文本 */
+input,
+textarea {
+  user-select: text;
+  font: inherit;
+}
+
+button {
+  font: inherit;
+  /* 标题栏按钮不可拖拽 */
+  -webkit-app-region: no-drag;
+}
+
+/* Electron 自定义标题栏拖拽区域 */
+[data-electron-drag-region] {
+  -webkit-app-region: drag;
+}
+
+::selection {
+  background: #e4d5f9;
+  color: #2a1b42;
+}
+
+/* 滚动条 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-color: var(--scrollbar-thumb);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.app-scrollbar {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
