@@ -121,6 +121,16 @@ textarea,
   font: inherit;
 }
 
+/* 对话消息 / 工具输出 / 技能详情等可读区域可选中复制 */
+.select-text,
+[data-message-selectable],
+.aui-md,
+pre,
+code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 button {
   /* 只继承字体族；勿用 font 缩写，否则会盖掉按钮上的 text-sm / font-medium 等 utility */
   font-family: inherit;

@@ -3,21 +3,28 @@
  * - 流式 Markdown
  * - 思考/推理折叠块
  * - 工具调用卡片
+ * - 新 Composer：技能/节点/实体上下文
  */
-import { Component, type ErrorInfo, type ReactNode, useEffect, useRef } from 'react'
+import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef } from 'react'
 import {
-  ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
-  useAuiState
+  useAuiState,
+  useMessagePartText
 } from '@assistant-ui/react'
-import { Square, Send, Sparkles } from 'lucide-react'
+import { CircleDot, Sparkles, Users, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useCreateStore } from '@/stores/create-store'
 import { Button } from '@/components/ui/button'
 import { MarkdownText } from './markdown-text'
 import { ReasoningPart } from './reasoning'
 import { ToolCallPart } from './tool-ui'
+import { CreateComposer } from './CreateComposer'
+import {
+  contextKindLabel,
+  parseUserMessage,
+  type ComposerContextKind
+} from './composer-context'
 
 /** 助手消息 parts 组件映射 */
 const assistantPartsComponents = {
@@ -26,18 +33,68 @@ const assistantPartsComponents = {
   tools: { Fallback: ToolCallPart }
 }
 
-/** 用户气泡：纯文本，不走 Markdown */
+function chipTone(kind: ComposerContextKind): string {
+  switch (kind) {
+    case 'skill':
+      return 'border-violet-500/30 bg-violet-500/15 text-violet-100'
+    case 'beat':
+      return 'border-sky-500/30 bg-sky-500/15 text-sky-100'
+    case 'entity':
+      return 'border-rose-500/30 bg-rose-500/15 text-rose-100'
+  }
+}
+
+function ChipGlyph({ kind }: { kind: ComposerContextKind }): React.JSX.Element {
+  const cls = 'size-3 shrink-0 opacity-90'
+  if (kind === 'skill') return <Zap className={cls} />
+  if (kind === 'beat') return <CircleDot className={cls} />
+  return <Users className={cls} />
+}
+
+/** 用户文本 part：解析上下文 chip + 可选中正文 */
+function UserTextPart(): React.JSX.Element | null {
+  const { text } = useMessagePartText()
+  const parsed = useMemo(() => parseUserMessage(text ?? ''), [text])
+
+  if (!text) return null
+
+  return (
+    <div className="select-text space-y-2" data-message-selectable>
+      {parsed.items.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {parsed.items.map((item) => (
+            <span
+              key={`${item.kind}:${item.id}`}
+              className={cn(
+                'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium',
+                chipTone(item.kind)
+              )}
+              title={`${contextKindLabel(item.kind)} ${item.label} (${item.id})`}
+            >
+              <ChipGlyph kind={item.kind} />
+              <span className="min-w-0 truncate">{item.label}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <p className="whitespace-pre-wrap leading-relaxed select-text">{parsed.body}</p>
+    </div>
+  )
+}
+
+/** 用户气泡：可选择文本；展示上下文 chip */
 function UserBubble(): React.JSX.Element {
   return (
     <MessagePrimitive.Root className="flex justify-end">
-      <div className="max-w-[85%] rounded-2xl bg-primary px-3.5 py-2 text-sm text-primary-foreground">
-        <MessagePrimitive.Parts>
-          {({ part }) =>
-            part.type === 'text' ? (
-              <p className="whitespace-pre-wrap leading-relaxed">{part.text}</p>
-            ) : null
-          }
-        </MessagePrimitive.Parts>
+      <div
+        className="max-w-[85%] rounded-2xl bg-primary px-3.5 py-2 text-sm text-primary-foreground select-text"
+        data-message-selectable
+      >
+        <MessagePrimitive.Parts
+          components={{
+            Text: UserTextPart
+          }}
+        />
       </div>
     </MessagePrimitive.Root>
   )
@@ -59,9 +116,10 @@ function AssistantBubble(): React.JSX.Element {
       </div>
       <div
         className={cn(
-          'min-w-0 rounded-2xl bg-muted/60 px-3.5 py-2',
+          'min-w-0 rounded-2xl bg-muted/60 px-3.5 py-2 select-text',
           expandWidth ? 'w-full max-w-[min(100%,42rem)]' : 'max-w-[85%]'
         )}
+        data-message-selectable
       >
         <MessagePrimitive.Parts components={assistantPartsComponents} />
       </div>
@@ -82,7 +140,7 @@ function EmptyState(): React.JSX.Element {
       <div>
         <h2 className="text-base font-semibold">开始一次创作</h2>
         <p className="mt-1 max-w-xs text-xs text-muted-foreground">
-          描述你想写的内容。可在左侧展开节点/实体，点选后于右侧查看详情。
+          描述你想写的内容。可用 + 附加技能 / 节点 / 实体；左侧可展开节点与实体。
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-2">
@@ -170,8 +228,6 @@ class ThreadErrorBoundary extends Component<
  */
 export function CreateAssistantThread(): React.JSX.Element {
   const error = useCreateStore((s) => s.error)
-  const sending = useCreateStore((s) => s.sending)
-  const cancelTurn = useCreateStore((s) => s.cancelTurn)
 
   return (
     <ThreadErrorBoundary>
@@ -195,44 +251,12 @@ export function CreateAssistantThread(): React.JSX.Element {
         </ThreadPrimitive.Viewport>
 
         {error ? (
-          <div className="border-t border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <div className="border-t border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive select-text">
             {error}
           </div>
         ) : null}
 
-        <div className="border-t border-border px-3 py-3">
-          <ComposerPrimitive.Root className="mx-auto flex w-full max-w-2xl items-end gap-2 rounded-2xl border border-border bg-card px-3 py-2 shadow-sm">
-            <ComposerPrimitive.Input
-              className="max-h-40 min-h-[40px] flex-1 resize-none bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground"
-              placeholder="描述你想写的内容…"
-              rows={1}
-            />
-            {sending ? (
-              <button
-                className={cn(
-                  'flex size-9 shrink-0 items-center justify-center rounded-full',
-                  'bg-muted text-foreground hover:bg-muted/80'
-                )}
-                onClick={() => void cancelTurn()}
-                title="停止"
-                type="button"
-              >
-                <Square className="size-3.5 fill-current" />
-              </button>
-            ) : (
-              <ComposerPrimitive.Send
-                className={cn(
-                  'flex size-9 shrink-0 items-center justify-center rounded-full',
-                  'bg-primary text-primary-foreground hover:bg-primary/90',
-                  'disabled:opacity-40'
-                )}
-                title="发送"
-              >
-                <Send className="size-4" />
-              </ComposerPrimitive.Send>
-            )}
-          </ComposerPrimitive.Root>
-        </div>
+        <CreateComposer />
       </ThreadPrimitive.Root>
     </ThreadErrorBoundary>
   )

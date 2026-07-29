@@ -11,6 +11,14 @@ import {
   Zap
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle
+} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -292,15 +300,14 @@ export function SkillsPage(): React.JSX.Element {
             ) : null}
           </div>
         ) : (
-          <section className="mt-3 overflow-hidden rounded-xl border border-border bg-card">
-            {visible.map((skill, index) => (
-              <SkillRow
+          <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {visible.map((skill) => (
+              <SkillCard
                 key={skill.id}
                 busy={busyId === skill.id}
                 editable={skill.sourceKind === 'custom'}
                 removable={skill.sourceKind === 'custom'}
                 skill={skill}
-                showBorder={index > 0}
                 onDetail={() => void openDetail(skill.id)}
                 onEdit={
                   skill.sourceKind === 'custom' ? () => void openEdit(skill) : undefined
@@ -514,12 +521,11 @@ export function SkillsPage(): React.JSX.Element {
   )
 }
 
-function SkillRow({
+function SkillCard({
   skill,
   busy,
   removable,
   editable,
-  showBorder,
   onToggle,
   onDetail,
   onEdit,
@@ -529,7 +535,6 @@ function SkillRow({
   busy: boolean
   removable: boolean
   editable: boolean
-  showBorder: boolean
   onToggle: (enabled: boolean) => void
   onDetail: () => void
   onEdit?: () => void
@@ -539,68 +544,86 @@ function SkillRow({
   const showId = label !== skill.name
 
   return (
-    <div
+    <Card
       className={cn(
-        'flex items-start gap-3 px-4 py-3.5',
-        showBorder && 'border-t border-border'
+        'h-full transition-colors hover:border-border/90 hover:bg-muted/20',
+        !skill.enabled && 'opacity-80'
       )}
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            className="truncate text-left text-sm font-medium text-foreground hover:underline"
-            type="button"
-            onClick={onDetail}
-          >
-            {label}
-          </button>
-          {showId ? (
-            <span className="truncate font-mono text-[11px] text-muted-foreground">
-              {skill.name}
-            </span>
+      <CardHeader className="pb-2">
+        <div className="flex items-start gap-2">
+          <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Zap className="size-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <CardTitle className="truncate">
+              <button
+                className="truncate text-left hover:underline"
+                type="button"
+                onClick={onDetail}
+              >
+                {label}
+              </button>
+            </CardTitle>
+            {showId ? (
+              <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                {skill.name}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        {!skill.isValid ? (
+          <span className="mt-2 inline-flex w-fit items-center gap-1 rounded-md border border-destructive/20 bg-destructive/8 px-1.5 py-0.5 text-[11px] text-destructive">
+            <AlertCircle className="size-3" />
+            校验异常
+          </span>
+        ) : null}
+      </CardHeader>
+      <CardContent>
+        <CardDescription className="line-clamp-3 min-h-[3.75rem]">
+          {skill.description || '暂无描述'}
+        </CardDescription>
+        {skill.version ? (
+          <p className="mt-2 text-[11px] text-muted-foreground">v{skill.version}</p>
+        ) : null}
+      </CardContent>
+      <CardFooter className="justify-between">
+        <div className="flex items-center gap-0.5">
+          <Button size="sm" type="button" variant="ghost" onClick={onDetail}>
+            详情
+          </Button>
+          {editable && onEdit ? (
+            <Button
+              disabled={busy}
+              size="icon-sm"
+              title="编辑"
+              type="button"
+              variant="ghost"
+              onClick={onEdit}
+            >
+              <Pencil className="size-4 text-muted-foreground" />
+            </Button>
           ) : null}
-          {!skill.isValid ? (
-            <span className="inline-flex items-center gap-1 rounded-md border border-destructive/20 bg-destructive/8 px-1.5 py-0.5 text-[11px] text-destructive">
-              <AlertCircle className="size-3" />
-              校验异常
-            </span>
+          {removable && onUninstall ? (
+            <Button
+              disabled={busy}
+              size="icon-sm"
+              title="卸载"
+              type="button"
+              variant="ghost"
+              onClick={onUninstall}
+            >
+              <Trash2 className="size-4 text-muted-foreground" />
+            </Button>
           ) : null}
         </div>
-        <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-          {skill.description}
-        </p>
-      </div>
-
-      <div className="flex shrink-0 items-center gap-1 pt-0.5">
-        {editable && onEdit ? (
-          <Button
-            disabled={busy}
-            size="icon-sm"
-            title="编辑"
-            variant="ghost"
-            onClick={onEdit}
-          >
-            <Pencil className="size-4 text-muted-foreground" />
-          </Button>
-        ) : null}
-        {removable && onUninstall ? (
-          <Button
-            disabled={busy}
-            size="icon-sm"
-            title="卸载"
-            variant="ghost"
-            onClick={onUninstall}
-          >
-            <Trash2 className="size-4 text-muted-foreground" />
-          </Button>
-        ) : null}
         <Switch
           checked={skill.enabled}
           disabled={busy || !skill.isValid}
           label={`启用 ${label}`}
           onCheckedChange={onToggle}
         />
-      </div>
-    </div>
+      </CardFooter>
+    </Card>
   )
 }
