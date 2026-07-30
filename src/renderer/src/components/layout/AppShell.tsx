@@ -12,7 +12,10 @@ import { EntitiesPage } from '@/pages/EntitiesPage'
 import { HomePage, useBootstrapLibrary } from '@/pages/HomePage'
 import { OverviewPage } from '@/pages/OverviewPage'
 import { SkillsPage } from '@/pages/SkillsPage'
-import { useCreateStore } from '@/stores/create-store'
+import {
+  isDetailTargetAvailable,
+  useCreateStore
+} from '@/stores/create-store'
 import { useProjectStore, type ProjectView } from '@/stores/project-store'
 import { useSettingsStore } from '@/stores/settings-store'
 
@@ -39,11 +42,18 @@ export function AppShell(): React.JSX.Element {
   const error = useProjectStore((s) => s.error)
   const openSettings = useSettingsStore((s) => s.openSettings)
   const createSidebarOpen = useCreateStore((s) => s.rightPanelOpen)
+  const createDetailTarget = useCreateStore((s) => s.detailTarget)
+  const setCreateDetailTarget = useCreateStore((s) => s.setDetailTarget)
   const toggleCreateSidebar = useCreateStore((s) => s.toggleRightPanel)
 
   const isCreate = Boolean(
     appSurface === 'project' && activeProjectId && snapshot && projectView === 'create'
   )
+  const hasCreateDetail = isDetailTargetAvailable(snapshot, createDetailTarget)
+
+  useEffect(() => {
+    if (createDetailTarget && !hasCreateDetail) setCreateDetailTarget(null)
+  }, [createDetailTarget, hasCreateDetail, setCreateDetailTarget])
 
   // 进/出创作：同帧硬切侧栏，不排队 spring
   if (isCreate !== wasCreate.current) {
@@ -75,11 +85,11 @@ export function AppShell(): React.JSX.Element {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <TitleBar
-        createSidebarOpen={createSidebarOpen}
+        createSidebarOpen={createSidebarOpen && hasCreateDetail}
         onOpenSettings={() => openSettings('preferences')}
         onToggleCreateSidebar={toggleCreateSidebar}
         onToggleSidebar={handleToggleSidebar}
-        showCreateSidebarToggle={isCreate}
+        showCreateSidebarToggle={isCreate && hasCreateDetail}
         sidebarCollapsed={sidebarCollapsed}
       />
 

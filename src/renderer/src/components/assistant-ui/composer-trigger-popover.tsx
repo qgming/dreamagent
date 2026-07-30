@@ -88,7 +88,7 @@ const Categories: FC<CategoriesProps> = ({
     {(categories) => (
       <div
         data-slot="composer-trigger-popover-categories"
-        className="flex flex-col py-1"
+        className="app-scrollbar flex max-h-[min(20rem,calc(100dvh-6rem))] flex-col overflow-y-auto overscroll-contain py-1"
       >
         {categories.map((cat) => {
           const Icon = resolveIcon(cat.id, iconMap, fallbackIcon);
@@ -137,14 +137,14 @@ const Items: FC<ItemsProps> = ({
       {(items) => (
         <div
           data-slot="composer-trigger-popover-items"
-          className="flex flex-col"
+          className="flex max-h-[min(20rem,calc(100dvh-6rem))] flex-col"
         >
-          <ComposerPrimitive.Unstable_TriggerPopoverBack className="text-muted-foreground hover:bg-accent flex cursor-pointer items-center gap-1.5 border-b px-3 py-2 text-xs tracking-wide uppercase transition-colors">
+          <ComposerPrimitive.Unstable_TriggerPopoverBack className="text-muted-foreground hover:bg-accent flex shrink-0 cursor-pointer items-center gap-1.5 border-b px-3 py-2 text-xs tracking-wide uppercase transition-colors">
             <ChevronLeftIcon className="size-3.5" />
             {backLabel}
           </ComposerPrimitive.Unstable_TriggerPopoverBack>
 
-          <div className="py-1">
+          <div className="app-scrollbar min-h-0 overflow-y-auto overscroll-contain py-1">
             {items.map((item, index) => {
               const iconKey =
                 typeof item.metadata?.icon === "string"
@@ -156,17 +156,12 @@ const Items: FC<ItemsProps> = ({
                   key={item.id}
                   item={item}
                   index={index}
-                  className="hover:bg-accent focus:bg-accent data-[highlighted]:bg-accent flex w-full cursor-pointer flex-col items-start gap-0.5 px-3 py-2 text-start transition-colors outline-none"
+                  className="hover:bg-accent focus:bg-accent data-[highlighted]:bg-accent flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-start transition-colors outline-none"
                 >
-                  <span className="flex items-center gap-2 text-sm font-medium">
-                    <Icon className="text-primary size-3.5" />
+                  <Icon className="text-primary size-3.5 shrink-0" />
+                  <span className="min-w-0 break-words text-sm font-medium">
                     {item.label}
                   </span>
-                  {item.description && (
-                    <span className="text-muted-foreground ms-5.5 text-xs leading-tight">
-                      {item.description}
-                    </span>
-                  )}
                 </ComposerPrimitive.Unstable_TriggerPopoverItem>
               );
             })}
@@ -200,7 +195,7 @@ const ComposerTriggerPopoverImpl: FC<ComposerTriggerPopoverProps> = ({
 }) => {
   const warnedRef = useRef(false);
   if (
-    process.env.NODE_ENV !== "production" &&
+    import.meta.env.DEV &&
     !warnedRef.current &&
     Boolean(directive) === Boolean(action)
   ) {
@@ -214,7 +209,7 @@ const ComposerTriggerPopoverImpl: FC<ComposerTriggerPopoverProps> = ({
     <ComposerPrimitive.Unstable_TriggerPopover
       data-slot="composer-trigger-popover"
       className={cn(
-        "aui-composer-trigger-popover bg-popover text-popover-foreground absolute start-0 bottom-full z-50 mb-2 w-64 overflow-hidden rounded-xl border shadow-lg",
+        "aui-composer-trigger-popover bg-popover text-popover-foreground absolute start-0 bottom-full z-50 mb-2 max-h-[min(20rem,calc(100dvh-6rem))] w-64 overflow-hidden rounded-xl border shadow-lg",
         className,
       )}
       {...props}

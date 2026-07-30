@@ -17,6 +17,21 @@ import { useProjectStore } from './project-store'
 /** 右侧详情目标 */
 export type DetailTarget = { type: 'beat' | 'entity' | 'chapter'; id: string }
 
+export function isDetailTargetAvailable(
+  snapshot: ProjectSnapshot | null,
+  target: DetailTarget | null
+): boolean {
+  if (!snapshot || !target) return false
+  switch (target.type) {
+    case 'beat':
+      return Boolean(snapshot.beats[target.id])
+    case 'entity':
+      return Boolean(snapshot.entities[target.id])
+    case 'chapter':
+      return Boolean(snapshot.chapters[target.id])
+  }
+}
+
 /** 左侧下方：对话 / 文章 Tab */
 export type LeftListTab = 'conversations' | 'articles'
 
@@ -84,14 +99,6 @@ const initialState = {
   compactionState: 'idle' as ContextCompactionState,
   compactionError: null as string | null,
   bootstrappedProjectId: null as string | null
-}
-
-function lastChapterId(messages: UiChatMessage[]): string | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const ids = messages[i].chapterIds
-    if (ids && ids.length > 0) return ids[ids.length - 1]
-  }
-  return null
 }
 
 function patchAssistantMessage(
@@ -334,14 +341,7 @@ function ensureAgentSubscription(
           sending: false,
           runId: null,
           error: null,
-          ...(written
-            ? {
-                detailTarget: { type: 'chapter' as const, id: written },
-                rightPanelOpen: true,
-                rightPanelAnimate: false,
-                leftListTab: 'articles' as const
-              }
-            : {})
+          ...(written ? { leftListTab: 'articles' as const } : {})
         })
         void get().refreshSessionList()
         break
@@ -463,14 +463,13 @@ export const useCreateStore = create<CreateState>((set, get) => ({
 
       const latest = summaries[0]
       const view = await window.api.session.open(projectId, latest.id)
-      const chapId = lastChapterId(view.messages)
       set({
         activeSessionId: view.id,
         session: view,
         sessionSummaries: summaries,
         bootstrappedProjectId: projectId,
-        detailTarget: chapId ? { type: 'chapter', id: chapId } : null,
-        rightPanelOpen: Boolean(chapId),
+        detailTarget: null,
+        rightPanelOpen: false,
         rightPanelAnimate: false,
         error: null,
         compactionState: 'idle',
@@ -524,13 +523,12 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         await get().cancelTurn()
       }
       const view = await window.api.session.open(projectId, id)
-      const chapId = lastChapterId(view.messages)
       set({
         activeSessionId: view.id,
         session: view,
         leftListTab: 'conversations',
-        detailTarget: chapId ? { type: 'chapter', id: chapId } : get().detailTarget,
-        rightPanelOpen: chapId ? true : get().rightPanelOpen,
+        detailTarget: null,
+        rightPanelOpen: false,
         rightPanelAnimate: false,
         todos: [],
         error: null,
@@ -561,12 +559,11 @@ export const useCreateStore = create<CreateState>((set, get) => ({
 
       if (summaries.length > 0) {
         const next = await window.api.session.open(projectId, summaries[0].id)
-        const chapId = lastChapterId(next.messages)
         set({
           activeSessionId: next.id,
           session: next,
-          detailTarget: chapId ? { type: 'chapter', id: chapId } : null,
-          rightPanelOpen: Boolean(chapId),
+          detailTarget: null,
+          rightPanelOpen: false,
           rightPanelAnimate: false,
           error: null,
           compactionState: 'idle',
@@ -769,16 +766,45 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     }
   },
 
-  // 点选详情：用户操作，允许动画
-  openDetail: (target) =>
-    set({ detailTarget: target, rightPanelOpen: true, rightPanelAnimate: true }),
-  setDetailTarget: (target) => set({ detailTarget: target }),
+  // 点选详情：仅有效的用户点击目标可以打开右栏
+  openDetail: (target) => {
+    if (!isDetailTargetAvailable(useProjectStore.getState().snapshot, target)) return
+    set({ detailTarget: target, rightPanelOpen: true, rightPanelAnimate: true })
+  },
+  setDetailTarget: (target) => {
+    const validTarget = isDetailTargetAvailable(
+      useProjectStore.getState().snapshot,
+      target
+    )
+      ? target
+      : null
+    set(
+      validTarget
+        ? { detailTarget: validTarget }
+        : { detailTarget: null, rightPanelOpen: false, rightPanelAnimate: true }
+    )
+  },
   // animate 默认 true（手动）；会话恢复等传 false 硬切
-  setRightPanelOpen: (open, animate = true) =>
-    set({ rightPanelOpen: open, rightPanelAnimate: animate }),
+  setRightPanelOpen: (open, animate = true) => {
+    const state = get()
+    const canOpen = isDetailTargetAvailable(
+      useProjectStore.getState().snapshot,
+      state.detailTarget
+    )
+    set({ rightPanelOpen: open && canOpen, rightPanelAnimate: animate })
+  },
   // 标题栏按钮：用户手动，开动画
-  toggleRightPanel: () =>
-    set({ rightPanelOpen: !get().rightPanelOpen, rightPanelAnimate: true }),
+  toggleRightPanel: () => {
+    const state = get()
+    const canOpen = isDetailTargetAvailable(
+      useProjectStore.getState().snapshot,
+      state.detailTarget
+    )
+    set({
+      rightPanelOpen: state.rightPanelOpen ? false : canOpen,
+      rightPanelAnimate: true
+    })
+  },
   setLeftBeatsOpen: (open) => set({ leftBeatsOpen: open }),
   setLeftEntitiesOpen: (open) => set({ leftEntitiesOpen: open }),
   setLeftListTab: (tab) => set({ leftListTab: tab }),

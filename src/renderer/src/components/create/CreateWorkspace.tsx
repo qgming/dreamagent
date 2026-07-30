@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  BookOpen,
   CheckCircle2,
   ChevronRight,
   Circle,
@@ -54,8 +53,7 @@ import {
   ENTITY_STATUS_DOT_CLASS,
   formatUpdatedAt
 } from '@/lib/project-utils'
-import { BACKLINK_CHIP, mentionChipStyles } from '@/lib/mention-styles'
-import { CollapsibleChipList } from '@/components/ui/collapsible-chip-list'
+import { mentionChipStyles } from '@/lib/mention-styles'
 import { computeBacklinks } from '@/lib/backlinks'
 import {
   getOrderedBeats,
@@ -63,8 +61,16 @@ import {
   getOrderedEntities,
   useProjectStore
 } from '@/stores/project-store'
-import { useCreateStore, type DetailTarget } from '@/stores/create-store'
+import {
+  isDetailTargetAvailable,
+  useCreateStore,
+  type DetailTarget
+} from '@/stores/create-store'
 import { ContextDisplay } from '@/components/assistant-ui/context-display'
+import {
+  RelatedLinksPopover,
+  type RelatedLinkItem
+} from '@/components/create/RelatedLinksPopover'
 
 /** 右栏固定宽度，展开/收起带动中栏平滑变宽 */
 const RIGHT_PANEL_WIDTH = 400
@@ -85,6 +91,7 @@ export function CreateWorkspace(): React.JSX.Element {
   const ensureSession = useCreateStore((s) => s.ensureSession)
   const rightPanelOpen = useCreateStore((s) => s.rightPanelOpen)
   const rightPanelAnimate = useCreateStore((s) => s.rightPanelAnimate)
+  const detailTarget = useCreateStore((s) => s.detailTarget)
 
   useEffect(() => {
     if (snapshot) void ensureSession()
@@ -106,7 +113,10 @@ export function CreateWorkspace(): React.JSX.Element {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <ChatPane />
         </div>
-        <RightPanelSlot animate={rightPanelAnimate} open={rightPanelOpen} />
+        <RightPanelSlot
+          animate={rightPanelAnimate}
+          open={rightPanelOpen && isDetailTargetAvailable(snapshot, detailTarget)}
+        />
       </div>
     </div>
   )
@@ -427,9 +437,6 @@ function ArticleListRow({
 }): React.JSX.Element {
   const updateChapter = useProjectStore((s) => s.updateChapter)
   const deleteChapter = useProjectStore((s) => s.deleteChapter)
-  const detailTarget = useCreateStore((s) => s.detailTarget)
-  const setDetailTarget = useCreateStore((s) => s.setDetailTarget)
-  const setRightPanelOpen = useCreateStore((s) => s.setRightPanelOpen)
 
   const handleToggleStatus = (): void => {
     const next = article.status === 'final' ? 'draft' : 'final'
@@ -444,10 +451,6 @@ function ArticleListRow({
       })
       if (!ok) return
       await deleteChapter(article.id)
-      if (detailTarget?.type === 'chapter' && detailTarget.id === article.id) {
-        setDetailTarget(null)
-        setRightPanelOpen(false)
-      }
     })()
   }
 
@@ -781,35 +784,8 @@ function RightDetailPanel(): React.JSX.Element {
   const setProjectView = useProjectStore((s) => s.setProjectView)
   const setSelectedBeatId = useProjectStore((s) => s.setSelectedBeatId)
   const setSelectedEntityId = useProjectStore((s) => s.setSelectedEntityId)
-  const chapters = getOrderedChapters(snapshot)
-
   if (!target || !snapshot) {
-    return (
-      <div className="flex h-full flex-col bg-card/10">
-        <RightPanelHeader title="详情" />
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
-          <BookOpen className="size-8 opacity-40" />
-          <p>从左侧点选节点/实体/文章</p>
-          <p className="text-xs">或等待 Agent 写出文章后在此预览</p>
-          {chapters.length > 0 ? (
-            <div className="mt-4 w-full space-y-1">
-              <p className="text-[11px] font-medium text-foreground">已有文章</p>
-              {chapters.map((c) => (
-                <button
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
-                  key={c.id}
-                  onClick={() => openDetail({ type: 'chapter', id: c.id })}
-                  type="button"
-                >
-                  <FileText className="size-3.5 shrink-0" />
-                  <span className="truncate">{c.title}</span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    )
+    return <></>
   }
 
   return (
@@ -924,15 +900,36 @@ function ArticleEditor({
           ? '未保存'
           : null
 
+  const relatedItems: RelatedLinkItem[] = [
+    ...[...new Set([...chapter.sourceBeatIds, ...chapter.beatRefs])].flatMap((id) => {
+      const beat = snapshot.beats[id]
+      return beat
+        ? [{ id, label: beat.title || '未命名节点', type: 'beat' as const }]
+        : []
+    }),
+    ...[...new Set(chapter.entityRefs)].flatMap((id) => {
+      const entity = snapshot.entities[id]
+      return entity
+        ? [{ id, label: entity.name || '未命名实体', type: 'entity' as const }]
+        : []
+    })
+  ]
+
   return (
     <div className="flex h-full flex-col bg-card/10">
       <RightPanelHeader
         badge={CHAPTER_STATUS_LABELS[chapter.status]}
         extra={
-          <span className="flex shrink-0 items-center gap-2 text-[10px] text-muted-foreground">
-            <span>{content.length} 字</span>
-            {saveHint ? <span>{saveHint}</span> : null}
-          </span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <span>{content.length} 字</span>
+              {saveHint ? <span>{saveHint}</span> : null}
+            </span>
+            <RelatedLinksPopover
+              onOpen={onOpenRelated}
+              outgoing={relatedItems}
+            />
+          </div>
         }
         title={title || '未命名文章'}
         titleSlot={
@@ -944,50 +941,6 @@ function ArticleEditor({
           />
         }
       />
-      {(chapter.sourceBeatIds.length > 0 ||
-        chapter.entityRefs.length > 0 ||
-        chapter.beatRefs.length > 0) && (
-        <div className="space-y-1.5 border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
-          {chapter.sourceBeatIds.length > 0 || chapter.beatRefs.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-1">
-              <span className="shrink-0">关联节点</span>
-              {[...new Set([...chapter.sourceBeatIds, ...chapter.beatRefs])].map((id) => {
-                const b = snapshot.beats[id]
-                if (!b) return null
-                return (
-                  <button
-                    className="rounded bg-[color-mix(in_oklab,#3b82f6_18%,transparent)] px-1.5 py-0.5 font-medium text-[#1d4ed8] dark:text-[#93c5fd]"
-                    key={id}
-                    onClick={() => onOpenRelated({ type: 'beat', id })}
-                    type="button"
-                  >
-                    {b.title || '未命名'}
-                  </button>
-                )
-              })}
-            </div>
-          ) : null}
-          {chapter.entityRefs.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-1">
-              <span className="shrink-0">关联实体</span>
-              {chapter.entityRefs.map((id) => {
-                const e = snapshot.entities[id]
-                if (!e) return null
-                return (
-                  <button
-                    className="rounded bg-[color-mix(in_oklab,#ef4444_16%,transparent)] px-1.5 py-0.5 font-medium text-[#b91c1c] dark:text-[#fca5a5]"
-                    key={id}
-                    onClick={() => onOpenRelated({ type: 'entity', id })}
-                    type="button"
-                  >
-                    {e.name}
-                  </button>
-                )
-              })}
-            </div>
-          ) : null}
-        </div>
-      )}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4">
         <textarea
           className="h-full min-h-0 w-full flex-1 resize-none bg-transparent text-[14px] leading-7 text-foreground outline-none placeholder:text-muted-foreground app-scrollbar"
@@ -998,6 +951,16 @@ function ArticleEditor({
       </div>
     </div>
   )
+}
+
+function backlinkItems(
+  backlinks: ReturnType<typeof computeBacklinks>
+): RelatedLinkItem[] {
+  return [
+    ...backlinks.beats.map((item) => ({ ...item, type: 'beat' as const })),
+    ...backlinks.entities.map((item) => ({ ...item, type: 'entity' as const })),
+    ...backlinks.chapters.map((item) => ({ ...item, type: 'chapter' as const }))
+  ]
 }
 
 function DetailContent({
@@ -1014,11 +977,7 @@ function DetailContent({
   if (target.type === 'chapter') {
     const chapter = snapshot.chapters[target.id]
     if (!chapter) {
-      return (
-        <div className="flex h-full flex-col">
-          <RightPanelHeader title="文章不存在" />
-        </div>
-      )
+      return <></>
     }
     return (
       <ArticleEditor
@@ -1032,31 +991,40 @@ function DetailContent({
   if (target.type === 'beat') {
     const beat = snapshot.beats[target.id]
     if (!beat) {
-      return (
-        <div className="flex h-full flex-col">
-          <RightPanelHeader title="节点不存在" />
-        </div>
-      )
+      return <></>
     }
     const back = computeBacklinks(snapshot, 'beat', beat.id)
     const html = contentToEditorHtml(beat.content, 'beat')
+    const outgoing: RelatedLinkItem[] = [
+      ...beat.beatRefs
+        .map((id) => snapshot.beats[id])
+        .filter(Boolean)
+        .map((item) => ({
+          id: item.id,
+          label: item.title || '未命名节点',
+          type: 'beat' as const
+        })),
+      ...beat.entityRefs
+        .map((id) => snapshot.entities[id])
+        .filter(Boolean)
+        .map((item) => ({
+          id: item.id,
+          label: item.name || '未命名实体',
+          type: 'entity' as const
+        }))
+    ]
     return (
       <div className="flex h-full flex-col bg-card/10">
         <RightPanelHeader
           badge={BEAT_STATUS_LABELS[beat.status]}
+          extra={
+            <RelatedLinksPopover
+              incoming={backlinkItems(back)}
+              onOpen={onOpenRelated}
+              outgoing={outgoing}
+            />
+          }
           title={beat.title || '未命名节点'}
-        />
-        <MetaLinks
-          inbound={back}
-          onOpen={onOpenRelated}
-          outboundBeats={beat.beatRefs
-            .map((id) => snapshot.beats[id])
-            .filter(Boolean)
-            .map((b) => ({ id: b.id, label: b.title || '未命名', type: 'beat' as const }))}
-          outboundEntities={beat.entityRefs
-            .map((id) => snapshot.entities[id])
-            .filter(Boolean)
-            .map((e) => ({ id: e.id, label: e.name, type: 'entity' as const }))}
         />
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 app-scrollbar">
           <div
@@ -1091,31 +1059,40 @@ function DetailContent({
   // entity
   const entity = snapshot.entities[target.id]
   if (!entity) {
-    return (
-      <div className="flex h-full flex-col">
-        <RightPanelHeader title="实体不存在" />
-      </div>
-    )
+    return <></>
   }
   const back = computeBacklinks(snapshot, 'entity', entity.id)
   const html = contentToEditorHtml(entity.content, 'entity')
+  const outgoing: RelatedLinkItem[] = [
+    ...entity.beatRefs
+      .map((id) => snapshot.beats[id])
+      .filter(Boolean)
+      .map((item) => ({
+        id: item.id,
+        label: item.title || '未命名节点',
+        type: 'beat' as const
+      })),
+    ...entity.entityRefs
+      .map((id) => snapshot.entities[id])
+      .filter(Boolean)
+      .map((item) => ({
+        id: item.id,
+        label: item.name || '未命名实体',
+        type: 'entity' as const
+      }))
+  ]
   return (
     <div className="flex h-full flex-col bg-card/10">
       <RightPanelHeader
         badge={ENTITY_STATUS_LABELS[entity.status]}
+        extra={
+          <RelatedLinksPopover
+            incoming={backlinkItems(back)}
+            onOpen={onOpenRelated}
+            outgoing={outgoing}
+          />
+        }
         title={entity.name}
-      />
-      <MetaLinks
-        inbound={back}
-        onOpen={onOpenRelated}
-        outboundBeats={entity.beatRefs
-          .map((id) => snapshot.beats[id])
-          .filter(Boolean)
-          .map((b) => ({ id: b.id, label: b.title || '未命名', type: 'beat' as const }))}
-        outboundEntities={entity.entityRefs
-          .map((id) => snapshot.entities[id])
-          .filter(Boolean)
-          .map((e) => ({ id: e.id, label: e.name, type: 'entity' as const }))}
       />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 app-scrollbar">
         <div
@@ -1145,100 +1122,6 @@ function DetailContent({
           在实体页打开
         </Button>
       </div>
-    </div>
-  )
-}
-
-function MetaLinks({
-  outboundBeats,
-  outboundEntities,
-  inbound,
-  onOpen
-}: {
-  outboundBeats: Array<{ id: string; label: string; type: 'beat' }>
-  outboundEntities: Array<{ id: string; label: string; type: 'entity' }>
-  inbound: ReturnType<typeof computeBacklinks>
-  onOpen: (t: DetailTarget) => void
-}): React.JSX.Element {
-  const outItems = [...outboundBeats, ...outboundEntities]
-  const inItems = [
-    ...inbound.beats.map((r) => ({ ...r, kind: 'beat' as const })),
-    ...inbound.entities.map((r) => ({ ...r, kind: 'entity' as const })),
-    ...inbound.chapters.map((r) => ({ ...r, kind: 'chapter' as const }))
-  ]
-  const hasOut = outItems.length > 0
-  const hasIn = inItems.length > 0
-  if (!hasOut && !hasIn) return <></>
-
-  return (
-    <div className="space-y-2 border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
-      {hasOut ? (
-        <div className="flex min-w-0 items-start gap-1.5">
-          <span className="mt-0.5 shrink-0 leading-5">出链</span>
-          <CollapsibleChipList
-            className="min-w-0 flex-1"
-            count={outItems.length}
-          >
-            {outboundBeats.map((r) => (
-              <button
-                className={BACKLINK_CHIP.beat}
-                key={`ob-${r.id}`}
-                onClick={() => onOpen({ type: 'beat', id: r.id })}
-                type="button"
-              >
-                <span className="truncate">@{r.label}</span>
-              </button>
-            ))}
-            {outboundEntities.map((r) => (
-              <button
-                className={BACKLINK_CHIP.entity}
-                key={`oe-${r.id}`}
-                onClick={() => onOpen({ type: 'entity', id: r.id })}
-                type="button"
-              >
-                <span className="truncate">@{r.label}</span>
-              </button>
-            ))}
-          </CollapsibleChipList>
-        </div>
-      ) : null}
-      {hasIn ? (
-        <div className="flex min-w-0 items-start gap-1.5">
-          <span className="mt-0.5 shrink-0 leading-5">入链</span>
-          <CollapsibleChipList className="min-w-0 flex-1" count={inItems.length}>
-            {inbound.beats.map((r) => (
-              <button
-                className={BACKLINK_CHIP.beat}
-                key={`ib-${r.id}`}
-                onClick={() => onOpen({ type: 'beat', id: r.id })}
-                type="button"
-              >
-                <span className="truncate">@{r.label}</span>
-              </button>
-            ))}
-            {inbound.entities.map((r) => (
-              <button
-                className={BACKLINK_CHIP.entity}
-                key={`ie-${r.id}`}
-                onClick={() => onOpen({ type: 'entity', id: r.id })}
-                type="button"
-              >
-                <span className="truncate">@{r.label}</span>
-              </button>
-            ))}
-            {inbound.chapters.map((r) => (
-              <button
-                className={BACKLINK_CHIP.article}
-                key={`ic-${r.id}`}
-                onClick={() => onOpen({ type: 'chapter', id: r.id })}
-                type="button"
-              >
-                <span className="truncate">{r.label}</span>
-              </button>
-            ))}
-          </CollapsibleChipList>
-        </div>
-      ) : null}
     </div>
   )
 }
