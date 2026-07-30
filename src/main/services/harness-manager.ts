@@ -20,6 +20,8 @@ import {
 import { buildSkillTools } from './skill-tools'
 import { buildWebTools } from './web-tools'
 import { buildTodoTools } from './todo-tools'
+import { buildMcpTools } from './mcp-tools'
+import { getMcpService } from './mcp-service'
 import type { TodoService } from './todo-service'
 import { readPinsFromBranch } from './pi-session-parser'
 import type { LlmThinkingLevel } from '../../shared/llm-settings'
@@ -168,12 +170,26 @@ export class HarnessManager {
       .join('\n\n')
   }
 
-  /** 结构性签名：skills 变化才重建 harness */
+  /** 结构性签名：skills / MCP 变化才重建 harness */
   private async structuralSignature(_projectId: string): Promise<string> {
     const enabledSkillIds = await this.skills
       .getEnabledSkillIds()
       .catch(() => [] as string[])
-    return JSON.stringify({ skills: enabledSkillIds })
+    // MCP 配置变化时强制重建 harness（工具列表会变）
+    const mcpConfigs = await getMcpService()
+      .list()
+      .catch(() => [])
+    const mcpSig = mcpConfigs
+      .map((s) => ({
+        id: s.id,
+        enabled: s.enabled,
+        url: s.server?.url,
+        disabled: [...(s.disabledToolNames ?? [])].sort(),
+        tools: (s.discoveredTools ?? []).map((t) => t.name).sort(),
+        status: s.installCheck?.status
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id))
+    return JSON.stringify({ skills: enabledSkillIds, mcp: mcpSig })
   }
 
   async getOrCreate(
@@ -264,11 +280,25 @@ export class HarnessManager {
       .filter(Boolean)
       .join('\n\n')
 
+    // 云端 MCP：启用且探测成功的 server 注入为 pi 工具
+    const mcpConfigs = await getMcpService()
+      .listEnabledForAgent()
+      .catch((error) => {
+        console.warn('[harness-manager] 加载 MCP 失败，降级为无 MCP:', error)
+        return []
+      })
+    const mcpTools = buildMcpTools(mcpConfigs)
+    const mcpBlock =
+      mcpTools.length > 0
+        ? `## 云端 MCP\n已接入 ${mcpConfigs.length} 个 MCP server、${mcpTools.length} 个工具（名称形如 mcp__server__tool）。按任务需要调用。`
+        : ''
+
     const tools = [
       ...buildDreamAgentTools(),
       ...buildSkillTools(),
       ...buildWebTools(),
-      ...buildTodoTools()
+      ...buildTodoTools(),
+      ...mcpTools
     ]
     const toolContext: DreamToolContext = {
       projectId,
@@ -290,7 +320,7 @@ export class HarnessManager {
       // 动态 systemPrompt：每轮重建 L0+L1，pins 走 context hook
       systemPrompt: async () => {
         const base = await this.buildSystemPrompt(projectId, sessionId)
-        return [base, skillsBlock].filter(Boolean).join('\n\n')
+        return [base, skillsBlock, mcpBlock].filter(Boolean).join('\n\n')
       },
       resources: { skills: piSkills },
       thinkingLevel,

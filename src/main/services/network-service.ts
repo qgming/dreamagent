@@ -14,7 +14,10 @@ import type {
   WebSearchSettings,
   WebSearchSettingsPatch
 } from '../../shared/web-search'
-import { DEFAULT_WEB_SEARCH_SETTINGS } from '../../shared/web-search'
+import {
+  DEFAULT_SEARXNG_INSTANCES,
+  DEFAULT_WEB_SEARCH_SETTINGS
+} from '../../shared/web-search'
 import { ensureDir, readJsonFile, writeJsonAtomic } from './fs-utils'
 
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -51,6 +54,13 @@ function maskKey(key: string): string | undefined {
   if (!t) return undefined
   if (t.length <= 8) return '••••'
   return `${t.slice(0, 3)}••••${t.slice(-4)}`
+}
+
+/** 按分钟轮转列表，避免总是打同一个公共实例 */
+function rotateList<T>(list: T[]): T[] {
+  if (list.length <= 1) return list
+  const offset = Math.floor(Date.now() / 60_000) % list.length
+  return list.slice(offset).concat(list.slice(0, offset))
 }
 
 interface ElectronHttpResponse {
@@ -549,19 +559,19 @@ export class NetworkService {
   }
 
   private async searxngSearch(request: WebSearchRequest): Promise<WebSearchResponse> {
-    const instances = (request.instances || '')
+    const custom = (request.instances || '')
       .split(/[\n,]/)
       .map((line) => line.trim())
       .filter(Boolean)
-    const defaults = [
-      'https://searx.be',
-      'https://search.sapti.me',
-      'https://searx.tiekoetter.com'
-    ]
-    const targetInstances = instances.length > 0 ? instances : defaults
+    // 用户自定义优先；否则使用内置公共清单，并做轻度打散以避免总打同一节点
+    const targetInstances =
+      custom.length > 0 ? custom : rotateList([...DEFAULT_SEARXNG_INSTANCES])
     const limit = Math.min(Math.max(Number(request.limit || 5), 1), 10)
     let lastError: unknown = null
-    for (const instance of targetInstances) {
+    // 最多尝试前 N 个，避免一次请求拖太久
+    const maxAttempts = Math.min(targetInstances.length, custom.length > 0 ? custom.length : 12)
+    for (let i = 0; i < maxAttempts; i++) {
+      const instance = targetInstances[i]
       try {
         const url = new URL('/search', instance)
         url.searchParams.set('q', request.query)
@@ -569,17 +579,33 @@ export class NetworkService {
         url.searchParams.set('pageno', '1')
         const response = await electronRequest(url.toString(), {
           method: 'GET',
-          timeoutMs: 15000
+          headers: {
+            Accept: 'application/json',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+          },
+          timeoutMs: 12_000
         })
-        if (response.status < 200 || response.status >= 300) continue
+        if (response.status < 200 || response.status >= 300) {
+          lastError = new Error(`HTTP ${response.status}`)
+          continue
+        }
         const data = responseJson(response, 'SearXNG 搜索')
-        const results = ((data.results as Array<Record<string, unknown>>) || [])
-          .slice(0, limit)
-          .map((item) => ({
-            title: String(item.title || ''),
-            url: String(item.url || ''),
-            snippet: String(item.content || '')
-          }))
+        const rawResults = data.results
+        if (!Array.isArray(rawResults)) {
+          // 多数公共实例默认未开启 json，会回 HTML 或空结构，继续试下一个
+          lastError = new Error('响应无 results 字段（可能未开启 format=json）')
+          continue
+        }
+        const results = (rawResults as Array<Record<string, unknown>>).slice(0, limit).map((item) => ({
+          title: String(item.title || ''),
+          url: String(item.url || ''),
+          snippet: String(item.content || '')
+        }))
+        if (results.length === 0) {
+          lastError = new Error('结果为空')
+          continue
+        }
         return { success: true, provider: 'searxng', instance, results }
       } catch (error) {
         lastError = error

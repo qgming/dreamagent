@@ -11,10 +11,10 @@ import type {
 } from '@shared/web-search'
 
 const PROVIDERS: Array<{ value: WebSearchProvider; label: string }> = [
+  { value: 'searxng', label: 'SearXNG（默认·免 Key）' },
   { value: 'tavily', label: 'Tavily' },
   { value: 'exa', label: 'Exa' },
   { value: 'serper', label: 'Serper' },
-  { value: 'searxng', label: 'SearXNG（自建/公共）' },
   { value: 'brave', label: 'Brave' }
 ]
 
@@ -22,7 +22,7 @@ export function WebSearchPanel(): React.JSX.Element {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [cfg, setCfg] = useState<WebSearchPublicSettings | null>(null)
-  const [provider, setProvider] = useState<WebSearchProvider>('tavily')
+  const [provider, setProvider] = useState<WebSearchProvider>('searxng')
   const [apiKey, setApiKey] = useState('')
   const [instances, setInstances] = useState('')
   const [message, setMessage] = useState<string | null>(null)
@@ -91,7 +91,7 @@ export function WebSearchPanel(): React.JSX.Element {
       <div className="mt-8 divide-y divide-border rounded-xl border border-border bg-card">
         <SettingRow
           title="服务商"
-          description="选择搜索后端。Tavily 适合 AI 摘要；SearXNG 可免 Key。"
+          description="默认 SearXNG（内置数十个公共实例，免 Key）；也可换 Tavily/Exa 等。"
           control={
             <SettingDropdown
               value={provider}
@@ -106,13 +106,13 @@ export function WebSearchPanel(): React.JSX.Element {
         {provider === 'searxng' ? (
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">
-              SearXNG 实例（换行或逗号分隔；可留空使用内置公共实例）
+              SearXNG 实例（换行或逗号分隔；留空则使用内置 80+ 公共实例，自动 format=json 回退）
             </label>
             <textarea
               className="min-h-[88px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
               value={instances}
               onChange={(e) => setInstances(e.target.value)}
-              placeholder="https://example.com"
+              placeholder={'https://etsi.me\nhttps://searx.party\nhttps://search.mdosch.de'}
             />
           </div>
         ) : (

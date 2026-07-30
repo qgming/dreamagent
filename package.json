@@ -29,6 +29,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@earendil-works/pi-agent-core": "^0.83.0",
     "@earendil-works/pi-ai": "^0.83.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@opencode-ai/models": "^0.0.27",
     "@radix-ui/react-avatar": "^1.2.6",
     "@radix-ui/react-collapsible": "^1.1.20",

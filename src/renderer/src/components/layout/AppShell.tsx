@@ -12,6 +12,7 @@ import { EntitiesPage } from '@/pages/EntitiesPage'
 import { HomePage, useBootstrapLibrary } from '@/pages/HomePage'
 import { OverviewPage } from '@/pages/OverviewPage'
 import { SkillsPage } from '@/pages/SkillsPage'
+import { McpPage } from '@/pages/McpPage'
 import {
   isDetailTargetAvailable,
   useCreateStore
@@ -150,11 +151,12 @@ function MainView({
   hasSnapshot
 }: {
   activeProjectId: string | null
-  appSurface: 'home' | 'skills' | 'project'
+  appSurface: 'home' | 'skills' | 'mcp' | 'project'
   projectView: ProjectView
   hasSnapshot: boolean
 }): React.JSX.Element {
   if (appSurface === 'skills') return <SkillsPage />
+  if (appSurface === 'mcp') return <McpPage />
   if (appSurface === 'project' && activeProjectId && hasSnapshot) {
     if (projectView === 'overview') return <OverviewPage />
     if (projectView === 'beats') return <BeatsPage />

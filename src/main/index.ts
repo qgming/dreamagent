@@ -15,6 +15,7 @@ import { registerAgentIpc } from './ipc/agent-ipc'
 import { registerSettingsIpc } from './ipc/settings-ipc'
 import { registerSkillIpc } from './ipc/skill-ipc'
 import { registerNetworkIpc } from './ipc/network-ipc'
+import { registerMcpIpc } from './ipc/mcp-ipc'
 
 /** 是否为开发环境 */
 const isDev = !app.isPackaged
@@ -161,6 +162,7 @@ app.whenReady().then(async () => {
   registerSettingsIpc(llmSettings)
   registerSkillIpc(skillService)
   registerNetworkIpc()
+  registerMcpIpc()
 
   createWindow()
 

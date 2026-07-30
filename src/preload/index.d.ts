@@ -226,6 +226,29 @@ export interface SkillsApi {
   readFile: (id: string, relativePath: string) => Promise<string>
 }
 
+export interface McpApi {
+  list: () => Promise<import('../shared/mcp').McpServerConfig[]>
+  get: (id: string) => Promise<import('../shared/mcp').McpServerConfig | null>
+  upsert: (
+    input: import('../shared/mcp').McpUpsertInput
+  ) => Promise<import('../shared/mcp').McpServerConfig>
+  importJson: (
+    jsonText: string,
+    discover?: boolean
+  ) => Promise<import('../shared/mcp').McpServerConfig[]>
+  remove: (id: string) => Promise<void>
+  setEnabled: (
+    id: string,
+    enabled: boolean
+  ) => Promise<import('../shared/mcp').McpServerConfig>
+  toggleRemoteTool: (
+    serverId: string,
+    toolName: string,
+    enabled: boolean
+  ) => Promise<import('../shared/mcp').McpServerConfig>
+  discover: (id: string) => Promise<import('../shared/mcp').McpServerConfig>
+}
+
 export interface DreamAgentApi {
   app: AppApi
   window: WindowApi
@@ -235,6 +258,7 @@ export interface DreamAgentApi {
   settings: SettingsApi
   skills: SkillsApi
   network: NetworkApi
+  mcp: McpApi
 }
 
 declare global {

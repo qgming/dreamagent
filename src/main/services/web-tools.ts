@@ -36,7 +36,7 @@ export function buildWebTools(): AnyNetTool[] {
       name: 'web_search',
       label: 'web_search',
       description:
-        '在互联网上检索信息，返回标题、链接、摘要。用于最新资讯、核实事实、查找资料。需在设置中配置搜索服务商 API Key。',
+        '在互联网上检索信息，返回标题、链接、摘要。用于最新资讯、核实事实、查找资料。默认使用 SearXNG 公共实例（免 Key）；也可在设置中切换 Tavily/Exa 等。',
       parameters: webSearchParams,
       executionMode: 'parallel',
       execute: async (_id, params) => {

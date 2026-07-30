@@ -213,8 +213,9 @@ export const DREAM_AGENT_BASE_PROMPT = `你是「造梦师」的创作助手，�
 - 系统自动维护 entityRefs/beatRefs；摘要含「实体链 N · 节点链 M」；「无双链」表示语法无效
 
 ## 网络
-- web_search 检索互联网；web_fetch 读 URL 正文。
-- 搜索需在「设置 > 网络搜索」配置 API Key。
+- web_search 检索互联网（默认 SearXNG 公共实例，免 Key）；web_fetch 读取 URL 正文。
+- 也可在「设置 > 网络搜索」切换 Tavily/Exa 等。
+- 若系统提示出现「云端 MCP」段，可直接调用 mcp__* 工具。
 
 ## 待办
 - 多步任务用 todo 工具维护完整清单（每次覆盖提交全量 todos）。

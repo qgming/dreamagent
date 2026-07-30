@@ -24,7 +24,7 @@ import { getChildIds } from '@shared/tree-index'
 export type ProjectView = 'overview' | 'beats' | 'entities' | 'create'
 
 /** 应用主表面：首页 / 技能库 / 项目 */
-export type AppSurface = 'home' | 'skills' | 'project'
+export type AppSurface = 'home' | 'skills' | 'mcp' | 'project'
 
 /** 项目表单模态：新建 或 编辑 */
 export type ProjectFormMode =
@@ -63,6 +63,7 @@ interface ProjectState {
   createProject: (input: CreateProjectInput) => Promise<ProjectSnapshot>
   openProject: (projectId: string, view?: ProjectView) => Promise<void>
   openSkills: () => void
+  openMcp: () => void
   closeProject: () => void
   deleteProject: (projectId: string) => Promise<void>
   updateProjectMeta: (
@@ -229,6 +230,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({
       appSurface: 'skills',
       // 离开项目主视图，但保留侧栏项目展开状态
+      activeProjectId: null,
+      snapshot: null,
+      selectedBeatId: null,
+      selectedEntityId: null
+    })
+    void import('./create-store').then(({ useCreateStore }) => {
+      useCreateStore.getState().reset()
+    })
+  },
+
+  openMcp: () => {
+    set({
+      appSurface: 'mcp',
       activeProjectId: null,
       snapshot: null,
       selectedBeatId: null,

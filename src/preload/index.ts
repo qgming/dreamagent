@@ -312,6 +312,38 @@ const skillsApi = {
     ipcRenderer.invoke('skills:readFile', id, relativePath)
 }
 
+/**
+ * 云端 MCP API
+ */
+const mcpApi = {
+  list: (): Promise<import('../shared/mcp').McpServerConfig[]> =>
+    ipcRenderer.invoke('mcp:list'),
+  get: (id: string): Promise<import('../shared/mcp').McpServerConfig | null> =>
+    ipcRenderer.invoke('mcp:get', id),
+  upsert: (
+    input: import('../shared/mcp').McpUpsertInput
+  ): Promise<import('../shared/mcp').McpServerConfig> => ipcRenderer.invoke('mcp:upsert', input),
+  importJson: (
+    jsonText: string,
+    discover?: boolean
+  ): Promise<import('../shared/mcp').McpServerConfig[]> =>
+    ipcRenderer.invoke('mcp:importJson', jsonText, discover),
+  remove: (id: string): Promise<void> => ipcRenderer.invoke('mcp:remove', id),
+  setEnabled: (
+    id: string,
+    enabled: boolean
+  ): Promise<import('../shared/mcp').McpServerConfig> =>
+    ipcRenderer.invoke('mcp:setEnabled', id, enabled),
+  toggleRemoteTool: (
+    serverId: string,
+    toolName: string,
+    enabled: boolean
+  ): Promise<import('../shared/mcp').McpServerConfig> =>
+    ipcRenderer.invoke('mcp:toggleRemoteTool', serverId, toolName, enabled),
+  discover: (id: string): Promise<import('../shared/mcp').McpServerConfig> =>
+    ipcRenderer.invoke('mcp:discover', id)
+}
+
 const api = {
   app: appApi,
   window: windowApi,
@@ -320,7 +352,8 @@ const api = {
   agent: agentApi,
   settings: settingsApi,
   skills: skillsApi,
-  network: networkApi
+  network: networkApi,
+  mcp: mcpApi
 }
 
 try {

@@ -131,6 +131,12 @@ const initialState = {
   retryMessage: null as string | null
 }
 
+/**
+ * 按项目串行化 ensureSession，避免 React StrictMode 双 effect
+ * 或快速切换时并发 list→create 产生两个「新对话」。
+ */
+const ensureSessionInflight = new Map<string, Promise<void>>()
+
 function patchAssistantMessage(
   messages: UiChatMessage[],
   messageId: string,
@@ -547,27 +553,29 @@ export const useCreateStore = create<CreateState>((set, get) => ({
       return
     }
 
-    try {
-      const summaries = await window.api.session.list(projectId)
-      set({ sessionSummaries: summaries })
+    // 同一项目只跑一次引导；并发调用复用同一 Promise
+    const inflight = ensureSessionInflight.get(projectId)
+    if (inflight) {
+      await inflight
+      return
+    }
 
-      if (summaries.length === 0) {
-        const view = await window.api.session.create(projectId, { title: '新对话' })
-        // 再 list 一次，与磁盘状态对齐
-        const after = await window.api.session.list(projectId).catch(() => [
-          {
-            id: view.id,
-            title: view.title,
-            messageCount: 0,
-            createdAt: view.createdAt,
-            updatedAt: view.updatedAt
-          }
-        ])
-        set({
-          activeSessionId: view.id,
-          session: view,
-          todos: view.todos ?? [],
-          sessionSummaries: after.length > 0 ? after : [
+    const run = (async () => {
+      try {
+        // 二次检查：等锁期间可能已被其他调用引导完成
+        if (get().bootstrappedProjectId === projectId && get().session) {
+          const summaries = await window.api.session.list(projectId).catch(() => null)
+          if (summaries) set({ sessionSummaries: summaries, error: null })
+          return
+        }
+
+        const summaries = await window.api.session.list(projectId)
+        set({ sessionSummaries: summaries })
+
+        if (summaries.length === 0) {
+          const view = await window.api.session.create(projectId, { title: '新对话' })
+          // 再 list 一次，与磁盘状态对齐（并去重，防止历史竞态残留）
+          let after = await window.api.session.list(projectId).catch(() => [
             {
               id: view.id,
               title: view.title,
@@ -575,7 +583,48 @@ export const useCreateStore = create<CreateState>((set, get) => ({
               createdAt: view.createdAt,
               updatedAt: view.updatedAt
             }
-          ],
+          ])
+          // 空项目若仍出现多个「新对话」（旧竞态产物），只保留当前 view，多余的删掉
+          if (after.length > 1) {
+            const extras = after.filter((s) => s.id !== view.id && s.messageCount === 0)
+            for (const extra of extras) {
+              await window.api.session.delete(projectId, extra.id).catch(() => undefined)
+            }
+            after = await window.api.session.list(projectId).catch(() =>
+              after.filter((s) => s.id === view.id)
+            )
+          }
+          set({
+            activeSessionId: view.id,
+            session: view,
+            todos: view.todos ?? [],
+            sessionSummaries: after.length > 0 ? after : [
+              {
+                id: view.id,
+                title: view.title,
+                messageCount: 0,
+                createdAt: view.createdAt,
+                updatedAt: view.updatedAt
+              }
+            ],
+            bootstrappedProjectId: projectId,
+            detailTarget: null,
+            rightPanelOpen: false,
+            rightPanelAnimate: false,
+            error: null,
+            compactionState: 'idle',
+            compactionError: null
+          })
+          return
+        }
+
+        const latest = summaries[0]
+        const view = await window.api.session.open(projectId, latest.id)
+        set({
+          activeSessionId: view.id,
+          session: view,
+          todos: view.todos ?? [],
+          sessionSummaries: summaries,
           bootstrappedProjectId: projectId,
           detailTarget: null,
           rightPanelOpen: false,
@@ -584,26 +633,18 @@ export const useCreateStore = create<CreateState>((set, get) => ({
           compactionState: 'idle',
           compactionError: null
         })
-        return
+      } catch (error) {
+        set({ error: error instanceof Error ? error.message : String(error) })
       }
+    })()
 
-      const latest = summaries[0]
-      const view = await window.api.session.open(projectId, latest.id)
-      set({
-        activeSessionId: view.id,
-        session: view,
-        todos: view.todos ?? [],
-        sessionSummaries: summaries,
-        bootstrappedProjectId: projectId,
-        detailTarget: null,
-        rightPanelOpen: false,
-        rightPanelAnimate: false,
-        error: null,
-        compactionState: 'idle',
-        compactionError: null
-      })
-    } catch (error) {
-      set({ error: error instanceof Error ? error.message : String(error) })
+    ensureSessionInflight.set(projectId, run)
+    try {
+      await run
+    } finally {
+      if (ensureSessionInflight.get(projectId) === run) {
+        ensureSessionInflight.delete(projectId)
+      }
     }
   },
 

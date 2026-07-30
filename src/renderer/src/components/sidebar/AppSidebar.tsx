@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   MoreHorizontal,
   Pencil,
+  Plug,
   Plus,
   Settings,
   Sparkles,
@@ -42,6 +43,7 @@ export function AppSidebar(): React.JSX.Element {
   const toggleProjectExpanded = useProjectStore((s) => s.toggleProjectExpanded)
   const openProject = useProjectStore((s) => s.openProject)
   const openSkills = useProjectStore((s) => s.openSkills)
+  const openMcp = useProjectStore((s) => s.openMcp)
   const openCreateProjectModal = useProjectStore((s) => s.openCreateProjectModal)
   const openEditProjectModal = useProjectStore((s) => s.openEditProjectModal)
   const deleteProject = useProjectStore((s) => s.deleteProject)
@@ -73,6 +75,7 @@ export function AppSidebar(): React.JSX.Element {
 
   const isAppHome = appSurface === 'home'
   const isSkills = appSurface === 'skills'
+  const isMcp = appSurface === 'mcp'
 
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
@@ -85,6 +88,7 @@ export function AppSidebar(): React.JSX.Element {
         <nav className="space-y-1">
           <SidebarButton active={isAppHome} icon={Home} label="首页" onClick={closeProject} />
           <SidebarButton active={isSkills} icon={Sparkles} label="技能" onClick={openSkills} />
+          <SidebarButton active={isMcp} icon={Plug} label="MCP" onClick={openMcp} />
         </nav>
       </div>
 
