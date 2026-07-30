@@ -4,6 +4,9 @@ import {
   Minus,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Settings,
   Square as SquareIcon,
   X
 } from 'lucide-react'
@@ -20,24 +23,39 @@ interface TitleBarProps {
   sidebarCollapsed: boolean
   /** 切换侧边栏开合 */
   onToggleSidebar: () => void
+  /** 打开设置模态窗 */
+  onOpenSettings: () => void
+  /** 是否显示创作页详情栏开关 */
+  showCreateSidebarToggle: boolean
+  /** 创作页详情栏是否展开 */
+  createSidebarOpen: boolean
+  /** 切换创作页详情栏 */
+  onToggleCreateSidebar: () => void
 }
 
 /**
  * 自定义顶部栏
- * 左：侧边栏开关；右：窗口控制（最小化 / 最大化·还原 / 关闭）
+ * 左：设置 + 应用侧边栏；右：创作详情栏（按页面显示）+ 窗口控制
  * 应用名称已移至侧边栏顶部
  */
 export function TitleBar({
   sidebarCollapsed,
-  onToggleSidebar
+  onToggleSidebar,
+  onOpenSettings,
+  showCreateSidebarToggle,
+  createSidebarOpen,
+  onToggleCreateSidebar
 }: TitleBarProps): React.JSX.Element {
   return (
     <header
       data-electron-drag-region
       className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-background"
     >
-      {/* 左侧：侧边栏开关 */}
+      {/* 左侧：设置 + 应用侧边栏 */}
       <div className="flex h-full items-center gap-1 px-2">
+        <IconButton className="size-8" label="设置" onClick={onOpenSettings}>
+          <Settings className="size-4" />
+        </IconButton>
         <IconButton
           className="size-8"
           label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
@@ -51,8 +69,27 @@ export function TitleBar({
         </IconButton>
       </div>
 
-      {/* 右侧：窗口控制 */}
-      <WindowControls />
+      <div className="flex h-full items-center">
+        {showCreateSidebarToggle ? (
+          <>
+            <IconButton
+              className={cn('mx-1 size-8', createSidebarOpen && 'bg-muted text-foreground')}
+              label={createSidebarOpen ? '收起详情栏' : '展开详情栏'}
+              onClick={onToggleCreateSidebar}
+            >
+              {createSidebarOpen ? (
+                <PanelRightClose className="size-4" />
+              ) : (
+                <PanelRightOpen className="size-4" />
+              )}
+            </IconButton>
+            <div aria-hidden="true" className="mx-1 h-6 w-px bg-border" />
+          </>
+        ) : null}
+
+        {/* 右侧：窗口控制 */}
+        <WindowControls />
+      </div>
     </header>
   )
 }

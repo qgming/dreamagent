@@ -16,6 +16,8 @@ import {
   streamSimple as openaiCompletionsStreamSimple
 } from '@earendil-works/pi-ai/api/openai-completions'
 import type { LlmSettingsService } from './llm-settings-service'
+import type { ResolvedModelInfo } from '../../shared/context-usage'
+import { cacheModelLogo, resolveModelInfo } from './model-catalog'
 
 const PROVIDER_ID = 'openai-compatible'
 
@@ -28,12 +30,22 @@ const openaiStreams: ProviderStreams = {
  * 根据当前 LLM 设置构建 pi Models，并解析默认 Model
  */
 export class PiModelsService {
-  private cached: { sig: string; models: Models; model: Model<Api> } | null = null
+  private cached: {
+    sig: string
+    models: Models
+    model: Model<Api>
+    info: ResolvedModelInfo
+  } | null = null
 
   constructor(private readonly llm: LlmSettingsService) {}
 
   reset(): void {
     this.cached = null
+  }
+
+  async getCurrentModelInfo(): Promise<ResolvedModelInfo> {
+    const cfg = await this.llm.getRuntimeConfig()
+    return cacheModelLogo(resolveModelInfo(cfg.modelId, cfg.baseURL))
   }
 
   async getModelsAndDefault(): Promise<{ models: Models; model: Model<Api> }> {
@@ -51,19 +63,21 @@ export class PiModelsService {
       return { models: this.cached.models, model: this.cached.model }
     }
 
+    const info = await cacheModelLogo(resolveModelInfo(cfg.modelId, cfg.baseURL))
+
     const model: Model<Api> = {
       id: cfg.modelId,
-      name: cfg.modelId,
+      name: info.name,
       api: 'openai-completions',
       provider: PROVIDER_ID,
       baseUrl: cfg.baseURL,
       // 允许推理模型返回 thinking 块；普通模型无 thinking 时无影响
-      reasoning: true,
+      reasoning: info.reasoning,
       input: ['text'],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 200000,
+      cost: info.price,
+      contextWindow: info.contextWindow,
       // 提高上限，避免 thinking + 工具参数阶段过早截断看起来像「思考中断」
-      maxTokens: 32768
+      maxTokens: Math.min(info.maxOutputTokens, 32768)
     }
 
     const models = createModels() as MutableModels
@@ -88,7 +102,7 @@ export class PiModelsService {
     })
 
     models.setProvider(provider as Provider<Api>)
-    this.cached = { sig, models, model }
+    this.cached = { sig, models, model, info }
     return { models, model }
   }
 }

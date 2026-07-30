@@ -70,6 +70,7 @@ export interface SessionView {
   pinnedEntityIds: string[]
   createdAt: string
   updatedAt: string
+  usage: import('./context-usage').SessionContextUsage
 }
 
 export interface CreateSessionInput {

@@ -2,7 +2,16 @@
  * Pi Session 服务：每项目一个 JsonlSessionRepo
  */
 import path from 'path'
-import { JsonlSessionRepo, type Session } from '@earendil-works/pi-agent-core'
+import {
+  JsonlSessionRepo,
+  calculateContextTokens,
+  estimateContextTokens,
+  estimateTokens,
+  type AgentMessage,
+  type Session,
+  type SessionTreeEntry
+} from '@earendil-works/pi-agent-core'
+import type { Usage } from '@earendil-works/pi-ai'
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node'
 import { createId } from '../../shared/ids'
 import type {
@@ -14,6 +23,12 @@ import type {
 import { SESSION_ENTRY } from '../../shared/agent-events'
 import type { ProjectService } from './project-service'
 import { ensureDir } from './fs-utils'
+import type { PiModelsService } from './pi-models'
+import {
+  AUTO_COMPACT_RATIO,
+  type SessionContextUsage,
+  type TokenUsageBreakdown
+} from '../../shared/context-usage'
 import {
   countUserAssistant,
   parseSessionBranch,
@@ -34,7 +49,125 @@ interface ProjectSessionRuntime {
 export class PiSessionService {
   private runtimes = new Map<string, Promise<ProjectSessionRuntime>>()
 
-  constructor(private readonly projects: ProjectService) {}
+  constructor(
+    private readonly projects: ProjectService,
+    private readonly models: PiModelsService
+  ) {}
+
+  private async activeHistory(session: Session): Promise<SessionTreeEntry[]> {
+    const [entries, leafId] = await Promise.all([
+      session.getEntries(),
+      session.getLeafId()
+    ])
+    if (!leafId) return []
+
+    const byId = new Map(entries.map((entry) => [entry.id, entry]))
+    const path: SessionTreeEntry[] = []
+    const visited = new Set<string>()
+    let current = byId.get(leafId)
+    while (current && !visited.has(current.id)) {
+      visited.add(current.id)
+      path.unshift(current)
+      current = current.parentId ? byId.get(current.parentId) : undefined
+    }
+    return path
+  }
+
+  /** 完整活动分支用于 UI 和 pins；Pi 的模型上下文仍使用 compact 后的 getBranch。 */
+  async getActiveHistoryEntries(
+    projectId: string,
+    sessionId: string
+  ): Promise<SessionTreeEntry[]> {
+    const session = await this.openSessionObject(projectId, sessionId)
+    return this.activeHistory(session)
+  }
+
+  private usageFromEntry(entry: SessionTreeEntry): Usage | undefined {
+    if (entry.type === 'message' && entry.message.role === 'assistant') {
+      return entry.message.usage
+    }
+    if (entry.type === 'compaction' || entry.type === 'branch_summary') {
+      return entry.usage
+    }
+    return undefined
+  }
+
+  private addUsage(target: TokenUsageBreakdown, usage: Usage): void {
+    target.input += usage.input || 0
+    target.output += usage.output || 0
+    target.cacheRead += usage.cacheRead || 0
+    target.cacheWrite += usage.cacheWrite || 0
+    target.reasoning += usage.reasoning || 0
+  }
+
+  async getUsage(projectId: string, sessionId: string): Promise<SessionContextUsage> {
+    const session = await this.openSessionObject(projectId, sessionId)
+    const [branch, context, entries, stats, model] = await Promise.all([
+      session.getBranch(),
+      session.buildContext(),
+      session.getEntries(),
+      session.getSessionStats(),
+      this.models.getCurrentModelInfo()
+    ])
+
+    const lastCompactionIndex = branch.findLastIndex(
+      (entry) => entry.type === 'compaction'
+    )
+    const hasFreshAssistantUsage = branch
+      .slice(lastCompactionIndex + 1)
+      .some(
+        (entry) =>
+          entry.type === 'message' &&
+          entry.message.role === 'assistant' &&
+          entry.message.stopReason !== 'error' &&
+          entry.message.stopReason !== 'aborted' &&
+          calculateContextTokens(entry.message.usage) > 0
+      )
+
+    let contextTokens: number
+    let estimated: boolean
+    if (lastCompactionIndex >= 0 && !hasFreshAssistantUsage) {
+      contextTokens = context.messages.reduce(
+        (sum, message) => sum + estimateTokens(message as AgentMessage),
+        0
+      )
+      estimated = true
+    } else {
+      const estimate = estimateContextTokens(context.messages)
+      contextTokens = estimate.tokens
+      estimated = estimate.lastUsageIndex === null
+    }
+
+    const cumulative: TokenUsageBreakdown = {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      reasoning: 0,
+      total: stats.totalTokens,
+      cost: stats.costTotal
+    }
+    for (const entry of entries) {
+      const usage = this.usageFromEntry(entry)
+      if (usage) this.addUsage(cumulative, usage)
+    }
+
+    const compactions = entries.filter((entry) => entry.type === 'compaction')
+    const lastCompaction = compactions[compactions.length - 1]
+    return {
+      model,
+      contextTokens,
+      contextPercent:
+        model.contextWindow > 0
+          ? Math.min((contextTokens / model.contextWindow) * 100, 100)
+          : 0,
+      autoCompactThreshold: AUTO_COMPACT_RATIO,
+      estimated,
+      cumulative,
+      compactionCount: compactions.length,
+      lastCompactedAt: lastCompaction?.timestamp
+    }
+  }
 
   private async runtimeFor(projectId: string): Promise<ProjectSessionRuntime> {
     const cached = this.runtimes.get(projectId)
@@ -119,7 +252,7 @@ export class PiSessionService {
         if (!rt.sessions.has(meta.id)) {
           rt.sessions.set(meta.id, Promise.resolve(session))
         }
-        const branch = await session.getBranch().catch(() => [])
+        const branch = await this.activeHistory(session).catch(() => [])
         const messages = parseSessionBranch(branch)
         const name = (await session.getSessionName().catch(() => undefined))?.trim()
         const title =
@@ -178,6 +311,7 @@ export class PiSessionService {
       })
     }
     const meta = await session.getMetadata()
+    const usage = await this.getUsage(projectId, id)
     return {
       id,
       title,
@@ -185,13 +319,14 @@ export class PiSessionService {
       pinnedBeatIds: input.pinnedBeatIds ?? [],
       pinnedEntityIds: input.pinnedEntityIds ?? [],
       createdAt: meta.createdAt,
-      updatedAt: meta.createdAt
+      updatedAt: meta.createdAt,
+      usage
     }
   }
 
   async open(projectId: string, sessionId: string): Promise<SessionView> {
     const session = await this.openSessionObject(projectId, sessionId)
-    const branch = await session.getBranch()
+    const branch = await this.activeHistory(session)
     const messages = parseSessionBranch(branch)
     const pins = readPinsFromBranch(branch)
     const name = (await session.getSessionName().catch(() => undefined))?.trim()
@@ -214,6 +349,7 @@ export class PiSessionService {
             )
           ).toISOString()
         : meta.createdAt
+    const usage = await this.getUsage(projectId, sessionId)
 
     return {
       id: sessionId,
@@ -222,7 +358,8 @@ export class PiSessionService {
       pinnedBeatIds: pins.pinnedBeatIds,
       pinnedEntityIds: pins.pinnedEntityIds,
       createdAt: meta.createdAt,
-      updatedAt
+      updatedAt,
+      usage
     }
   }
 

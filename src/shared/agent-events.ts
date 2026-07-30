@@ -8,6 +8,10 @@ import type {
   UiChatMessage,
   UiToolCallPart
 } from './ui-chat'
+import type {
+  ContextCompactionState,
+  SessionContextUsage
+} from './context-usage'
 
 export type AgentStreamEvent =
   | {
@@ -94,6 +98,15 @@ export type AgentStreamEvent =
       sessionId: string
       runId: string
       payload: AgentTurnDonePayload
+    }
+  | {
+      type: 'context_update'
+      projectId: string
+      sessionId: string
+      runId: string
+      usage: SessionContextUsage
+      compactionState: ContextCompactionState
+      compactionError?: string
     }
   | {
       type: 'error'

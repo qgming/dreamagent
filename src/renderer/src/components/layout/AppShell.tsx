@@ -12,7 +12,9 @@ import { EntitiesPage } from '@/pages/EntitiesPage'
 import { HomePage, useBootstrapLibrary } from '@/pages/HomePage'
 import { OverviewPage } from '@/pages/OverviewPage'
 import { SkillsPage } from '@/pages/SkillsPage'
+import { useCreateStore } from '@/stores/create-store'
 import { useProjectStore, type ProjectView } from '@/stores/project-store'
+import { useSettingsStore } from '@/stores/settings-store'
 
 const SIDEBAR_SPRING = { type: 'spring' as const, stiffness: 380, damping: 36 }
 
@@ -35,6 +37,9 @@ export function AppShell(): React.JSX.Element {
   const projectView = useProjectStore((s) => s.projectView)
   const snapshot = useProjectStore((s) => s.snapshot)
   const error = useProjectStore((s) => s.error)
+  const openSettings = useSettingsStore((s) => s.openSettings)
+  const createSidebarOpen = useCreateStore((s) => s.rightPanelOpen)
+  const toggleCreateSidebar = useCreateStore((s) => s.toggleRightPanel)
 
   const isCreate = Boolean(
     appSurface === 'project' && activeProjectId && snapshot && projectView === 'create'
@@ -70,7 +75,11 @@ export function AppShell(): React.JSX.Element {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <TitleBar
+        createSidebarOpen={createSidebarOpen}
+        onOpenSettings={() => openSettings('preferences')}
+        onToggleCreateSidebar={toggleCreateSidebar}
         onToggleSidebar={handleToggleSidebar}
+        showCreateSidebarToggle={isCreate}
         sidebarCollapsed={sidebarCollapsed}
       />
 

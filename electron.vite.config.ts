@@ -11,6 +11,7 @@ import tailwindcss from '@tailwindcss/vite'
 const piEsmOnly = [
   '@earendil-works/pi-agent-core',
   '@earendil-works/pi-ai',
+  '@opencode-ai/models',
   'typebox'
 ]
 

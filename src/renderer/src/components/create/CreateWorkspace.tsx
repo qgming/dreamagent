@@ -13,8 +13,6 @@ import {
   MessageSquarePlus,
   Minus,
   MoreHorizontal,
-  PanelRightClose,
-  PanelRightOpen,
   RotateCcw,
   Sparkles,
   Trash2,
@@ -66,6 +64,7 @@ import {
   useProjectStore
 } from '@/stores/project-store'
 import { useCreateStore, type DetailTarget } from '@/stores/create-store'
+import { ContextDisplay } from '@/components/assistant-ui/context-display'
 
 /** 右栏固定宽度，展开/收起带动中栏平滑变宽 */
 const RIGHT_PANEL_WIDTH = 400
@@ -694,9 +693,8 @@ function ChatPane(): React.JSX.Element {
 
 function ChatHeader(): React.JSX.Element {
   const active = useCreateStore((s) => s.session)
-  const rightPanelOpen = useCreateStore((s) => s.rightPanelOpen)
-  const toggleRightPanel = useCreateStore((s) => s.toggleRightPanel)
-  const detailTarget = useCreateStore((s) => s.detailTarget)
+  const compactionState = useCreateStore((s) => s.compactionState)
+  const compactionError = useCreateStore((s) => s.compactionError)
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
@@ -704,23 +702,12 @@ function ChatHeader(): React.JSX.Element {
       <div className="min-w-0 flex-1">
         <h1 className="truncate text-sm font-semibold">{active?.title || '新对话'}</h1>
       </div>
-      <button
-        className={cn(
-          'flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-          rightPanelOpen && 'bg-muted text-foreground'
-        )}
-        onClick={toggleRightPanel}
-        title={rightPanelOpen ? '收起详情' : '展开详情'}
-        type="button"
-      >
-        {rightPanelOpen ? (
-          <PanelRightClose className="size-4" />
-        ) : (
-          <PanelRightOpen className="size-4" />
-        )}
-      </button>
-      {!rightPanelOpen && detailTarget ? (
-        <span className="size-1.5 rounded-full bg-primary" title="有详情可查看" />
+      {active?.usage ? (
+        <ContextDisplay
+          compactionError={compactionError}
+          compactionState={compactionState}
+          usage={active.usage}
+        />
       ) : null}
     </div>
   )
@@ -789,7 +776,6 @@ function PinnedChips(): React.JSX.Element {
 
 function RightDetailPanel(): React.JSX.Element {
   const target = useCreateStore((s) => s.detailTarget)
-  const setRightPanelOpen = useCreateStore((s) => s.setRightPanelOpen)
   const openDetail = useCreateStore((s) => s.openDetail)
   const snapshot = useProjectStore((s) => s.snapshot)
   const setProjectView = useProjectStore((s) => s.setProjectView)
@@ -800,7 +786,7 @@ function RightDetailPanel(): React.JSX.Element {
   if (!target || !snapshot) {
     return (
       <div className="flex h-full flex-col bg-card/10">
-        <RightPanelHeader onClose={() => setRightPanelOpen(false)} title="详情" />
+        <RightPanelHeader title="详情" />
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
           <BookOpen className="size-8 opacity-40" />
           <p>从左侧点选节点/实体/文章</p>
@@ -828,7 +814,6 @@ function RightDetailPanel(): React.JSX.Element {
 
   return (
     <DetailContent
-      onClose={() => setRightPanelOpen(false)}
       onOpenInPage={(t) => {
         if (t.type === 'beat') {
           setSelectedBeatId(t.id)
@@ -848,13 +833,11 @@ function RightDetailPanel(): React.JSX.Element {
 function RightPanelHeader({
   title,
   badge,
-  onClose,
   extra,
   titleSlot
 }: {
   title: string
   badge?: string
-  onClose: () => void
   extra?: React.ReactNode
   /** 自定义标题区（可编辑标题） */
   titleSlot?: React.ReactNode
@@ -870,14 +853,6 @@ function RightPanelHeader({
         </span>
       ) : null}
       {extra}
-      <button
-        className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-        onClick={onClose}
-        title="收起详情"
-        type="button"
-      >
-        <PanelRightClose className="size-4" />
-      </button>
     </div>
   )
 }
@@ -888,12 +863,10 @@ function RightPanelHeader({
 function ArticleEditor({
   chapter,
   snapshot,
-  onClose,
   onOpenRelated
 }: {
   chapter: Chapter
   snapshot: NonNullable<ReturnType<typeof useProjectStore.getState>['snapshot']>
-  onClose: () => void
   onOpenRelated: (t: DetailTarget) => void
 }): React.JSX.Element {
   const updateChapter = useProjectStore((s) => s.updateChapter)
@@ -961,7 +934,6 @@ function ArticleEditor({
             {saveHint ? <span>{saveHint}</span> : null}
           </span>
         }
-        onClose={onClose}
         title={title || '未命名文章'}
         titleSlot={
           <input
@@ -1031,13 +1003,11 @@ function ArticleEditor({
 function DetailContent({
   target,
   snapshot,
-  onClose,
   onOpenInPage,
   onOpenRelated
 }: {
   target: DetailTarget
   snapshot: NonNullable<ReturnType<typeof useProjectStore.getState>['snapshot']>
-  onClose: () => void
   onOpenInPage: (t: DetailTarget) => void
   onOpenRelated: (t: DetailTarget) => void
 }): React.JSX.Element {
@@ -1046,14 +1016,13 @@ function DetailContent({
     if (!chapter) {
       return (
         <div className="flex h-full flex-col">
-          <RightPanelHeader onClose={onClose} title="文章不存在" />
+          <RightPanelHeader title="文章不存在" />
         </div>
       )
     }
     return (
       <ArticleEditor
         chapter={chapter}
-        onClose={onClose}
         onOpenRelated={onOpenRelated}
         snapshot={snapshot}
       />
@@ -1065,7 +1034,7 @@ function DetailContent({
     if (!beat) {
       return (
         <div className="flex h-full flex-col">
-          <RightPanelHeader onClose={onClose} title="节点不存在" />
+          <RightPanelHeader title="节点不存在" />
         </div>
       )
     }
@@ -1075,7 +1044,6 @@ function DetailContent({
       <div className="flex h-full flex-col bg-card/10">
         <RightPanelHeader
           badge={BEAT_STATUS_LABELS[beat.status]}
-          onClose={onClose}
           title={beat.title || '未命名节点'}
         />
         <MetaLinks
@@ -1125,7 +1093,7 @@ function DetailContent({
   if (!entity) {
     return (
       <div className="flex h-full flex-col">
-        <RightPanelHeader onClose={onClose} title="实体不存在" />
+        <RightPanelHeader title="实体不存在" />
       </div>
     )
   }
@@ -1135,7 +1103,6 @@ function DetailContent({
     <div className="flex h-full flex-col bg-card/10">
       <RightPanelHeader
         badge={ENTITY_STATUS_LABELS[entity.status]}
-        onClose={onClose}
         title={entity.name}
       />
       <MetaLinks

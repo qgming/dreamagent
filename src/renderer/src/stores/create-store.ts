@@ -11,6 +11,7 @@ import type {
 } from '@shared/ui-chat'
 import type { ProjectSnapshot } from '@shared/project-types'
 import type { TodoItem } from '@shared/todos'
+import type { ContextCompactionState } from '@shared/context-usage'
 import { useProjectStore } from './project-store'
 
 /** 右侧详情目标 */
@@ -36,6 +37,8 @@ interface CreateState {
   sending: boolean
   runId: string | null
   error: string | null
+  compactionState: ContextCompactionState
+  compactionError: string | null
   bootstrappedProjectId: string | null
 
   ensureSession: () => Promise<void>
@@ -78,6 +81,8 @@ const initialState = {
   sending: false,
   runId: null as string | null,
   error: null as string | null,
+  compactionState: 'idle' as ContextCompactionState,
+  compactionError: null as string | null,
   bootstrappedProjectId: null as string | null
 }
 
@@ -341,6 +346,16 @@ function ensureAgentSubscription(
         void get().refreshSessionList()
         break
       }
+      case 'context_update': {
+        const sess = get().session
+        if (!sess) break
+        set({
+          session: { ...sess, usage: event.usage },
+          compactionState: event.compactionState,
+          compactionError: event.compactionError ?? null
+        })
+        break
+      }
       case 'error': {
         const sess = get().session
         if (sess) {
@@ -439,7 +454,9 @@ export const useCreateStore = create<CreateState>((set, get) => ({
           detailTarget: null,
           rightPanelOpen: false,
           rightPanelAnimate: false,
-          error: null
+          error: null,
+          compactionState: 'idle',
+          compactionError: null
         })
         return
       }
@@ -455,7 +472,9 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         detailTarget: chapId ? { type: 'chapter', id: chapId } : null,
         rightPanelOpen: Boolean(chapId),
         rightPanelAnimate: false,
-        error: null
+        error: null,
+        compactionState: 'idle',
+        compactionError: null
       })
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
@@ -486,7 +505,9 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         rightPanelOpen: false,
         rightPanelAnimate: false,
         todos: [],
-        error: null
+        error: null,
+        compactionState: 'idle',
+        compactionError: null
       })
       await get().refreshSessionList()
     } catch (error) {
@@ -514,7 +535,9 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         todos: [],
         error: null,
         sending: false,
-        runId: null
+        runId: null,
+        compactionState: 'idle',
+        compactionError: null
       })
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
@@ -545,7 +568,9 @@ export const useCreateStore = create<CreateState>((set, get) => ({
           detailTarget: chapId ? { type: 'chapter', id: chapId } : null,
           rightPanelOpen: Boolean(chapId),
           rightPanelAnimate: false,
-          error: null
+          error: null,
+          compactionState: 'idle',
+          compactionError: null
         })
       } else {
         const view = await window.api.session.create(projectId, { title: '新对话' })
@@ -564,7 +589,9 @@ export const useCreateStore = create<CreateState>((set, get) => ({
           detailTarget: null,
           rightPanelOpen: false,
           rightPanelAnimate: false,
-          error: null
+          error: null,
+          compactionState: 'idle',
+          compactionError: null
         })
       }
     } catch (error) {

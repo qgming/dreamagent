@@ -137,7 +137,7 @@ app.whenReady().then(async () => {
   const projectService = new ProjectService(libraryService)
   const llmSettings = new LlmSettingsService()
   const piModels = new PiModelsService(llmSettings)
-  const sessionService = new PiSessionService(projectService)
+  const sessionService = new PiSessionService(projectService, piModels)
   const skillService = new SkillService()
   await skillService.ensureReady()
   const todoService = new TodoService(sessionService)

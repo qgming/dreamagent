@@ -21,6 +21,7 @@ import type { LlmSettingsService } from './llm-settings-service'
 import type { HarnessManager } from './harness-manager'
 import type { AgentHarness } from '@earendil-works/pi-agent-core'
 import type { DreamToolContext } from './pi-agent-tools'
+import type { SessionContextUsage } from '../../shared/context-usage'
 
 type DreamHarness = AgentHarness<DreamToolContext>
 
@@ -60,6 +61,8 @@ function beatStatusFromDetails(details: unknown): UiBeatStatusUpdate | null {
 export class AgentRunner {
   /** sessionKey → 当前 run */
   private active = new Map<string, ActiveRun>()
+  /** turn_done 后仍在执行的压缩；下一轮必须等它完成。 */
+  private compactions = new Map<string, Promise<SessionContextUsage>>()
 
   constructor(
     private readonly projects: ProjectService,
@@ -75,6 +78,68 @@ export class AgentRunner {
   private emit(sender: WebContents, event: AgentStreamEvent): void {
     if (sender.isDestroyed()) return
     sender.send('agent:event', event)
+  }
+
+  private async compactIfNeeded(
+    run: ActiveRun,
+    harness: DreamHarness,
+    additionalTokens = 0
+  ): Promise<SessionContextUsage> {
+    const { projectId, sessionId, runId, sender } = run
+    const usage = await this.sessions.getUsage(projectId, sessionId)
+    const threshold = usage.model.contextWindow * usage.autoCompactThreshold
+    if (usage.contextTokens + additionalTokens < threshold) {
+      this.emit(sender, {
+        type: 'context_update',
+        projectId,
+        sessionId,
+        runId,
+        usage,
+        compactionState: 'idle'
+      })
+      return usage
+    }
+
+    this.emit(sender, {
+      type: 'context_update',
+      projectId,
+      sessionId,
+      runId,
+      usage,
+      compactionState: 'compacting'
+    })
+
+    try {
+      await harness.compact(
+        '保留用户目标、约束、已确认决策、创作设定、工具执行结果和所有未完成事项。'
+      )
+      const compactedUsage = await this.sessions.getUsage(projectId, sessionId)
+      this.emit(sender, {
+        type: 'context_update',
+        projectId,
+        sessionId,
+        runId,
+        usage: compactedUsage,
+        compactionState: 'idle'
+      })
+      return compactedUsage
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn('[agent-runner] 自动压缩失败:', message)
+      const latestUsage = await this.sessions
+        .getUsage(projectId, sessionId)
+        .catch(() => usage)
+      this.emit(sender, {
+        type: 'context_update',
+        projectId,
+        sessionId,
+        runId,
+        usage: latestUsage,
+        compactionState: 'error',
+        compactionError: message
+      })
+      return latestUsage
+    }
   }
 
   async startTurn(
@@ -155,6 +220,9 @@ export class AgentRunner {
     const key = this.sessionKey(projectId, sessionId)
 
     this.emit(sender, { type: 'turn_start', projectId, sessionId, runId })
+
+    const pendingCompaction = this.compactions.get(key)
+    if (pendingCompaction) await pendingCompaction
 
     // 每次 recreate，保证 system prompt / tools / model 最新
     const harness = await this.harnesses.recreate(projectId, sessionId)
@@ -241,6 +309,9 @@ export class AgentRunner {
     const { projectId, sessionId, runId, sender } = run
     const key = this.sessionKey(projectId, sessionId)
 
+    const pendingCompaction = this.compactions.get(key)
+    if (pendingCompaction) await pendingCompaction
+
     // regenerate 路径已发过 turn_start
     if (!options?.harnessAlreadyCreated) {
       this.emit(sender, { type: 'turn_start', projectId, sessionId, runId })
@@ -269,6 +340,9 @@ export class AgentRunner {
       options?.harnessAlreadyCreated && options.harness
         ? options.harness
         : await this.harnesses.recreate(projectId, sessionId)
+
+    // 将本次用户输入也纳入阈值预测，避免在 80% 边缘直接发出超长请求。
+    await this.compactIfNeeded(run, harness, Math.ceil(userText.length / 4))
 
     const assistantMessageId = createId('msg')
     let assistantStarted = false
@@ -364,6 +438,19 @@ export class AgentRunner {
         }
         case 'message_end': {
           flushAll(true)
+          try {
+            const usage = await this.sessions.getUsage(projectId, sessionId)
+            this.emit(sender, {
+              type: 'context_update',
+              projectId,
+              sessionId,
+              runId,
+              usage,
+              compactionState: 'idle'
+            })
+          } catch (error) {
+            console.warn('[agent-runner] 刷新会话用量失败', error)
+          }
           break
         }
         case 'tool_execution_start': {
@@ -569,6 +656,15 @@ export class AgentRunner {
           writtenChapterIds: [...new Set(writtenChapterIds)]
         }
       })
+
+      // turn_done 已让界面恢复可用；随后压缩，并用 per-session promise 串行化下一轮。
+      const compaction = this.compactIfNeeded(run, harness)
+      this.compactions.set(key, compaction)
+      try {
+        await compaction
+      } finally {
+        if (this.compactions.get(key) === compaction) this.compactions.delete(key)
+      }
     } catch (error) {
       flushAll(true)
       if (run.aborted) {

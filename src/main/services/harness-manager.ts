@@ -77,8 +77,9 @@ export class HarnessManager {
 
   private async buildSystemPrompt(projectId: string, sessionId: string): Promise<string> {
     const snap = await this.projects.openProject(projectId)
-    const session = await this.sessions.openSessionObject(projectId, sessionId)
-    const branch = await session.getBranch().catch(() => [])
+    const branch = await this.sessions
+      .getActiveHistoryEntries(projectId, sessionId)
+      .catch(() => [])
     const pins = readPinsFromBranch(branch)
 
     const outlineLines = snap.index.beats.order
