@@ -1,5 +1,6 @@
 /**
  * 会话待办服务：内存 + session custom entry 持久化
+ * 写入路径仅限 Agent todo 工具；UI 只读展示，不可手动清理。
  */
 import type { TodoItem, TodoListState, TodoStatus } from '../../shared/todos'
 import { SESSION_ENTRY } from '../../shared/agent-events'

@@ -308,7 +308,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'todo',
     description:
-      '维护本会话任务待办。每次传入完整 todos 数组覆盖。status: pending|in_progress|completed|cancelled。多步任务用此跟踪进度。',
+      '维护本会话任务待办（持久化，重开仍可见）。每次传入完整 todos 数组覆盖。status: pending|in_progress|completed|cancelled。多步任务用此跟踪进度。清理/清空只能由本工具完成（传精简列表或 []）；用户 UI 只读。',
     inputSchema: {
       type: 'object',
       properties: {

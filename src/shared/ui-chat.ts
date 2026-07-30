@@ -68,6 +68,8 @@ export interface SessionView {
   messages: UiChatMessage[]
   pinnedBeatIds: string[]
   pinnedEntityIds: string[]
+  /** 会话级 Agent 待办（仅 AI todo 工具可写/清理，打开时从 session 持久化恢复） */
+  todos: import('./todos').TodoItem[]
   createdAt: string
   updatedAt: string
   usage: import('./context-usage').SessionContextUsage

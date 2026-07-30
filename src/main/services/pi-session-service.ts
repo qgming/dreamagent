@@ -33,7 +33,8 @@ import {
   countUserAssistant,
   parseSessionBranch,
   previewFromMessages,
-  readPinsFromBranch
+  readPinsFromBranch,
+  readTodosFromBranch
 } from './pi-session-parser'
 
 interface ProjectSessionRuntime {
@@ -318,6 +319,7 @@ export class PiSessionService {
       messages: [],
       pinnedBeatIds: input.pinnedBeatIds ?? [],
       pinnedEntityIds: input.pinnedEntityIds ?? [],
+      todos: [],
       createdAt: meta.createdAt,
       updatedAt: meta.createdAt,
       usage
@@ -329,6 +331,7 @@ export class PiSessionService {
     const branch = await this.activeHistory(session)
     const messages = parseSessionBranch(branch)
     const pins = readPinsFromBranch(branch)
+    const todos = readTodosFromBranch(branch)
     const name = (await session.getSessionName().catch(() => undefined))?.trim()
     const meta = await session.getMetadata()
     const title =
@@ -357,6 +360,7 @@ export class PiSessionService {
       messages,
       pinnedBeatIds: pins.pinnedBeatIds,
       pinnedEntityIds: pins.pinnedEntityIds,
+      todos,
       createdAt: meta.createdAt,
       updatedAt,
       usage

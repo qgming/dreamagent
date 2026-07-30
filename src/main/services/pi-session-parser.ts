@@ -273,6 +273,28 @@ export function readPinsFromBranch(branch: SessionTreeEntry[]): {
   }
 }
 
+/** 从 branch 读取最后一次 todo 工具写入的完整清单 */
+export function readTodosFromBranch(
+  branch: SessionTreeEntry[]
+): import('../../shared/todos').TodoItem[] {
+  const data = readLastCustomData<{ todos?: unknown }>(branch, SESSION_ENTRY.todos)
+  if (!data || !Array.isArray(data.todos)) return []
+  const VALID = new Set(['pending', 'in_progress', 'completed', 'cancelled'])
+  const out: import('../../shared/todos').TodoItem[] = []
+  for (const raw of data.todos) {
+    if (!raw || typeof raw !== 'object') continue
+    const o = raw as Record<string, unknown>
+    if (typeof o.id !== 'string' || typeof o.content !== 'string') continue
+    if (typeof o.status !== 'string' || !VALID.has(o.status)) continue
+    out.push({
+      id: o.id,
+      content: o.content,
+      status: o.status as import('../../shared/todos').TodoStatus
+    })
+  }
+  return out
+}
+
 /** 从消息中取预览文本 */
 export function previewFromMessages(messages: UiChatMessage[]): string | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {

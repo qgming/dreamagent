@@ -40,7 +40,7 @@ interface CreateState {
   session: SessionView | null
   /** 会话列表摘要（左栏） */
   sessionSummaries: SessionSummary[]
-  /** 当前会话 Agent 待办（todo 工具） */
+  /** 当前会话 Agent 待办（只读展示；仅 AI todo 工具可写/清理，打开会话时从磁盘恢复） */
   todos: TodoItem[]
   rightPanelOpen: boolean
   /** true = 用户手动开关，右栏走 spring；false = 进页/会话恢复等硬切 */
@@ -338,6 +338,8 @@ function ensureAgentSubscription(
           payload.writtenChapterIds[payload.writtenChapterIds.length - 1]
         set({
           session: payload.session,
+          // 回合结束以磁盘投影为准（含 AI 清理后的待办）
+          todos: payload.session.todos ?? get().todos,
           sending: false,
           runId: null,
           error: null,
@@ -441,6 +443,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         set({
           activeSessionId: view.id,
           session: view,
+          todos: view.todos ?? [],
           sessionSummaries: after.length > 0 ? after : [
             {
               id: view.id,
@@ -466,6 +469,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
       set({
         activeSessionId: view.id,
         session: view,
+        todos: view.todos ?? [],
         sessionSummaries: summaries,
         bootstrappedProjectId: projectId,
         detailTarget: null,
@@ -503,7 +507,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         detailTarget: null,
         rightPanelOpen: false,
         rightPanelAnimate: false,
-        todos: [],
+        // 新会话无待办；待办仅由 AI todo 工具写入/清理
+        todos: view.todos ?? [],
         error: null,
         compactionState: 'idle',
         compactionError: null
@@ -530,7 +535,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         detailTarget: null,
         rightPanelOpen: false,
         rightPanelAnimate: false,
-        todos: [],
+        // 从 session custom entry 恢复持久化待办（UI 只读，不可手动清理）
+        todos: view.todos ?? [],
         error: null,
         sending: false,
         runId: null,
@@ -562,6 +568,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         set({
           activeSessionId: next.id,
           session: next,
+          todos: next.todos ?? [],
           detailTarget: null,
           rightPanelOpen: false,
           rightPanelAnimate: false,
@@ -574,6 +581,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         set({
           activeSessionId: view.id,
           session: view,
+          todos: view.todos ?? [],
           sessionSummaries: [
             {
               id: view.id,
@@ -640,7 +648,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
       // 回读会话
       try {
         const view = await window.api.session.open(projectId, activeSessionId)
-        set({ session: view })
+        set({ session: view, todos: view.todos ?? [] })
       } catch {
         // ignore
       }
@@ -684,7 +692,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
       })
       try {
         const view = await window.api.session.open(projectId, activeSessionId)
-        set({ session: view })
+        set({ session: view, todos: view.todos ?? [] })
       } catch {
         // ignore
       }

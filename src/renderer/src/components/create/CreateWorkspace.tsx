@@ -30,8 +30,8 @@ import type { SessionSummary } from '@shared/ui-chat'
 import type { TodoItem, TodoStatus } from '@shared/todos'
 import { CreateRuntimeProvider } from './assistant/CreateRuntimeProvider'
 import { CreateAssistantThread } from './assistant/CreateAssistantThread'
-import { contentToEditorHtml } from '@shared/mentions'
 import { Button } from '@/components/ui/button'
+import { DetailMarkdown } from '@/components/create/DetailMarkdown'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/animated-tabs'
 import {
   SortableHandle,
@@ -863,7 +863,7 @@ function sessionTodoIcon(status: TodoStatus): React.JSX.Element {
   }
 }
 
-/** 左栏：当前会话 Agent 待办 */
+/** 左栏：当前会话 Agent 待办（只读展示；清理/改写仅 AI todo 工具） */
 function SessionTodoPanel({ todos }: { todos: TodoItem[] }): React.JSX.Element {
   const done = todos.filter((t) => t.status === 'completed').length
   return (
@@ -1325,7 +1325,6 @@ function DetailContent({
       return <></>
     }
     const back = computeBacklinks(snapshot, 'beat', beat.id)
-    const html = contentToEditorHtml(beat.content, 'beat')
     const outgoing: RelatedLinkItem[] = [
       ...beat.beatRefs
         .map((id) => snapshot.beats[id])
@@ -1358,18 +1357,10 @@ function DetailContent({
           title={beat.title || '未命名节点'}
         />
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 app-scrollbar">
-          <div
-            className="text-[14px] leading-7 text-foreground"
-            dangerouslySetInnerHTML={{ __html: html || '<p class="text-muted-foreground">（无正文）</p>' }}
-            onClick={(e) => {
-              const el = (e.target as HTMLElement).closest(
-                '[data-mention-id]'
-              ) as HTMLElement | null
-              if (!el) return
-              const id = el.getAttribute('data-mention-id')
-              const type = el.getAttribute('data-mention-type') as 'beat' | 'entity' | null
-              if (id && type) onOpenRelated({ type, id })
-            }}
+          <DetailMarkdown
+            content={beat.content}
+            onOpenMention={(type, id) => onOpenRelated({ type, id })}
+            sourceType="beat"
           />
         </div>
         <div className="border-t border-border p-3">
@@ -1393,7 +1384,6 @@ function DetailContent({
     return <></>
   }
   const back = computeBacklinks(snapshot, 'entity', entity.id)
-  const html = contentToEditorHtml(entity.content, 'entity')
   const outgoing: RelatedLinkItem[] = [
     ...entity.beatRefs
       .map((id) => snapshot.beats[id])
@@ -1426,20 +1416,10 @@ function DetailContent({
         title={entity.name}
       />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 app-scrollbar">
-        <div
-          className="text-[14px] leading-7 text-foreground"
-          dangerouslySetInnerHTML={{
-            __html: html || '<p class="text-muted-foreground">（无正文）</p>'
-          }}
-          onClick={(e) => {
-            const el = (e.target as HTMLElement).closest(
-              '[data-mention-id]'
-            ) as HTMLElement | null
-            if (!el) return
-            const id = el.getAttribute('data-mention-id')
-            const type = el.getAttribute('data-mention-type') as 'beat' | 'entity' | null
-            if (id && type) onOpenRelated({ type, id })
-          }}
+        <DetailMarkdown
+          content={entity.content}
+          onOpenMention={(type, id) => onOpenRelated({ type, id })}
+          sourceType="entity"
         />
       </div>
       <div className="border-t border-border p-3">

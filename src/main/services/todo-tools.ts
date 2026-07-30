@@ -28,7 +28,7 @@ const todoParams = Type.Object({
     }),
     {
       description:
-        '完整待办列表（每次调用应提交当前完整清单，而非增量）。多步任务开始时列出，完成一项就改 status。'
+        '完整待办列表（每次调用应提交当前完整清单，而非增量）。多步任务开始时列出，完成一项就改 status。清空清单请传空数组 []——仅 AI 可通过本工具清理；用户 UI 只读。'
     }
   )
 })
@@ -39,7 +39,7 @@ export function buildTodoTools(): AnyTodoTool[] {
       name: 'todo',
       label: 'todo',
       description:
-        '维护本会话任务待办清单。每次传入完整 todos 数组覆盖旧清单。status: pending | in_progress | completed | cancelled。复杂多步任务开始时先写清单，推进时更新；同时最多一个 in_progress。',
+        '维护本会话任务待办清单（持久化到当前会话，重开后仍可见）。每次传入完整 todos 数组覆盖旧清单。status: pending | in_progress | completed | cancelled。复杂多步任务开始时先写清单，推进时更新；同时最多一个 in_progress。清理已完成/取消项或整表清空：重新提交精简后的完整列表，或传 todos: []。用户界面只读，不可手动勾选或删除，只能由本工具改写。',
       parameters: todoParams,
       executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) => {
