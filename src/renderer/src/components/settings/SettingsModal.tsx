@@ -1,7 +1,8 @@
-import { Globe, Info, Settings2 } from 'lucide-react'
+import { Bot, Globe, Info, Settings2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Modal, ModalContent, ModalTitle } from '@/components/ui/modal'
 import { PreferencesPanel } from './PreferencesPanel'
+import { ModelPanel } from './ModelPanel'
 import { WebSearchPanel } from './WebSearchPanel'
 import { AboutPanel } from './AboutPanel'
 import {
@@ -13,13 +14,14 @@ import { cn } from '@/lib/utils'
 /** 导航项 */
 const navItems: Array<{ id: SettingsSection; label: string; icon: LucideIcon }> = [
   { id: 'preferences', label: '偏好设置', icon: Settings2 },
+  { id: 'models', label: '模型', icon: Bot },
   { id: 'web-search', label: '网络搜索', icon: Globe },
   { id: 'about', label: '关于', icon: Info }
 ]
 
 /** 导航分组 */
 const navGroups: Array<{ title: string; items: SettingsSection[] }> = [
-  { title: '通用', items: ['preferences', 'web-search'] },
+  { title: '通用', items: ['preferences', 'models', 'web-search'] },
   { title: '关于', items: ['about'] }
 ]
 
@@ -81,6 +83,7 @@ export function SettingsModal(): React.JSX.Element {
           <main className="app-scrollbar min-w-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-[980px] px-8 py-10">
               {activeSection === 'preferences' ? <PreferencesPanel /> : null}
+              {activeSection === 'models' ? <ModelPanel /> : null}
               {activeSection === 'web-search' ? <WebSearchPanel /> : null}
               {activeSection === 'about' ? <AboutPanel /> : null}
             </div>

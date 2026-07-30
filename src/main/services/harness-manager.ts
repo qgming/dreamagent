@@ -1,8 +1,12 @@
 /**
- * 每会话一个 AgentHarness 缓存
+ * 每会话一个 AgentHarness 缓存（少 recreate，动态 systemPrompt / context）
  */
-import { AgentHarness, formatSkillsForSystemPrompt } from '@earendil-works/pi-agent-core'
+import {
+  AgentHarness,
+  formatSkillsForSystemPrompt
+} from '@earendil-works/pi-agent-core'
 import type { Model, Models, Api } from '@earendil-works/pi-ai'
+import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
 import type { ProjectService } from './project-service'
 import type { PiSessionService } from './pi-session-service'
 import type { PiModelsService } from './pi-models'
@@ -18,6 +22,7 @@ import { buildWebTools } from './web-tools'
 import { buildTodoTools } from './todo-tools'
 import type { TodoService } from './todo-service'
 import { readPinsFromBranch } from './pi-session-parser'
+import type { LlmThinkingLevel } from '../../shared/llm-settings'
 
 type DreamHarness = AgentHarness<DreamToolContext>
 
@@ -27,7 +32,14 @@ function harnessKey(projectId: string, sessionId: string): string {
 
 interface CachedHarness {
   promise: Promise<DreamHarness>
+  /** 仅 skills 集合变化时重建；模型/思考用 setModel 热切换 */
   signature: string
+}
+
+export interface HarnessSelection {
+  providerId?: string
+  modelId?: string
+  thinkingLevel?: LlmThinkingLevel
 }
 
 /**
@@ -75,37 +87,52 @@ export class HarnessManager {
     this.pending.delete(key)
   }
 
+  /**
+   * L0+L1：稳定规则 + 压缩 outline（不含 pin 全文）
+   */
   private async buildSystemPrompt(projectId: string, sessionId: string): Promise<string> {
     const snap = await this.projects.openProject(projectId)
-    const branch = await this.sessions
-      .getActiveHistoryEntries(projectId, sessionId)
-      .catch(() => [])
-    const pins = readPinsFromBranch(branch)
 
     const outlineLines: string[] = []
     const walkOutline = (ids: string[], depth: number): void => {
       for (const id of ids) {
         const b = snap.beats[id]
         if (!b) continue
-        const summary = (b.content || '')
-          .replace(/\[@([^\]]+)\]\((?:entity|beat):[^)]+\)/g, '@$1')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(0, 60)
         const pad = '  '.repeat(depth)
-        outlineLines.push(
-          `${pad}- [${b.status}] ${b.title || '未命名'} (${b.id})${summary ? ` — ${summary}` : ''}`
-        )
+        const title = (b.title || '未命名').replace(/\s+/g, ' ').trim().slice(0, 40)
+        outlineLines.push(`${pad}- [${b.status}] ${title} (${b.id})`)
         walkOutline(snap.index.beats.children[id] ?? [], depth + 1)
       }
     }
     walkOutline(snap.index.beats.roots, 0)
 
+    const parts = [
+      DREAM_AGENT_BASE_PROMPT,
+      `## 当前项目\n标题：${snap.meta.title}`,
+      outlineLines.length
+        ? `## 节点大纲（仅标题；细节请 read）\n${outlineLines.join('\n')}`
+        : '## 节点大纲\n（暂无节点）',
+      `## 会话\nsessionId=${sessionId}`
+    ]
+    return parts.filter(Boolean).join('\n\n')
+  }
+
+  /** 钉选 + todo 动态段（context hook 注入） */
+  private async buildDynamicContextBlock(
+    projectId: string,
+    sessionId: string
+  ): Promise<string> {
+    const snap = await this.projects.openProject(projectId)
+    const branch = await this.sessions
+      .getActiveHistoryEntries(projectId, sessionId)
+      .catch(() => [])
+    const pins = readPinsFromBranch(branch)
+
     const pinBeatLines = pins.pinnedBeatIds
       .map((id) => snap.beats[id])
       .filter(Boolean)
       .map((b) => {
-        const body = (b.content || '').replace(/\s+/g, ' ').trim().slice(0, 200)
+        const body = (b.content || '').replace(/\s+/g, ' ').trim().slice(0, 400)
         return `### 节点「${b.title}」(${b.id}) [${b.status}]\n${body || '（空）'}`
       })
 
@@ -113,56 +140,68 @@ export class HarnessManager {
       .map((id) => snap.entities[id])
       .filter(Boolean)
       .map((e) => {
-        const body = (e.content || '').replace(/\s+/g, ' ').trim().slice(0, 200)
+        const body = (e.content || '').replace(/\s+/g, ' ').trim().slice(0, 400)
         return `### 实体「${e.name}」(${e.id}) [${e.status}]\n${body || '（空）'}`
       })
 
-    const parts = [
-      DREAM_AGENT_BASE_PROMPT,
-      `## 当前项目\n标题：${snap.meta.title}\n路径：${snap.dirPath}`,
-      outlineLines.length
-        ? `## 节点列表\n${outlineLines.join('\n')}`
-        : '## 节点列表\n（暂无节点，可提示用户先去「节点」页创建）',
+    let todoBlock = ''
+    try {
+      const todos = await this.todos.load(projectId, sessionId)
+      const open = todos.filter((t) => t.status !== 'completed' && t.status !== 'cancelled')
+      if (open.length) {
+        todoBlock =
+          '## 未完成待办\n' +
+          open
+            .map((t) => `- [${t.status}] ${t.content || t.id}`)
+            .join('\n')
+      }
+    } catch {
+      // ignore
+    }
+
+    return [
       pinBeatLines.length ? `## 已钉选节点\n${pinBeatLines.join('\n\n')}` : '',
       pinEntityLines.length ? `## 已钉选实体\n${pinEntityLines.join('\n\n')}` : '',
-      `## 会话\nsessionId=${sessionId}`
+      todoBlock
     ]
-    return parts.filter(Boolean).join('\n\n')
+      .filter(Boolean)
+      .join('\n\n')
   }
 
-  private async configSignature(projectId: string, sessionId: string): Promise<string> {
-    const [{ model }, view, enabledSkillIds] = await Promise.all([
-      this.modelsService.getModelsAndDefault(),
-      this.sessions.open(projectId, sessionId).catch(() => null),
-      this.skills.getEnabledSkillIds().catch(() => [] as string[])
-    ])
-    return JSON.stringify({
-      modelId: model.id,
-      provider: model.provider,
-      baseUrl: model.baseUrl,
-      pinsB: view?.pinnedBeatIds ?? [],
-      pinsE: view?.pinnedEntityIds ?? [],
-      skills: enabledSkillIds
-    })
+  /** 结构性签名：skills 变化才重建 harness */
+  private async structuralSignature(_projectId: string): Promise<string> {
+    const enabledSkillIds = await this.skills
+      .getEnabledSkillIds()
+      .catch(() => [] as string[])
+    return JSON.stringify({ skills: enabledSkillIds })
   }
 
-  async getOrCreate(projectId: string, sessionId: string): Promise<DreamHarness> {
+  async getOrCreate(
+    projectId: string,
+    sessionId: string,
+    selection?: HarnessSelection
+  ): Promise<DreamHarness> {
     const key = harnessKey(projectId, sessionId)
-    const signature = await this.configSignature(projectId, sessionId)
+    const signature = await this.structuralSignature(projectId)
 
     const cached = this.cache.get(key)
     if (cached && cached.signature === signature) {
-      return cached.promise
+      const harness = await cached.promise
+      await this.applySelection(harness, selection)
+      return harness
     }
     if (cached) {
-      // 配置变了：丢弃缓存引用，旧 run 自然结束
       this.cache.delete(key)
     }
 
     const pending = this.pending.get(key)
-    if (pending) return pending
+    if (pending) {
+      const harness = await pending
+      await this.applySelection(harness, selection)
+      return harness
+    }
 
-    const createPromise = this.createHarness(projectId, sessionId, signature)
+    const createPromise = this.createHarness(projectId, sessionId, selection)
       .then((harness) => {
         this.cache.set(key, { promise: Promise.resolve(harness), signature })
         this.pending.delete(key)
@@ -177,20 +216,44 @@ export class HarnessManager {
     return createPromise
   }
 
+  private async applySelection(
+    harness: DreamHarness,
+    selection?: HarnessSelection
+  ): Promise<void> {
+    try {
+      const { model, selection: sel } =
+        await this.modelsService.getModelsAndDefault(selection)
+      const current = harness.getModel()
+      if (
+        current.id !== model.id ||
+        current.provider !== model.provider ||
+        current.baseUrl !== model.baseUrl
+      ) {
+        await harness.setModel(model as Model<Api>)
+      }
+      const level = (sel.thinkingLevel || 'medium') as ThinkingLevel
+      if (harness.getThinkingLevel() !== level) {
+        await harness.setThinkingLevel(level)
+      }
+    } catch (error) {
+      console.warn('[harness-manager] 应用模型/思考档失败', error)
+    }
+  }
+
   private async createHarness(
     projectId: string,
     sessionId: string,
-    _signature: string
+    selection?: HarnessSelection
   ): Promise<DreamHarness> {
-    const [{ models, model }, session, basePrompt, piSkills] = await Promise.all([
-      this.modelsService.getModelsAndDefault(),
-      this.sessions.openSessionObject(projectId, sessionId),
-      this.buildSystemPrompt(projectId, sessionId),
-      this.skills.getEnabledPiSkills().catch((error) => {
-        console.warn('[harness-manager] 加载技能失败，降级为无技能:', error)
-        return []
-      })
-    ])
+    const [{ models, model, selection: sel }, session, piSkills] =
+      await Promise.all([
+        this.modelsService.getModelsAndDefault(selection),
+        this.sessions.openSessionObject(projectId, sessionId),
+        this.skills.getEnabledPiSkills().catch((error) => {
+          console.warn('[harness-manager] 加载技能失败，降级为无技能:', error)
+          return []
+        })
+      ])
 
     const skillsBlock = [
       formatSkillsForSystemPrompt(piSkills),
@@ -200,8 +263,6 @@ export class HarnessManager {
     ]
       .filter(Boolean)
       .join('\n\n')
-
-    const systemPrompt = [basePrompt, skillsBlock].filter(Boolean).join('\n\n')
 
     const tools = [
       ...buildDreamAgentTools(),
@@ -218,52 +279,67 @@ export class HarnessManager {
       todoService: this.todos
     }
 
-    // pi 0.82：不再传 env；工具上下文经 toolContext 注入
+    const thinkingLevel = (sel.thinkingLevel || 'medium') as ThinkingLevel
+
     const harness = new AgentHarness<DreamToolContext>({
       session,
       models: models as Models,
       model: model as Model<Api>,
       tools,
       toolContext,
-      systemPrompt,
+      // 动态 systemPrompt：每轮重建 L0+L1，pins 走 context hook
+      systemPrompt: async () => {
+        const base = await this.buildSystemPrompt(projectId, sessionId)
+        return [base, skillsBlock].filter(Boolean).join('\n\n')
+      },
       resources: { skills: piSkills },
-      // 中等思考档：支持 reasoning 的模型会流式输出 thinking 块
-      thinkingLevel: 'medium',
-      // 流式请求默认重试（pi-ai 默认 maxRetries=0）
+      thinkingLevel,
+      steeringMode: 'one-at-a-time',
+      followUpMode: 'one-at-a-time',
       streamOptions: {
         cacheRetention: 'short',
         metadata: { sessionId, projectId },
         maxRetries: 5,
-        // 服务端要求过长等待时仍有上限，避免卡死
         maxRetryDelayMs: 30_000,
         timeoutMs: 180_000
+      }
+    })
+
+    // 每轮注入钉选与 todo
+    harness.on('context', async () => {
+      try {
+        const block = await this.buildDynamicContextBlock(projectId, sessionId)
+        if (!block) return undefined
+        return {
+          messages: [
+            {
+              role: 'user' as const,
+              content: `【系统动态上下文 — 仅供参考，勿原样复述】\n${block}`,
+              timestamp: Date.now()
+            }
+          ]
+        }
+      } catch (error) {
+        console.warn('[harness-manager] context hook 失败', error)
+        return undefined
       }
     })
 
     return harness
   }
 
-  /** 运行前刷新 system prompt（pins/节点可能已变） */
-  async refreshSystemPrompt(projectId: string, sessionId: string): Promise<void> {
-    const key = harnessKey(projectId, sessionId)
-    const cached = this.cache.get(key)
-    if (!cached) return
-    try {
-      const harness = await cached.promise
-      // AgentHarness 无直接 setSystemPrompt；通过重建更稳妥
-      // 这里用 signature 失配触发下次 getOrCreate 重建
-      const freshSig = await this.configSignature(projectId, sessionId)
-      // 附加 outline 时间戳迫使在 startTurn 时若需要可重建
-      void harness
-      void freshSig
-    } catch {
-      // ignore
-    }
+  /** 兼容旧调用：仅在 skills 变时重建，否则复用 */
+  async recreate(
+    projectId: string,
+    sessionId: string,
+    selection?: HarnessSelection
+  ): Promise<DreamHarness> {
+    // 不再无脑 dispose；交由 getOrCreate 按 structural signature 决定
+    return this.getOrCreate(projectId, sessionId, selection)
   }
 
-  /** 强制重建 harness（startTurn 前调用，保证 prompt/tools 最新） */
-  async recreate(projectId: string, sessionId: string): Promise<DreamHarness> {
-    this.disposeSession(projectId, sessionId)
-    return this.getOrCreate(projectId, sessionId)
+  /** 强制丢弃缓存（设置页改供应商后） */
+  invalidateAll(): void {
+    this.clear()
   }
 }

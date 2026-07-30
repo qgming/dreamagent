@@ -91,6 +91,10 @@ export interface AgentStartTurnInput {
   projectId: string
   sessionId: string
   userMessage: string
+  /** 会话覆盖：providerId:: 可不传则用全局默认 */
+  providerId?: string
+  modelId?: string
+  thinkingLevel?: import('./llm-settings').LlmThinkingLevel
 }
 
 export interface AgentStartTurnResult {
@@ -103,11 +107,30 @@ export interface AgentRegenerateTurnInput {
   sessionId: string
   /** 用户消息 id（assistant 的 parentId / session entry id） */
   userMessageId: string
+  providerId?: string
+  modelId?: string
+  thinkingLevel?: import('./llm-settings').LlmThinkingLevel
 }
 
 export interface AgentCancelTurnInput {
   projectId: string
   sessionId: string
+  runId?: string
+}
+
+/** 运行中插话 */
+export interface AgentSteerInput {
+  projectId: string
+  sessionId: string
+  text: string
+  runId?: string
+}
+
+/** 排队到本轮结束后 */
+export interface AgentFollowUpInput {
+  projectId: string
+  sessionId: string
+  text: string
   runId?: string
 }
 

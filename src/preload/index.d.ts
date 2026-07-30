@@ -1,6 +1,13 @@
 import type { AgentToolDefinition } from '../shared/agent-tools'
 import type { AgentStreamEvent } from '../shared/agent-events'
-import type { LlmPublicSettings, LlmSettingsPatch } from '../shared/llm-settings'
+import type {
+  LlmAddProviderInput,
+  LlmProvidersPublic,
+  LlmRemoteModelInfo,
+  LlmSelectableModel,
+  LlmThinkingLevel,
+  LlmUpdateProviderInput
+} from '../shared/llm-settings'
 import type {
   AgentCancelTurnInput,
   AgentStartTurnInput,
@@ -165,13 +172,31 @@ export interface AgentApi {
     input: import('../shared/ui-chat').AgentRegenerateTurnInput
   ) => Promise<AgentStartTurnResult>
   cancelTurn: (input: AgentCancelTurnInput) => Promise<void>
+  steer: (input: import('../shared/ui-chat').AgentSteerInput) => Promise<void>
+  followUp: (input: import('../shared/ui-chat').AgentFollowUpInput) => Promise<void>
   listTools: () => Promise<AgentToolDefinition[]>
   onEvent: (handler: (event: AgentStreamEvent) => void) => () => void
 }
 
 export interface SettingsApi {
-  getLlm: () => Promise<LlmPublicSettings>
-  setLlm: (patch: LlmSettingsPatch) => Promise<LlmPublicSettings>
+  getLlm: () => Promise<LlmProvidersPublic>
+  addProvider: (input: LlmAddProviderInput) => Promise<LlmProvidersPublic>
+  updateProvider: (
+    providerId: string,
+    patch: LlmUpdateProviderInput
+  ) => Promise<LlmProvidersPublic>
+  removeProvider: (providerId: string) => Promise<LlmProvidersPublic>
+  setDefaultModel: (
+    providerId: string,
+    modelId: string
+  ) => Promise<LlmProvidersPublic>
+  setThinkingLevel: (level: LlmThinkingLevel) => Promise<LlmProvidersPublic>
+  listSelectableModels: () => Promise<LlmSelectableModel[]>
+  listRemoteModels: (input: {
+    providerId?: string
+    baseURL?: string
+    apiKey?: string
+  }) => Promise<LlmRemoteModelInfo[]>
   getWebSearch: () => Promise<
     import('../shared/web-search').WebSearchPublicSettings
   >

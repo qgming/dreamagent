@@ -1,8 +1,8 @@
 /**
  * 创作页 Composer
- * - Lexical 行内 directive 胶囊（退格整颗删除）
- * - 加号右侧 @ 按钮，与手输 @ 相同
- * - 胶囊样式与用户消息一致（浅/深色）
+ * - Lexical 行内 directive 胶囊
+ * - Ghost ModelSelector（发送按钮左侧）：模型 + 按模型自适应思考强度
+ * - 运行中：Enter 插话 / Alt+Enter 排队
  */
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import {
@@ -17,6 +17,7 @@ import {
   AtSign,
   CircleDot,
   FileText,
+  MessageSquarePlus,
   Sparkles,
   Square,
   Users,
@@ -28,6 +29,7 @@ import { useCreateStore } from '@/stores/create-store'
 import { useProjectStore } from '@/stores/project-store'
 import { skillLabel, useSkillsStore } from '@/stores/skills-store'
 import { AGENT_TOOL_DEFINITIONS } from '@shared/agent-tools'
+import type { LlmThinkingLevel } from '@shared/llm-settings'
 import {
   ComposerAddAttachment,
   ComposerAttachments
@@ -35,6 +37,11 @@ import {
 import { ComposerTriggerPopover } from '@/components/assistant-ui/composer-trigger-popover'
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
 import { LexicalDirectiveChip } from '@/components/assistant-ui/lexical-directive-chip'
+import {
+  ModelSelector,
+  type ModelOption,
+  type ModelSelectorEffortOption
+} from '@/components/assistant-ui/model-selector'
 
 const MENTION_ICONS = {
   skill: Zap,
@@ -42,6 +49,30 @@ const MENTION_ICONS = {
   entity: Users,
   tool: Wrench,
   article: FileText
+}
+
+/** 思考档中文名（按模型 effortLevels 子集显示） */
+const EFFORT_LABEL: Record<string, string> = {
+  off: '关',
+  none: '关',
+  minimal: '极低',
+  low: '低',
+  medium: '中',
+  high: '高',
+  xhigh: '很高',
+  max: '最大'
+}
+
+function effortsForModel(
+  levels: string[] | undefined,
+  reasoning: boolean
+): boolean | ModelSelectorEffortOption[] | undefined {
+  if (!reasoning) return undefined
+  if (!levels || levels.length === 0) return true // 官方默认 low/med/high
+  return levels.map((id) => ({
+    id,
+    name: EFFORT_LABEL[id] ?? id
+  }))
 }
 
 export type CreateComposerProps = {
@@ -60,6 +91,18 @@ export function CreateComposer({
   const aui = useAui()
   const sending = useCreateStore((s) => s.sending)
   const cancelTurn = useCreateStore((s) => s.cancelTurn)
+  const sendMessage = useCreateStore((s) => s.sendMessage)
+  const queueFollowUp = useCreateStore((s) => s.queueFollowUp)
+  const selectableModels = useCreateStore((s) => s.selectableModels)
+  const selectedModelKey = useCreateStore((s) => s.selectedModelKey)
+  const thinkingLevel = useCreateStore((s) => s.thinkingLevel)
+  const setSelectedModelKey = useCreateStore((s) => s.setSelectedModelKey)
+  const setThinkingLevel = useCreateStore((s) => s.setThinkingLevel)
+  const loadSelectableModels = useCreateStore((s) => s.loadSelectableModels)
+  const followUpCount = useCreateStore((s) => s.followUpCount)
+  const followUpPreview = useCreateStore((s) => s.followUpPreview)
+  const retryMessage = useCreateStore((s) => s.retryMessage)
+
   /** Lexical 根节点（contenteditable 在内部） */
   const editorRootRef = useRef<HTMLDivElement | null>(null)
 
@@ -71,6 +114,45 @@ export function CreateComposer({
   useEffect(() => {
     if (skillsStatus === 'idle') void loadSkills()
   }, [skillsStatus, loadSkills])
+
+  useEffect(() => {
+    void loadSelectableModels()
+  }, [loadSelectableModels])
+
+  const modelOptions = useMemo((): ModelOption[] => {
+    return selectableModels.map((m) => {
+      const mods = (m.inputModalities ?? ['text']).filter((x) => x !== 'text')
+      const caps: string[] = []
+      if (m.reasoning) caps.push('推理')
+      if (mods.length) caps.push(mods.join('/'))
+      if (m.contextWindow) {
+        caps.push(
+          m.contextWindow >= 1000
+            ? `${Math.round(m.contextWindow / 1000)}k`
+            : String(m.contextWindow)
+        )
+      }
+      return {
+        id: m.key,
+        name: m.modelName || m.modelId,
+        description: [m.providerName, caps.join(' · ')].filter(Boolean).join(' · '),
+        disabled: m.disabled,
+        keywords: [m.modelId, m.providerName, m.providerId, ...caps],
+        // 按模型：无 reasoning 不显示；有则用该模型 effortLevels
+        efforts: effortsForModel(m.effortLevels, m.reasoning),
+        icon: m.logoUrl ? (
+          <img
+            alt=""
+            src={m.logoUrl}
+            className={cn(
+              'size-3.5 rounded-sm object-contain',
+              m.logoMonochrome && 'dark:invert'
+            )}
+          />
+        ) : undefined
+      }
+    })
+  }, [selectableModels])
 
   const categories = useMemo((): Unstable_MentionCategory[] => {
     const enabledSkills = skills.filter((s) => s.enabled && s.isValid)
@@ -144,10 +226,6 @@ export function CreateComposer({
     fallbackIcon: Sparkles
   })
 
-  /**
-   * 在当前光标处插入 @，触发与手输相同的 mention popover。
-   * Lexical 使用 contenteditable，通过 execCommand / beforeinput 写入文本。
-   */
   const insertMentionTrigger = useCallback(() => {
     const root = editorRootRef.current
     const editable =
@@ -155,8 +233,6 @@ export function CreateComposer({
 
     if (editable) {
       editable.focus()
-
-      // 尽量在当前选区插入；若无选区则落到末尾
       const sel = window.getSelection()
       if (!sel || sel.rangeCount === 0 || !editable.contains(sel.anchorNode)) {
         const range = document.createRange()
@@ -166,7 +242,6 @@ export function CreateComposer({
         sel?.addRange(range)
       }
 
-      // 前面不是空白时补空格，满足 detectTrigger 边界
       let prefix = ''
       try {
         const r = sel?.getRangeAt(0)
@@ -183,7 +258,6 @@ export function CreateComposer({
 
       const ok = document.execCommand('insertText', false, `${prefix}@`)
       if (!ok) {
-        // 部分环境 execCommand 失败：退回 setText（会丢光标精度）
         const stateText = aui.composer.getState().text ?? ''
         const needSpace = stateText.length > 0 && !/\s$/.test(stateText)
         aui.composer.setText(`${stateText}${needSpace ? ' ' : ''}@`)
@@ -196,8 +270,41 @@ export function CreateComposer({
     aui.composer.setText(`${stateText}${needSpace ? ' ' : ''}@`)
   }, [aui])
 
+  /** 拦截 Enter / Alt+Enter：运行中分别走插话 / 排队 */
+  const handleKeyDownCapture = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key !== 'Enter' || e.shiftKey) return
+      if (!sending) return
+      // 运行中：阻止默认发送
+      e.preventDefault()
+      e.stopPropagation()
+      const text = (aui.composer.getState().text ?? '').trim()
+      if (!text) return
+      if (e.altKey) {
+        void queueFollowUp(text).then(() => aui.composer.setText(''))
+      } else {
+        void sendMessage(text).then(() => aui.composer.setText(''))
+      }
+    },
+    [sending, aui, queueFollowUp, sendMessage]
+  )
+
   return (
     <div className={cn('w-full', className)}>
+      {/* 排队 / 重试提示条 */}
+      {(followUpCount > 0 || retryMessage) && (
+        <div className="mx-auto mb-1.5 flex w-full max-w-[var(--thread-max-width,42rem)] items-center gap-2 px-1 text-xs text-muted-foreground">
+          {retryMessage ? <span className="truncate">{retryMessage}</span> : null}
+          {followUpCount > 0 ? (
+            <span className="inline-flex min-w-0 items-center gap-1 truncate rounded-full bg-muted px-2 py-0.5">
+              <MessageSquarePlus className="size-3 shrink-0" />
+              排队 {followUpCount} 条
+              {followUpPreview ? ` · ${followUpPreview}` : ''}
+            </span>
+          ) : null}
+        </div>
+      )}
+
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerPrimitive.Root className="aui-composer-root relative mx-auto flex w-full max-w-[var(--thread-max-width,42rem)] flex-col">
           <div
@@ -208,18 +315,21 @@ export function CreateComposer({
               'dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 dark:shadow-none',
               centered && 'shadow-md'
             )}
+            onKeyDownCapture={handleKeyDownCapture}
           >
             <ComposerAttachments />
 
-            {/* Lexical：directive 以行内容器渲染，退格整颗删除 */}
             <LexicalComposerInput
               ref={editorRootRef}
-              placeholder="发送消息…"
+              placeholder={
+                sending
+                  ? '输入以插话… · Alt+Enter 排队'
+                  : '发送消息…'
+              }
               autoFocus={centered}
               submitMode="enter"
               directiveChip={LexicalDirectiveChip}
               className={cn(
-                // 覆盖默认 aui-lexical-editor 尺寸，贴合现有输入样式
                 'min-h-10 w-full px-2.5 py-1 text-sm outline-none',
                 '[&_.aui-lexical-input]:min-h-10 [&_.aui-lexical-input]:w-full [&_.aui-lexical-input]:outline-none',
                 '[&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:break-words',
@@ -229,7 +339,7 @@ export function CreateComposer({
             />
 
             <div className="relative flex items-center justify-between gap-1.5">
-              <div className="flex items-center gap-0.5">
+              <div className="flex min-w-0 items-center gap-0.5">
                 <ComposerAddAttachment />
                 <TooltipIconButton
                   tooltip="附加技能 / 节点 / 实体…"
@@ -245,33 +355,61 @@ export function CreateComposer({
                 </TooltipIconButton>
               </div>
 
-              {sending ? (
-                <button
-                  className={cn(
-                    'flex size-8 shrink-0 items-center justify-center rounded-full',
-                    'bg-muted text-foreground hover:bg-muted/80'
-                  )}
-                  onClick={() => void cancelTurn()}
-                  title="停止"
-                  type="button"
-                >
-                  <Square className="size-3.5 fill-current" />
-                </button>
-              ) : (
-                <ComposerPrimitive.Send asChild>
+              {/* 右侧：官方 ModelSelector Ghost + 发送/停止 */}
+              <div className="flex shrink-0 items-center gap-1">
+                {modelOptions.length > 0 ? (
+                  <ModelSelector
+                    models={modelOptions}
+                    value={selectedModelKey ?? undefined}
+                    onValueChange={(key) => setSelectedModelKey(key)}
+                    effort={thinkingLevel}
+                    onEffortChange={(level) =>
+                      setThinkingLevel(level as LlmThinkingLevel)
+                    }
+                    variant="ghost"
+                    size="sm"
+                    searchable
+                    align="end"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="h-8 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-accent"
+                    onClick={() => void loadSelectableModels()}
+                    title="加载模型列表"
+                  >
+                    未配置模型
+                  </button>
+                )}
+
+                {sending ? (
                   <button
                     className={cn(
                       'flex size-8 shrink-0 items-center justify-center rounded-full',
-                      'bg-primary text-primary-foreground hover:bg-primary/90',
-                      'disabled:opacity-40'
+                      'bg-muted text-foreground hover:bg-muted/80'
                     )}
-                    title="发送"
+                    onClick={() => void cancelTurn()}
+                    title="停止"
                     type="button"
                   >
-                    <ArrowUp className="size-4" />
+                    <Square className="size-3.5 fill-current" />
                   </button>
-                </ComposerPrimitive.Send>
-              )}
+                ) : (
+                  <ComposerPrimitive.Send asChild>
+                    <button
+                      className={cn(
+                        'flex size-8 shrink-0 items-center justify-center rounded-full',
+                        'bg-primary text-primary-foreground hover:bg-primary/90',
+                        'disabled:opacity-40'
+                      )}
+                      title="发送"
+                      type="button"
+                    >
+                      <ArrowUp className="size-4" />
+                    </button>
+                  </ComposerPrimitive.Send>
+                )}
+              </div>
             </div>
           </div>
 

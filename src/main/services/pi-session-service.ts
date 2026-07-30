@@ -101,14 +101,18 @@ export class PiSessionService {
     target.reasoning += usage.reasoning || 0
   }
 
-  async getUsage(projectId: string, sessionId: string): Promise<SessionContextUsage> {
+  async getUsage(
+    projectId: string,
+    sessionId: string,
+    modelOverride?: { providerId?: string; modelId?: string }
+  ): Promise<SessionContextUsage> {
     const session = await this.openSessionObject(projectId, sessionId)
     const [branch, context, entries, stats, model] = await Promise.all([
       session.getBranch(),
       session.buildContext(),
       session.getEntries(),
       session.getSessionStats(),
-      this.models.getCurrentModelInfo()
+      this.models.getCurrentModelInfo(modelOverride)
     ])
 
     const lastCompactionIndex = branch.findLastIndex(

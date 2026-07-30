@@ -9,6 +9,20 @@ export interface ModelPriceInfo {
   cacheWrite: number
 }
 
+/** 模型支持的输入/输出模态 */
+export type ModelModality = 'text' | 'audio' | 'image' | 'video' | 'pdf'
+
+/** 该模型可用的思考档（来自 models.dev reasoning_options） */
+export type ModelEffortLevel =
+  | 'off'
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max'
+
 export interface ResolvedModelInfo {
   configuredId: string
   id: string
@@ -21,7 +35,18 @@ export interface ResolvedModelInfo {
   logoMonochrome?: boolean
   contextWindow: number
   maxOutputTokens: number
+  /** 是否为推理模型；未匹配时为 false */
   reasoning: boolean
+  /** 该模型实际支持的思考档；无则 undefined */
+  effortLevels?: ModelEffortLevel[]
+  /** 输入模态 */
+  inputModalities: ModelModality[]
+  /** 输出模态 */
+  outputModalities: ModelModality[]
+  /** 支持附件/多模态文件 */
+  attachment: boolean
+  /** 支持工具调用 */
+  toolCall: boolean
   price: ModelPriceInfo
   /** false 表示 Models.dev 未匹配，使用保守默认值。 */
   matched: boolean

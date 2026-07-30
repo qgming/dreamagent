@@ -2,8 +2,10 @@ import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { AGENT_TOOL_DEFINITIONS } from '../../shared/agent-tools'
 import type {
   AgentCancelTurnInput,
+  AgentFollowUpInput,
   AgentRegenerateTurnInput,
-  AgentStartTurnInput
+  AgentStartTurnInput,
+  AgentSteerInput
 } from '../../shared/ui-chat'
 import type { AgentRunner } from '../services/agent-runner'
 
@@ -16,7 +18,7 @@ function handle<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Agent IPC：startTurn / regenerateTurn / cancelTurn / listTools
+ * Agent IPC：startTurn / regenerate / cancel / steer / followUp / listTools
  */
 export function registerAgentIpc(runner: AgentRunner): void {
   ipcMain.handle('agent:startTurn', (event: IpcMainInvokeEvent, input: AgentStartTurnInput) =>
@@ -31,6 +33,14 @@ export function registerAgentIpc(runner: AgentRunner): void {
 
   ipcMain.handle('agent:cancelTurn', (_e, input: AgentCancelTurnInput) =>
     handle(() => runner.cancelTurn(input))
+  )
+
+  ipcMain.handle('agent:steer', (_e, input: AgentSteerInput) =>
+    handle(() => runner.steer(input))
+  )
+
+  ipcMain.handle('agent:followUp', (_e, input: AgentFollowUpInput) =>
+    handle(() => runner.followUp(input))
   )
 
   ipcMain.handle('agent:listTools', () => AGENT_TOOL_DEFINITIONS)

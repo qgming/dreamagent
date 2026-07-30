@@ -1,7 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AgentToolDefinition } from '../shared/agent-tools'
 import type { AgentStreamEvent } from '../shared/agent-events'
-import type { LlmPublicSettings, LlmSettingsPatch } from '../shared/llm-settings'
+import type {
+  LlmAddProviderInput,
+  LlmProvidersPublic,
+  LlmRemoteModelInfo,
+  LlmSelectableModel,
+  LlmThinkingLevel,
+  LlmUpdateProviderInput
+} from '../shared/llm-settings'
 import type {
   AgentCancelTurnInput,
   AgentStartTurnInput,
@@ -218,6 +225,10 @@ const agentApi = {
   ): Promise<AgentStartTurnResult> => ipcRenderer.invoke('agent:regenerateTurn', input),
   cancelTurn: (input: AgentCancelTurnInput): Promise<void> =>
     ipcRenderer.invoke('agent:cancelTurn', input),
+  steer: (input: import('../shared/ui-chat').AgentSteerInput): Promise<void> =>
+    ipcRenderer.invoke('agent:steer', input),
+  followUp: (input: import('../shared/ui-chat').AgentFollowUpInput): Promise<void> =>
+    ipcRenderer.invoke('agent:followUp', input),
   listTools: (): Promise<AgentToolDefinition[]> => ipcRenderer.invoke('agent:listTools'),
   onEvent: (handler: (event: AgentStreamEvent) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, event: AgentStreamEvent): void => {
@@ -231,12 +242,34 @@ const agentApi = {
 }
 
 /**
- * 设置 API
+ * 设置 API（多供应商 LLM + 网络搜索）
  */
 const settingsApi = {
-  getLlm: (): Promise<LlmPublicSettings> => ipcRenderer.invoke('settings:getLlm'),
-  setLlm: (patch: LlmSettingsPatch): Promise<LlmPublicSettings> =>
-    ipcRenderer.invoke('settings:setLlm', patch),
+  getLlm: (): Promise<LlmProvidersPublic> => ipcRenderer.invoke('settings:getLlm'),
+  addProvider: (input: LlmAddProviderInput): Promise<LlmProvidersPublic> =>
+    ipcRenderer.invoke('settings:addProvider', input),
+  updateProvider: (
+    providerId: string,
+    patch: LlmUpdateProviderInput
+  ): Promise<LlmProvidersPublic> =>
+    ipcRenderer.invoke('settings:updateProvider', providerId, patch),
+  removeProvider: (providerId: string): Promise<LlmProvidersPublic> =>
+    ipcRenderer.invoke('settings:removeProvider', providerId),
+  setDefaultModel: (
+    providerId: string,
+    modelId: string
+  ): Promise<LlmProvidersPublic> =>
+    ipcRenderer.invoke('settings:setDefaultModel', providerId, modelId),
+  setThinkingLevel: (level: LlmThinkingLevel): Promise<LlmProvidersPublic> =>
+    ipcRenderer.invoke('settings:setThinkingLevel', level),
+  listSelectableModels: (): Promise<LlmSelectableModel[]> =>
+    ipcRenderer.invoke('settings:listSelectableModels'),
+  listRemoteModels: (input: {
+    providerId?: string
+    baseURL?: string
+    apiKey?: string
+  }): Promise<LlmRemoteModelInfo[]> =>
+    ipcRenderer.invoke('settings:listRemoteModels', input),
   getWebSearch: (): Promise<import('../shared/web-search').WebSearchPublicSettings> =>
     ipcRenderer.invoke('settings:getWebSearch'),
   setWebSearch: (

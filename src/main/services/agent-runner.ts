@@ -6,9 +6,11 @@ import { createId } from '../../shared/ids'
 import type { AgentStreamEvent } from '../../shared/agent-events'
 import type {
   AgentCancelTurnInput,
+  AgentFollowUpInput,
   AgentRegenerateTurnInput,
   AgentStartTurnInput,
   AgentStartTurnResult,
+  AgentSteerInput,
   UiBeatStatusUpdate,
   UiChatMessage,
   UiToolCallPart
@@ -18,7 +20,7 @@ import type { ProjectSnapshot } from '../../shared/project-types'
 import type { ProjectService } from './project-service'
 import type { PiSessionService } from './pi-session-service'
 import type { LlmSettingsService } from './llm-settings-service'
-import type { HarnessManager } from './harness-manager'
+import type { HarnessManager, HarnessSelection } from './harness-manager'
 import type { AgentHarness } from '@earendil-works/pi-agent-core'
 import type { DreamToolContext } from './pi-agent-tools'
 import type { SessionContextUsage } from '../../shared/context-usage'
@@ -31,6 +33,11 @@ interface ActiveRun {
   sessionId: string
   sender: WebContents
   aborted: boolean
+  selection?: HarnessSelection
+  /** 排队文案预览（followUp） */
+  followUpPreview?: string
+  followUpCount: number
+  steerCount: number
 }
 
 function chapterIdsFromDetails(details: unknown): string[] {
@@ -86,7 +93,7 @@ export class AgentRunner {
     additionalTokens = 0
   ): Promise<SessionContextUsage> {
     const { projectId, sessionId, runId, sender } = run
-    const usage = await this.sessions.getUsage(projectId, sessionId)
+    const usage = await this.sessions.getUsage(projectId, sessionId, run.selection)
     const threshold = usage.model.contextWindow * usage.autoCompactThreshold
     if (usage.contextTokens + additionalTokens < threshold) {
       this.emit(sender, {
@@ -111,9 +118,13 @@ export class AgentRunner {
 
     try {
       await harness.compact(
-        '保留用户目标、约束、已确认决策、创作设定、工具执行结果和所有未完成事项。'
+        '保留人物设定与关系、时间线、已确认文风与叙事决策、未兑现伏笔、未完成 todo、当前章目标与用户约束。丢弃重复工具 JSON 与过期探索性讨论。'
       )
-      const compactedUsage = await this.sessions.getUsage(projectId, sessionId)
+      const compactedUsage = await this.sessions.getUsage(
+        projectId,
+        sessionId,
+        run.selection
+      )
       this.emit(sender, {
         type: 'context_update',
         projectId,
@@ -127,7 +138,7 @@ export class AgentRunner {
       const message = error instanceof Error ? error.message : String(error)
       console.warn('[agent-runner] 自动压缩失败:', message)
       const latestUsage = await this.sessions
-        .getUsage(projectId, sessionId)
+        .getUsage(projectId, sessionId, run.selection)
         .catch(() => usage)
       this.emit(sender, {
         type: 'context_update',
@@ -151,7 +162,12 @@ export class AgentRunner {
     if (!userMessage) throw new Error('消息不能为空')
 
     await this.llm.assertConfigured()
-    const run = this.beginRun(projectId, sessionId, sender)
+    const selection: HarnessSelection = {
+      providerId: input.providerId,
+      modelId: input.modelId,
+      thinkingLevel: input.thinkingLevel
+    }
+    const run = this.beginRun(projectId, sessionId, sender, selection)
 
     // 异步执行，立即返回 runId
     void this.executeTurn(run, userMessage).catch((error) => {
@@ -172,7 +188,12 @@ export class AgentRunner {
     if (!userMessageId?.trim()) throw new Error('缺少用户消息 id')
 
     await this.llm.assertConfigured()
-    const run = this.beginRun(projectId, sessionId, sender)
+    const selection: HarnessSelection = {
+      providerId: input.providerId,
+      modelId: input.modelId,
+      thinkingLevel: input.thinkingLevel
+    }
+    const run = this.beginRun(projectId, sessionId, sender, selection)
 
     void this.executeRegenerate(run, userMessageId.trim()).catch((error) => {
       this.handleRunError(run, error)
@@ -181,10 +202,84 @@ export class AgentRunner {
     return { runId: run.runId }
   }
 
+  /** 运行中插话：立即注入，打断后续工具 */
+  async steer(input: AgentSteerInput): Promise<void> {
+    const text = (input.text ?? '').trim()
+    if (!text) return
+    const key = this.sessionKey(input.projectId, input.sessionId)
+    const run = this.active.get(key)
+    if (!run || run.aborted) {
+      throw new Error('当前没有进行中的回合，无法插话')
+    }
+    if (input.runId && input.runId !== run.runId) return
+
+    const harness = await this.harnesses.getOrCreate(
+      input.projectId,
+      input.sessionId,
+      run.selection
+    )
+    await harness.steer(text)
+    run.steerCount += 1
+    this.emit(run.sender, {
+      type: 'queue_update',
+      projectId: run.projectId,
+      sessionId: run.sessionId,
+      runId: run.runId,
+      steerCount: run.steerCount,
+      followUpCount: run.followUpCount,
+      followUpPreview: run.followUpPreview
+    })
+    // 乐观用户气泡
+    this.emit(run.sender, {
+      type: 'user_message',
+      projectId: run.projectId,
+      sessionId: run.sessionId,
+      runId: run.runId,
+      message: {
+        id: createId('msg'),
+        role: 'user',
+        createdAt: new Date().toISOString(),
+        parts: [{ type: 'text', text }],
+        status: 'complete'
+      }
+    })
+  }
+
+  /** 排队：本轮结束后自动续跑 */
+  async followUp(input: AgentFollowUpInput): Promise<void> {
+    const text = (input.text ?? '').trim()
+    if (!text) return
+    const key = this.sessionKey(input.projectId, input.sessionId)
+    const run = this.active.get(key)
+    if (!run || run.aborted) {
+      throw new Error('当前没有进行中的回合，无法排队')
+    }
+    if (input.runId && input.runId !== run.runId) return
+
+    const harness = await this.harnesses.getOrCreate(
+      input.projectId,
+      input.sessionId,
+      run.selection
+    )
+    await harness.followUp(text)
+    run.followUpCount += 1
+    run.followUpPreview = text.slice(0, 80)
+    this.emit(run.sender, {
+      type: 'queue_update',
+      projectId: run.projectId,
+      sessionId: run.sessionId,
+      runId: run.runId,
+      steerCount: run.steerCount,
+      followUpCount: run.followUpCount,
+      followUpPreview: run.followUpPreview
+    })
+  }
+
   private beginRun(
     projectId: string,
     sessionId: string,
-    sender: WebContents
+    sender: WebContents,
+    selection?: HarnessSelection
   ): ActiveRun {
     const key = this.sessionKey(projectId, sessionId)
     const prev = this.active.get(key)
@@ -194,7 +289,16 @@ export class AgentRunner {
     }
 
     const runId = createId('run')
-    const run: ActiveRun = { runId, projectId, sessionId, sender, aborted: false }
+    const run: ActiveRun = {
+      runId,
+      projectId,
+      sessionId,
+      sender,
+      aborted: false,
+      selection,
+      followUpCount: 0,
+      steerCount: 0
+    }
     this.active.set(key, run)
     return run
   }
@@ -224,8 +328,12 @@ export class AgentRunner {
     const pendingCompaction = this.compactions.get(key)
     if (pendingCompaction) await pendingCompaction
 
-    // 每次 recreate，保证 system prompt / tools / model 最新
-    const harness = await this.harnesses.recreate(projectId, sessionId)
+    // 每次 getOrCreate + 应用模型
+    const harness = await this.harnesses.getOrCreate(
+      projectId,
+      sessionId,
+      run.selection
+    )
 
     // 定位用户消息：navigateTree 对 user 会把 leaf 移到其 parent，并返回 editorText
     const nav = (await harness.navigateTree(userMessageId)) as {
@@ -335,11 +443,11 @@ export class AgentRunner {
       })
     }
 
-    // 每次 recreate，保证 system prompt / tools / model 最新
+    // 每次 getOrCreate（按 skills 签名缓存），并应用模型/思考
     const harness =
       options?.harnessAlreadyCreated && options.harness
         ? options.harness
-        : await this.harnesses.recreate(projectId, sessionId)
+        : await this.harnesses.getOrCreate(projectId, sessionId, run.selection)
 
     // 将本次用户输入也纳入阈值预测，避免在 80% 边缘直接发出超长请求。
     await this.compactIfNeeded(run, harness, Math.ceil(userText.length / 4))
@@ -439,7 +547,7 @@ export class AgentRunner {
         case 'message_end': {
           flushAll(true)
           try {
-            const usage = await this.sessions.getUsage(projectId, sessionId)
+            const usage = await this.sessions.getUsage(projectId, sessionId, run.selection)
             this.emit(sender, {
               type: 'context_update',
               projectId,

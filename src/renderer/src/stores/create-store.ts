@@ -12,6 +12,15 @@ import type {
 import type { ProjectSnapshot } from '@shared/project-types'
 import type { TodoItem } from '@shared/todos'
 import type { ContextCompactionState } from '@shared/context-usage'
+import type {
+  LlmSelectableModel,
+  LlmThinkingLevel
+} from '@shared/llm-settings'
+import {
+  decodeModelKey,
+  encodeModelKey,
+  DEFAULT_THINKING_LEVEL
+} from '@shared/llm-settings'
 import { useProjectStore } from './project-store'
 
 /** 右侧详情目标 */
@@ -55,13 +64,28 @@ interface CreateState {
   compactionState: ContextCompactionState
   compactionError: string | null
   bootstrappedProjectId: string | null
+  /** 当前选用模型 key = providerId::modelId */
+  selectedModelKey: string | null
+  thinkingLevel: LlmThinkingLevel
+  selectableModels: LlmSelectableModel[]
+  /** followUp 队列预览 */
+  followUpCount: number
+  followUpPreview: string | null
+  retryMessage: string | null
 
   ensureSession: () => Promise<void>
   newSession: () => Promise<void>
   openSession: (id: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
   refreshSessionList: () => Promise<void>
+  loadSelectableModels: () => Promise<void>
+  setSelectedModelKey: (key: string) => void
+  setThinkingLevel: (level: LlmThinkingLevel) => void
   sendMessage: (text: string) => Promise<void>
+  /** 运行中插话 */
+  steerMessage: (text: string) => Promise<void>
+  /** 排队到本轮结束后 */
+  queueFollowUp: (text: string) => Promise<void>
   /** 重新生成：以 parentId（用户消息 id）为锚点 */
   regenerateMessage: (userMessageId: string) => Promise<void>
   cancelTurn: () => Promise<void>
@@ -98,7 +122,13 @@ const initialState = {
   error: null as string | null,
   compactionState: 'idle' as ContextCompactionState,
   compactionError: null as string | null,
-  bootstrappedProjectId: null as string | null
+  bootstrappedProjectId: null as string | null,
+  selectedModelKey: null as string | null,
+  thinkingLevel: DEFAULT_THINKING_LEVEL as LlmThinkingLevel,
+  selectableModels: [] as LlmSelectableModel[],
+  followUpCount: 0,
+  followUpPreview: null as string | null,
+  retryMessage: null as string | null
 }
 
 function patchAssistantMessage(
@@ -123,6 +153,64 @@ function patchAssistantMessage(
   const next = [...messages]
   next[idx] = patch(next[idx])
   return next
+}
+
+type SetState = (
+  partial: Partial<CreateState> | ((s: CreateState) => Partial<CreateState>)
+) => void
+
+/**
+ * 把当前选用模型写进 session.usage.model，顶部 ContextDisplay 立刻反映
+ * 上下文窗口 / 名称 / logo；占用百分比按新窗口重算。
+ */
+function applySelectedModelToSessionUsage(
+  get: () => CreateState,
+  set: SetState,
+  key?: string | null
+): void {
+  const state = get()
+  const sess = state.session
+  if (!sess?.usage) return
+  const modelKey = key ?? state.selectedModelKey
+  if (!modelKey) return
+  const sel = state.selectableModels.find((m) => m.key === modelKey)
+  if (!sel) return
+
+  const prev = sess.usage
+  const contextWindow = sel.contextWindow || prev.model.contextWindow || 1
+  const contextPercent = Math.min(
+    (prev.contextTokens / contextWindow) * 100,
+    100
+  )
+
+  set({
+    session: {
+      ...sess,
+      usage: {
+        ...prev,
+        contextPercent,
+        model: {
+          ...prev.model,
+          configuredId: sel.modelId,
+          id: sel.modelId,
+          name: sel.modelName || sel.modelId,
+          providerId: sel.providerId,
+          providerName: sel.providerName,
+          logoUrl: sel.logoUrl ?? prev.model.logoUrl,
+          logoMonochrome: sel.logoMonochrome ?? prev.model.logoMonochrome,
+          contextWindow,
+          maxOutputTokens: sel.maxTokens || prev.model.maxOutputTokens,
+          reasoning: sel.reasoning,
+          effortLevels: sel.effortLevels,
+          inputModalities: sel.inputModalities,
+          outputModalities: sel.outputModalities,
+          attachment: sel.attachment,
+          toolCall: sel.toolCall,
+          matched: true
+        }
+      }
+    }
+  })
 }
 
 let unsubAgent: (() => void) | null = null
@@ -338,13 +426,17 @@ function ensureAgentSubscription(
           payload.writtenChapterIds[payload.writtenChapterIds.length - 1]
         set({
           session: payload.session,
-          // 回合结束以磁盘投影为准（含 AI 清理后的待办）
           todos: payload.session.todos ?? get().todos,
           sending: false,
           runId: null,
           error: null,
+          followUpCount: 0,
+          followUpPreview: null,
+          retryMessage: null,
           ...(written ? { leftListTab: 'articles' as const } : {})
         })
+        // 回合结束后再按当前选用模型校正上下文展示
+        applySelectedModelToSessionUsage(get, set)
         void get().refreshSessionList()
         break
       }
@@ -356,6 +448,7 @@ function ensureAgentSubscription(
           compactionState: event.compactionState,
           compactionError: event.compactionError ?? null
         })
+        applySelectedModelToSessionUsage(get, set)
         break
       }
       case 'error': {
@@ -383,6 +476,9 @@ function ensureAgentSubscription(
           set({
             sending: false,
             runId: null,
+            followUpCount: 0,
+            followUpPreview: null,
+            retryMessage: null,
             session: {
               ...sess,
               messages: sess.messages.map((m) =>
@@ -391,7 +487,34 @@ function ensureAgentSubscription(
             }
           })
         } else {
-          set({ sending: false, runId: null })
+          set({
+            sending: false,
+            runId: null,
+            followUpCount: 0,
+            followUpPreview: null,
+            retryMessage: null
+          })
+        }
+        break
+      }
+      case 'queue_update': {
+        set({
+          followUpCount: event.followUpCount,
+          followUpPreview: event.followUpPreview ?? null
+        })
+        break
+      }
+      case 'retry_status': {
+        if (event.phase === 'finished') {
+          set({ retryMessage: null })
+        } else {
+          set({
+            retryMessage:
+              event.message ||
+              (event.attempt
+                ? `重试中 ${event.attempt}…`
+                : '正在重试…')
+          })
         }
         break
       }
@@ -513,6 +636,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         compactionState: 'idle',
         compactionError: null
       })
+      // 新对话：顶部上下文按当前选用模型刷新窗口/名称/logo
+      applySelectedModelToSessionUsage(get, set)
       await get().refreshSessionList()
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
@@ -543,6 +668,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         compactionState: 'idle',
         compactionError: null
       })
+      applySelectedModelToSessionUsage(get, set)
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
     }
@@ -604,15 +730,96 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     }
   },
 
+  loadSelectableModels: async () => {
+    try {
+      const models = await window.api.settings.listSelectableModels()
+      const state = get()
+      let selectedModelKey = state.selectedModelKey
+      // 若当前选择无效，回落到第一个可用模型
+      if (
+        !selectedModelKey ||
+        !models.some((m) => m.key === selectedModelKey && !m.disabled)
+      ) {
+        selectedModelKey =
+          models.find((m) => !m.disabled)?.key ?? models[0]?.key ?? null
+      }
+      let thinkingLevel = state.thinkingLevel
+      try {
+        const llm = await window.api.settings.getLlm()
+        // 若无选中，用全局默认模型
+        if (!selectedModelKey && llm.defaultProviderId && llm.defaultModelId) {
+          const key = encodeModelKey(llm.defaultProviderId, llm.defaultModelId)
+          if (models.some((m) => m.key === key)) selectedModelKey = key
+        }
+        // 思考档：优先该模型能力，再回落全局默认
+        const selected = models.find((m) => m.key === selectedModelKey)
+        if (selected?.reasoning) {
+          const levels =
+            selected.effortLevels.length > 0
+              ? selected.effortLevels
+              : (['low', 'medium', 'high'] as LlmThinkingLevel[])
+          if (levels.includes(llm.defaultThinkingLevel)) {
+            thinkingLevel = llm.defaultThinkingLevel
+          } else if (!levels.includes(thinkingLevel)) {
+            thinkingLevel = levels.includes('medium')
+              ? 'medium'
+              : levels[Math.floor(levels.length / 2)] ?? levels[0]
+          }
+        } else if (llm.defaultThinkingLevel) {
+          thinkingLevel = llm.defaultThinkingLevel
+        }
+      } catch {
+        // ignore
+      }
+      set({ selectableModels: models, selectedModelKey, thinkingLevel })
+      // 刷新当前会话上下文展示的模型信息
+      applySelectedModelToSessionUsage(get, set, selectedModelKey)
+    } catch (error) {
+      console.warn('[create-store] 加载可选模型失败', error)
+    }
+  },
+
+  setSelectedModelKey: (key) => {
+    const model = get().selectableModels.find((m) => m.key === key)
+    // 切换模型后：思考档纠正到该模型支持范围
+    let thinkingLevel = get().thinkingLevel
+    if (model?.reasoning) {
+      const levels =
+        model.effortLevels.length > 0
+          ? model.effortLevels
+          : (['low', 'medium', 'high'] as LlmThinkingLevel[])
+      if (!levels.includes(thinkingLevel)) {
+        thinkingLevel = levels.includes('medium')
+          ? 'medium'
+          : levels[Math.floor(levels.length / 2)] ?? levels[0]
+      }
+    }
+    set({ selectedModelKey: key, thinkingLevel })
+    // 立即刷新顶部上下文展示中的模型信息（窗口/名称/logo）
+    applySelectedModelToSessionUsage(get, set, key)
+  },
+
+  setThinkingLevel: (level) => {
+    set({ thinkingLevel: level })
+    // 同步写回全局默认（不阻塞 UI）
+    void window.api.settings.setThinkingLevel(level).catch(() => undefined)
+  },
+
   sendMessage: async (text) => {
     ensureAgentSubscription(get, set)
     const projectId = useProjectStore.getState().activeProjectId
-    const { activeSessionId, sending } = get()
-    if (!projectId || !activeSessionId || sending) return
+    const { activeSessionId, sending, selectedModelKey, thinkingLevel } = get()
+    if (!projectId || !activeSessionId) return
     const trimmed = text.trim()
     if (!trimmed) return
 
-    set({ sending: true, error: null })
+    // 运行中 → 插话
+    if (sending) {
+      await get().steerMessage(trimmed)
+      return
+    }
+
+    set({ sending: true, error: null, followUpCount: 0, followUpPreview: null })
     const prev = get().session
     if (prev) {
       set({
@@ -632,11 +839,15 @@ export const useCreateStore = create<CreateState>((set, get) => ({
       })
     }
 
+    const decoded = selectedModelKey ? decodeModelKey(selectedModelKey) : null
     try {
       const { runId } = await window.api.agent.startTurn({
         projectId,
         sessionId: activeSessionId,
-        userMessage: trimmed
+        userMessage: trimmed,
+        providerId: decoded?.providerId,
+        modelId: decoded?.modelId,
+        thinkingLevel
       })
       set({ runId })
     } catch (error) {
@@ -645,7 +856,6 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         runId: null,
         error: error instanceof Error ? error.message : String(error)
       })
-      // 回读会话
       try {
         const view = await window.api.session.open(projectId, activeSessionId)
         set({ session: view, todos: view.todos ?? [] })
@@ -655,21 +865,63 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     }
   },
 
+  steerMessage: async (text) => {
+    ensureAgentSubscription(get, set)
+    const projectId = useProjectStore.getState().activeProjectId
+    const { activeSessionId, runId, sending } = get()
+    if (!projectId || !activeSessionId || !sending) return
+    const trimmed = text.trim()
+    if (!trimmed) return
+    try {
+      await window.api.agent.steer({
+        projectId,
+        sessionId: activeSessionId,
+        text: trimmed,
+        runId: runId ?? undefined
+      })
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+    }
+  },
+
+  queueFollowUp: async (text) => {
+    ensureAgentSubscription(get, set)
+    const projectId = useProjectStore.getState().activeProjectId
+    const { activeSessionId, runId, sending } = get()
+    if (!projectId || !activeSessionId || !sending) return
+    const trimmed = text.trim()
+    if (!trimmed) return
+    try {
+      await window.api.agent.followUp({
+        projectId,
+        sessionId: activeSessionId,
+        text: trimmed,
+        runId: runId ?? undefined
+      })
+      set({
+        followUpCount: get().followUpCount + 1,
+        followUpPreview: trimmed.slice(0, 80)
+      })
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+    }
+  },
+
   regenerateMessage: async (userMessageId) => {
     ensureAgentSubscription(get, set)
     const projectId = useProjectStore.getState().activeProjectId
-    const { activeSessionId, sending, session } = get()
+    const { activeSessionId, sending, session, selectedModelKey, thinkingLevel } =
+      get()
     if (!projectId || !activeSessionId || sending || !session) return
     if (!userMessageId?.trim()) return
 
-    // 本地先截断到该用户消息（含该条），等 branch_reset / 流式事件再校准
     const idx = session.messages.findIndex((m) => m.id === userMessageId)
     if (idx < 0) {
       set({ error: '找不到要重新生成的用户消息' })
       return
     }
-    // 保留到 userMessageId 为止（含），去掉其后所有
     const truncated = session.messages.slice(0, idx + 1)
+    const decoded = selectedModelKey ? decodeModelKey(selectedModelKey) : null
 
     set({
       sending: true,
@@ -681,7 +933,10 @@ export const useCreateStore = create<CreateState>((set, get) => ({
       const { runId } = await window.api.agent.regenerateTurn({
         projectId,
         sessionId: activeSessionId,
-        userMessageId
+        userMessageId,
+        providerId: decoded?.providerId,
+        modelId: decoded?.modelId,
+        thinkingLevel
       })
       set({ runId })
     } catch (error) {
@@ -709,6 +964,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         sessionId: activeSessionId,
         runId: runId ?? undefined
       })
+      set({ followUpCount: 0, followUpPreview: null, retryMessage: null })
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
     } finally {

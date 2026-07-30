@@ -121,6 +121,28 @@ export type AgentStreamEvent =
       sessionId: string
       runId: string
     }
+  | {
+      /** 插话/排队队列变化 */
+      type: 'queue_update'
+      projectId: string
+      sessionId: string
+      runId: string
+      steerCount: number
+      followUpCount: number
+      /** 最近一条排队文案预览 */
+      followUpPreview?: string
+    }
+  | {
+      /** 提供商自动重试 */
+      type: 'retry_status'
+      projectId: string
+      sessionId: string
+      runId: string
+      phase: 'scheduled' | 'attempt' | 'finished'
+      attempt?: number
+      delayMs?: number
+      message?: string
+    }
 
 /** 自定义 session entry 类型常量（pi custom entry） */
 export const SESSION_ENTRY = {

@@ -5,9 +5,14 @@ import { models, providers } from '@opencode-ai/models/snapshot'
 import type {
   Model as CatalogModel,
   ModelMetadata,
-  Provider as CatalogProvider
+  Provider as CatalogProvider,
+  ReasoningOption
 } from '@opencode-ai/models'
-import type { ResolvedModelInfo } from '../../shared/context-usage'
+import type {
+  ModelEffortLevel,
+  ModelModality,
+  ResolvedModelInfo
+} from '../../shared/context-usage'
 
 const DEFAULT_CONTEXT_WINDOW = 200_000
 const DEFAULT_MAX_OUTPUT = 32_768
@@ -173,6 +178,64 @@ function findOffering(metadata: ModelMetadata): {
   return best ?? {}
 }
 
+/** 将 models.dev reasoning_options 归一为可选思考档 */
+function effortLevelsFromOptions(
+  options: ReasoningOption[] | undefined,
+  reasoning: boolean
+): ModelEffortLevel[] | undefined {
+  if (!reasoning) return undefined
+
+  const levels = new Set<ModelEffortLevel>()
+  let hasEffort = false
+  let hasToggleOrBudget = false
+
+  for (const opt of options ?? []) {
+    if (opt.type === 'effort' && Array.isArray(opt.values)) {
+      hasEffort = true
+      for (const value of opt.values) {
+        if (value === null || value === 'none') levels.add('off')
+        else if (
+          value === 'minimal' ||
+          value === 'low' ||
+          value === 'medium' ||
+          value === 'high' ||
+          value === 'xhigh' ||
+          value === 'max'
+        ) {
+          levels.add(value)
+        } else if (value === 'default') {
+          levels.add('medium')
+        }
+      }
+    } else if (opt.type === 'toggle' || opt.type === 'budget_tokens') {
+      hasToggleOrBudget = true
+    }
+  }
+
+  if (hasEffort && levels.size > 0) {
+    return [...levels]
+  }
+  if (hasToggleOrBudget || reasoning) {
+    // 无具名 effort 时：官方默认 low/med/high（efforts: true）
+    return ['low', 'medium', 'high']
+  }
+  return undefined
+}
+
+function modalitiesOf(
+  metadata: ModelMetadata,
+  offering?: CatalogModel
+): { input: ModelModality[]; output: ModelModality[] } {
+  const input = (offering?.modalities?.input ??
+    metadata.modalities?.input ?? ['text']) as ModelModality[]
+  const output = (offering?.modalities?.output ??
+    metadata.modalities?.output ?? ['text']) as ModelModality[]
+  return {
+    input: input.length ? input : ['text'],
+    output: output.length ? output : ['text']
+  }
+}
+
 function infoFromMetadata(
   configuredId: string,
   metadata: ModelMetadata
@@ -181,6 +244,10 @@ function infoFromMetadata(
   const owner = providers[ownerId]
   const offering = findOffering(metadata)
   const cost = offering.model?.cost
+  const reasoning = Boolean(
+    offering.model?.reasoning ?? metadata.reasoning ?? false
+  )
+  const mods = modalitiesOf(metadata, offering.model)
   return {
     configuredId,
     id: metadata.id,
@@ -189,10 +256,26 @@ function infoFromMetadata(
     providerName: owner?.name ?? ownerId,
     logoUrl: `${MODELS_DEV_LOGO_BASE_URL}/${encodeURIComponent(ownerId)}.svg`,
     contextWindow:
-      metadata.limit?.context || offering.model?.limit.context || DEFAULT_CONTEXT_WINDOW,
+      metadata.limit?.context ||
+      offering.model?.limit.context ||
+      DEFAULT_CONTEXT_WINDOW,
     maxOutputTokens:
-      metadata.limit?.output || offering.model?.limit.output || DEFAULT_MAX_OUTPUT,
-    reasoning: metadata.reasoning ?? offering.model?.reasoning ?? true,
+      metadata.limit?.output ||
+      offering.model?.limit.output ||
+      DEFAULT_MAX_OUTPUT,
+    reasoning,
+    effortLevels: effortLevelsFromOptions(
+      offering.model?.reasoning_options,
+      reasoning
+    ),
+    inputModalities: mods.input,
+    outputModalities: mods.output,
+    attachment: Boolean(
+      offering.model?.attachment ?? metadata.attachment ?? false
+    ),
+    toolCall: Boolean(
+      offering.model?.tool_call ?? metadata.tool_call ?? true
+    ),
     price: {
       input: cost?.input ?? 0,
       output: cost?.output ?? 0,
@@ -205,6 +288,7 @@ function infoFromMetadata(
 
 /**
  * 仅按模型 ID 匹配 Models.dev；baseURL 保留在签名中以兼容现有调用方，但不参与匹配。
+ * 未命中时 reasoning=false，避免所有未知模型都显示思考档。
  */
 export function resolveModelInfo(
   modelId: string,
@@ -221,7 +305,12 @@ export function resolveModelInfo(
     providerName: '未识别模型',
     contextWindow: DEFAULT_CONTEXT_WINDOW,
     maxOutputTokens: DEFAULT_MAX_OUTPUT,
-    reasoning: true,
+    reasoning: false,
+    effortLevels: undefined,
+    inputModalities: ['text'],
+    outputModalities: ['text'],
+    attachment: false,
+    toolCall: true,
     price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     matched: false
   }
