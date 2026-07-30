@@ -4,11 +4,27 @@
  * {libraryRoot}/{projectFolder}/
  *   project.json
  *   index.json
- *   beats/{名称}-{uuid}.json
+ *   beats/{名称}-{uuid}.json          # 平铺；父子靠 parentId
  *   entities/{名称}-{uuid}.json
- *   documents/chapters/{名称}-{uuid}.json
+ *   documents/chapters/               # 文章；文件夹为真实子目录
+ *     {文章}.json
+ *     卷一/{文章}.json
  *   conversations/{convId}.json
+ *   sessions/
  */
+
+import {
+  chapterOrderFromFlat,
+  emptyChapterOrder,
+  emptyTreeOrder,
+  flattenChapterOrder,
+  flattenTreeOrder,
+  treeFromFlatOrder,
+  type ChapterOrderIndex,
+  type TreeOrderIndex
+} from './tree-index'
+
+export type { ChapterOrderIndex, TreeOrderIndex }
 
 /** 节点写作成熟度（递进） */
 export type BeatStatus = 'idea' | 'outline' | 'draft' | 'final'
@@ -40,6 +56,11 @@ export interface Beat {
   entityRefs: string[]
   /** 正文双链 → 其他节点 */
   beatRefs: string[]
+  /**
+   * 结构父节点（同类型树，单父）；与双链正交
+   * null/缺省 = 根
+   */
+  parentId?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -55,6 +76,8 @@ export interface Entity {
   entityRefs: string[]
   /** 正文双链 → 节点 */
   beatRefs: string[]
+  /** 结构父实体（同类型树）；null/缺省 = 根 */
+  parentId?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -76,7 +99,20 @@ export interface Chapter {
   entityRefs: string[]
   /** 文中涉及的其他节点 id（元数据） */
   beatRefs: string[]
+  /** 所属文章文件夹；null/缺省 = 根目录 */
+  folderId?: string | null
   conversationId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** 文章文件夹元数据（真实磁盘子目录） */
+export interface ChapterFolderMeta {
+  id: string
+  name: string
+  parentId: string | null
+  /** 相对 documents/chapters 的路径，如「卷一」或「卷一/上」 */
+  relPath: string
   createdAt: string
   updatedAt: string
 }
@@ -137,11 +173,28 @@ export interface ConversationSummary {
   updatedAt: string
 }
 
+/**
+ * 项目索引 v3：节点/实体为树；文章为文件夹分组 + 文件夹树
+ *
+ * 兼容读：normalizeProjectIndex 会把 v2 的 { order } 升为 roots
+ * 写回时附带派生的 order（扁平 DFS），方便旧代码与外部工具
+ */
 export interface ProjectIndex {
   version: number
-  beats: { order: string[] }
-  entities: { order: string[] }
-  chapters: { order: string[] }
+  beats: TreeOrderIndex & {
+    /** 派生：DFS 扁平序（只读兼容；以 roots/children 为准） */
+    order: string[]
+  }
+  entities: TreeOrderIndex & {
+    order: string[]
+  }
+  chapters: ChapterOrderIndex & {
+    order: string[]
+  }
+  /** 文章文件夹树 + 元数据 */
+  chapterFolders: TreeOrderIndex & {
+    byId: Record<string, ChapterFolderMeta>
+  }
   conversations: { order: string[] }
   updatedAt: string
 }
@@ -164,6 +217,8 @@ export interface ProjectSnapshot {
   beats: Record<string, Beat>
   entities: Record<string, Entity>
   chapters: Record<string, Chapter>
+  /** 文章文件夹（与 index.chapterFolders.byId 同步） */
+  chapterFolders: Record<string, ChapterFolderMeta>
   conversationSummaries: ConversationSummary[]
   dirPath: string
 }
@@ -185,21 +240,26 @@ export interface CreateBeatInput {
   title: string
   content?: string
   status?: BeatStatus
+  /** 插在同级某节点之后（兼容旧语义） */
   afterId?: string | null
+  /** 父节点 id；缺省为根 */
+  parentId?: string | null
 }
 
 export type UpdateBeatInput = Partial<
-  Pick<Beat, 'title' | 'content' | 'status' | 'entityRefs' | 'beatRefs'>
+  Pick<Beat, 'title' | 'content' | 'status' | 'entityRefs' | 'beatRefs' | 'parentId'>
 >
 
 export interface CreateEntityInput {
   name: string
   content?: string
   status?: EntityStatus
+  parentId?: string | null
+  afterId?: string | null
 }
 
 export type UpdateEntityInput = Partial<
-  Pick<Entity, 'name' | 'content' | 'status' | 'entityRefs' | 'beatRefs'>
+  Pick<Entity, 'name' | 'content' | 'status' | 'entityRefs' | 'beatRefs' | 'parentId'>
 >
 
 export interface CreateChapterInput {
@@ -213,14 +273,30 @@ export interface CreateChapterInput {
   /** 显式关联节点（不从 content 解析） */
   beatRefs?: string[]
   conversationId?: string
+  /** 所属文件夹 */
+  folderId?: string | null
 }
 
 export type UpdateChapterInput = Partial<
   Pick<
     Chapter,
-    'title' | 'content' | 'status' | 'sourceBeatIds' | 'entityRefs' | 'beatRefs' | 'conversationId'
+    | 'title'
+    | 'content'
+    | 'status'
+    | 'sourceBeatIds'
+    | 'entityRefs'
+    | 'beatRefs'
+    | 'conversationId'
+    | 'folderId'
   >
 >
+
+export interface CreateChapterFolderInput {
+  name: string
+  parentId?: string | null
+}
+
+export type UpdateChapterFolderInput = Partial<Pick<ChapterFolderMeta, 'name' | 'parentId'>>
 
 export interface CreateConversationInput {
   title?: string
@@ -232,8 +308,35 @@ export type UpdateConversationInput = Partial<
   Pick<Conversation, 'title' | 'pinnedBeatIds' | 'pinnedEntityIds'>
 >
 
+/** @deprecated 优先用 ReorderSiblingsInput；仅当全部为根时仍可用 */
 export interface ReorderBeatsInput {
   orderedIds: string[]
+}
+
+/** 同级重排 */
+export interface ReorderSiblingsInput {
+  /** null = 根级 */
+  parentId?: string | null
+  orderedIds: string[]
+}
+
+/** 改挂父节点 */
+export interface ReparentInput {
+  parentId?: string | null
+  /** 插在新父下某兄弟之后 */
+  afterId?: string | null
+}
+
+/** 文章在文件夹内重排 */
+export interface ReorderChaptersInFolderInput {
+  folderId?: string | null
+  orderedIds: string[]
+}
+
+/** 移动文章到另一文件夹 */
+export interface MoveChapterInput {
+  folderId?: string | null
+  afterId?: string | null
 }
 
 export interface AgentRunTurnInput {
@@ -345,8 +448,90 @@ export function normalizeChapterStatus(raw: unknown): ChapterStatus {
   }
 }
 
+function isTreeShape(raw: unknown): raw is TreeOrderIndex {
+  return (
+    !!raw &&
+    typeof raw === 'object' &&
+    Array.isArray((raw as TreeOrderIndex).roots)
+  )
+}
+
+function readFlatOrder(raw: unknown): string[] {
+  if (!raw || typeof raw !== 'object') return []
+  const o = raw as { order?: unknown; roots?: unknown }
+  if (Array.isArray(o.order)) return o.order.filter((x) => typeof x === 'string')
+  if (Array.isArray(o.roots)) return o.roots.filter((x) => typeof x === 'string')
+  return []
+}
+
+function normalizeTreeSection(raw: unknown): TreeOrderIndex & { order: string[] } {
+  if (isTreeShape(raw)) {
+    const roots = [...((raw as TreeOrderIndex).roots ?? [])].filter(
+      (x) => typeof x === 'string'
+    )
+    const children: Record<string, string[]> = {}
+    const rawChildren = (raw as TreeOrderIndex).children ?? {}
+    for (const [k, v] of Object.entries(rawChildren)) {
+      if (Array.isArray(v)) children[k] = v.filter((x) => typeof x === 'string')
+    }
+    const tree = { roots, children }
+    return { ...tree, order: flattenTreeOrder(tree) }
+  }
+  const flat = readFlatOrder(raw)
+  const tree = treeFromFlatOrder(flat)
+  return { ...tree, order: [...flat] }
+}
+
+function normalizeChapterSection(raw: unknown): ChapterOrderIndex & { order: string[] } {
+  if (
+    raw &&
+    typeof raw === 'object' &&
+    Array.isArray((raw as ChapterOrderIndex).roots) &&
+    (raw as ChapterOrderIndex).byFolder &&
+    typeof (raw as ChapterOrderIndex).byFolder === 'object'
+  ) {
+    const roots = [...((raw as ChapterOrderIndex).roots ?? [])].filter(
+      (x) => typeof x === 'string'
+    )
+    const byFolder: Record<string, string[]> = {}
+    for (const [k, v] of Object.entries((raw as ChapterOrderIndex).byFolder ?? {})) {
+      if (Array.isArray(v)) byFolder[k] = v.filter((x) => typeof x === 'string')
+    }
+    const section = { roots, byFolder }
+    return { ...section, order: flattenChapterOrder(section) }
+  }
+  const flat = readFlatOrder(raw)
+  const section = chapterOrderFromFlat(flat)
+  return { ...section, order: [...flat] }
+}
+
+function normalizeChapterFolders(raw: unknown): ProjectIndex['chapterFolders'] {
+  if (!raw || typeof raw !== 'object') {
+    return { ...emptyTreeOrder(), byId: {} }
+  }
+  const r = raw as ProjectIndex['chapterFolders']
+  const tree = normalizeTreeSection(r)
+  const byId: Record<string, ChapterFolderMeta> = {}
+  if (r.byId && typeof r.byId === 'object') {
+    for (const [id, meta] of Object.entries(r.byId)) {
+      if (!meta || typeof meta !== 'object') continue
+      const m = meta as ChapterFolderMeta
+      if (!m.id || !m.name) continue
+      byId[id] = {
+        id: m.id,
+        name: String(m.name),
+        parentId: m.parentId ?? null,
+        relPath: String(m.relPath || m.name),
+        createdAt: m.createdAt ?? new Date().toISOString(),
+        updatedAt: m.updatedAt ?? m.createdAt ?? new Date().toISOString()
+      }
+    }
+  }
+  return { roots: tree.roots, children: tree.children, byId }
+}
+
 /**
- * 归一化 index：补齐 chapters / conversations，必要时标记需写回
+ * 归一化 index：v2 {order} → v3 树；补齐 chapterFolders
  */
 export function normalizeProjectIndex(raw: Partial<ProjectIndex> | null | undefined): {
   index: ProjectIndex
@@ -354,18 +539,28 @@ export function normalizeProjectIndex(raw: Partial<ProjectIndex> | null | undefi
 } {
   const now = new Date().toISOString()
   const base = raw ?? {}
+  const version = base.version ?? 0
   const needsWrite =
     !raw ||
-    (raw.version ?? 0) < INDEX_SCHEMA_VERSION ||
+    version < INDEX_SCHEMA_VERSION ||
     !raw.chapters ||
-    !raw.conversations
+    !raw.conversations ||
+    !raw.chapterFolders ||
+    !isTreeShape(raw.beats) ||
+    !isTreeShape(raw.entities)
+
+  const beats = normalizeTreeSection(base.beats)
+  const entities = normalizeTreeSection(base.entities)
+  const chapters = normalizeChapterSection(base.chapters)
+  const chapterFolders = normalizeChapterFolders(base.chapterFolders)
 
   return {
     index: {
       version: INDEX_SCHEMA_VERSION,
-      beats: { order: [...(base.beats?.order ?? [])] },
-      entities: { order: [...(base.entities?.order ?? [])] },
-      chapters: { order: [...(base.chapters?.order ?? [])] },
+      beats,
+      entities,
+      chapters,
+      chapterFolders,
       conversations: { order: [...(base.conversations?.order ?? [])] },
       updatedAt: base.updatedAt ?? now
     },
@@ -373,6 +568,37 @@ export function normalizeProjectIndex(raw: Partial<ProjectIndex> | null | undefi
   }
 }
 
-export const PROJECT_SCHEMA_VERSION = 2
-/** index 含 chapters / conversations */
-export const INDEX_SCHEMA_VERSION = 2
+/** 写回前刷新派生 order 字段 */
+export function withDerivedOrders(index: ProjectIndex): ProjectIndex {
+  const beatsTree = { roots: index.beats.roots, children: index.beats.children }
+  const entitiesTree = { roots: index.entities.roots, children: index.entities.children }
+  const chaptersSec = { roots: index.chapters.roots, byFolder: index.chapters.byFolder }
+  return {
+    ...index,
+    version: INDEX_SCHEMA_VERSION,
+    beats: { ...beatsTree, order: flattenTreeOrder(beatsTree) },
+    entities: { ...entitiesTree, order: flattenTreeOrder(entitiesTree) },
+    chapters: { ...chaptersSec, order: flattenChapterOrder(chaptersSec) },
+    chapterFolders: {
+      roots: [...index.chapterFolders.roots],
+      children: { ...index.chapterFolders.children },
+      byId: { ...index.chapterFolders.byId }
+    }
+  }
+}
+
+export function emptyProjectIndex(): ProjectIndex {
+  return {
+    version: INDEX_SCHEMA_VERSION,
+    beats: { ...emptyTreeOrder(), order: [] },
+    entities: { ...emptyTreeOrder(), order: [] },
+    chapters: { ...emptyChapterOrder(), order: [] },
+    chapterFolders: { ...emptyTreeOrder(), byId: {} },
+    conversations: { order: [] },
+    updatedAt: new Date().toISOString()
+  }
+}
+
+export const PROJECT_SCHEMA_VERSION = 3
+/** index：树形 beats/entities + 文章文件夹 */
+export const INDEX_SCHEMA_VERSION = 3

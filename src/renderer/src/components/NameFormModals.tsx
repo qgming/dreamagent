@@ -59,7 +59,7 @@ export function NameFormModals(): React.JSX.Element {
         onSubmit={async (title) => {
           if (!beatForm) return
           if (beatForm.mode === 'create') {
-            await createBeat({ title })
+            await createBeat({ title, parentId: beatForm.parentId ?? null })
           } else {
             await updateBeat(beatForm.beatId, { title })
           }
@@ -67,7 +67,13 @@ export function NameFormModals(): React.JSX.Element {
         open={beatOpen}
         placeholder="例如：血契认主"
         submittingLabel={beatIsEdit ? '保存中…' : '创建中…'}
-        title={beatIsEdit ? '编辑节点' : '新建节点'}
+        title={
+          beatIsEdit
+            ? '编辑节点'
+            : beatForm?.mode === 'create' && beatForm.parentId
+              ? '新建子节点'
+              : '新建节点'
+        }
       />
 
       <NamePromptModal
@@ -80,7 +86,7 @@ export function NameFormModals(): React.JSX.Element {
         onSubmit={async (name) => {
           if (!entityForm) return
           if (entityForm.mode === 'create') {
-            await createEntity({ name })
+            await createEntity({ name, parentId: entityForm.parentId ?? null })
           } else {
             await updateEntity(entityForm.entityId, { name })
           }
@@ -88,7 +94,13 @@ export function NameFormModals(): React.JSX.Element {
         open={entityOpen}
         placeholder="例如：噬灵魔藤"
         submittingLabel={entityIsEdit ? '保存中…' : '创建中…'}
-        title={entityIsEdit ? '编辑实体' : '新建实体'}
+        title={
+          entityIsEdit
+            ? '编辑实体'
+            : entityForm?.mode === 'create' && entityForm.parentId
+              ? '新建子实体'
+              : '新建实体'
+        }
       />
     </>
   )

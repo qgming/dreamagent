@@ -150,11 +150,16 @@ export function OverviewPage(): React.JSX.Element {
               先建几个节点搭结构，或建实体沉淀设定。
             </p>
             <div className="flex items-center justify-center gap-2">
-              <Button onClick={openCreateBeatModal} size="sm" type="button">
+              <Button onClick={() => openCreateBeatModal()} size="sm" type="button">
                 <Plus className="size-3.5" />
                 新建节点
               </Button>
-              <Button onClick={openCreateEntityModal} size="sm" type="button" variant="secondary">
+              <Button
+                onClick={() => openCreateEntityModal()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
                 <Plus className="size-3.5" />
                 新建实体
               </Button>

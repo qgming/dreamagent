@@ -77,6 +77,15 @@ export interface ProjectApi {
   ) => Promise<ProjectSnapshot>
   deleteBeat: (projectId: string, beatId: string) => Promise<ProjectSnapshot>
   reorderBeats: (projectId: string, input: ReorderBeatsInput) => Promise<ProjectSnapshot>
+  reorderBeatSiblings: (
+    projectId: string,
+    input: import('../shared/project-types').ReorderSiblingsInput
+  ) => Promise<ProjectSnapshot>
+  reparentBeat: (
+    projectId: string,
+    beatId: string,
+    input: import('../shared/project-types').ReparentInput
+  ) => Promise<ProjectSnapshot>
 
   createEntity: (
     projectId: string,
@@ -89,6 +98,15 @@ export interface ProjectApi {
   ) => Promise<ProjectSnapshot>
   deleteEntity: (projectId: string, entityId: string) => Promise<ProjectSnapshot>
   reorderEntities: (projectId: string, orderedIds: string[]) => Promise<ProjectSnapshot>
+  reorderEntitySiblings: (
+    projectId: string,
+    input: import('../shared/project-types').ReorderSiblingsInput
+  ) => Promise<ProjectSnapshot>
+  reparentEntity: (
+    projectId: string,
+    entityId: string,
+    input: import('../shared/project-types').ReparentInput
+  ) => Promise<ProjectSnapshot>
 
   createChapter: (
     projectId: string,
@@ -102,6 +120,31 @@ export interface ProjectApi {
   deleteChapter: (projectId: string, chapterId: string) => Promise<ProjectSnapshot>
   getChapter: (projectId: string, chapterId: string) => Promise<Chapter>
   reorderChapters: (projectId: string, orderedIds: string[]) => Promise<ProjectSnapshot>
+  reorderChaptersInFolder: (
+    projectId: string,
+    input: import('../shared/project-types').ReorderChaptersInFolderInput
+  ) => Promise<ProjectSnapshot>
+  moveChapter: (
+    projectId: string,
+    chapterId: string,
+    input: import('../shared/project-types').MoveChapterInput
+  ) => Promise<ProjectSnapshot>
+  createChapterFolder: (
+    projectId: string,
+    input: import('../shared/project-types').CreateChapterFolderInput
+  ) => Promise<
+    CreateMutationResult<import('../shared/project-types').ChapterFolderMeta>
+  >
+  updateChapterFolder: (
+    projectId: string,
+    folderId: string,
+    patch: import('../shared/project-types').UpdateChapterFolderInput
+  ) => Promise<ProjectSnapshot>
+  deleteChapterFolder: (projectId: string, folderId: string) => Promise<ProjectSnapshot>
+  reorderChapterFolders: (
+    projectId: string,
+    input: import('../shared/project-types').ReorderSiblingsInput
+  ) => Promise<ProjectSnapshot>
 }
 
 export interface SessionApi {

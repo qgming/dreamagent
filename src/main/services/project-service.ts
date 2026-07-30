@@ -15,32 +15,54 @@ import {
 import {
   INDEX_SCHEMA_VERSION,
   PROJECT_SCHEMA_VERSION,
+  emptyProjectIndex,
   migrateLegacyBeatStatus,
   normalizeBeatStatus,
   normalizeChapterStatus,
   normalizeEntityStatus,
   normalizeProjectIndex,
+  withDerivedOrders,
   type Beat,
   type Chapter,
+  type ChapterFolderMeta,
   type ConversationSummary,
   type CreateBeatInput,
+  type CreateChapterFolderInput,
   type CreateChapterInput,
   type CreateEntityInput,
   type CreateMutationResult,
   type CreateProjectInput,
   type Entity,
+  type MoveChapterInput,
   type ProjectIndex,
   type ProjectMeta,
   type ProjectSnapshot,
   type ReorderBeatsInput,
+  type ReorderChaptersInFolderInput,
+  type ReorderSiblingsInput,
+  type ReparentInput,
   type UpdateBeatInput,
+  type UpdateChapterFolderInput,
   type UpdateChapterInput,
   type UpdateEntityInput
 } from '../../shared/project-types'
+import {
+  deleteAndPromote,
+  getChildIds,
+  insertChapterIntoOrder,
+  insertIntoTree,
+  removeChapterFromOrder,
+  removeFromTree,
+  reorderChaptersInFolder,
+  reorderSiblings,
+  rebuildTreeFromParents,
+  wouldCreateCycle
+} from '../../shared/tree-index'
 import type { LibraryService } from './library-service'
 import {
   ensureDir,
   listFileNames,
+  listFilesRecursive,
   pathExists,
   readJsonFile,
   removeDir,
@@ -49,17 +71,6 @@ import {
 
 function nowIso(): string {
   return new Date().toISOString()
-}
-
-function emptyIndex(): ProjectIndex {
-  return {
-    version: INDEX_SCHEMA_VERSION,
-    beats: { order: [] },
-    entities: { order: [] },
-    chapters: { order: [] },
-    conversations: { order: [] },
-    updatedAt: nowIso()
-  }
 }
 
 function refsFromContent(
@@ -75,8 +86,14 @@ function refsFromContent(
   }
 }
 
+function normalizeParentId(raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') return null
+  return String(raw)
+}
+
 /**
- * 项目服务：节点 / 实体 / 章节；双链 beat↔entity / beat↔beat / entity↔entity / chapter
+ * 项目服务：节点 / 实体 / 章节 / 文章文件夹
+ * 结构树（parentId）与双链 mention 正交
  */
 export class ProjectService {
   /** 按项目目录串行化 index.json 写入，避免 Windows 并发 rename ENOENT */
@@ -127,8 +144,20 @@ export class ProjectService {
     return path.join(dirPath, 'entities', fileName)
   }
 
-  private chapterPath(dirPath: string, fileName: string): string {
-    return path.join(dirPath, 'documents', 'chapters', fileName)
+  /** 文章绝对路径：根或 folder.relPath 下 */
+  private chapterAbsPath(
+    dirPath: string,
+    fileName: string,
+    folderRelPath?: string | null
+  ): string {
+    const base = this.paths(dirPath).chapters
+    if (!folderRelPath) return path.join(base, fileName)
+    return path.join(base, ...folderRelPath.split(/[/\\]+/).filter(Boolean), fileName)
+  }
+
+  private folderAbsPath(dirPath: string, relPath: string): string {
+    const base = this.paths(dirPath).chapters
+    return path.join(base, ...relPath.split(/[/\\]+/).filter(Boolean))
   }
 
   async resolveDir(projectId: string): Promise<string> {
@@ -157,14 +186,11 @@ export class ProjectService {
   }
 
   private async writeIndex(dirPath: string, index: ProjectIndex): Promise<void> {
-    const clean: ProjectIndex = {
+    const clean = withDerivedOrders({
+      ...index,
       version: INDEX_SCHEMA_VERSION,
-      beats: { order: [...index.beats.order] },
-      entities: { order: [...(index.entities?.order ?? [])] },
-      chapters: { order: [...(index.chapters?.order ?? [])] },
-      conversations: { order: [...(index.conversations?.order ?? [])] },
       updatedAt: nowIso()
-    }
+    })
 
     const prev = this.indexWriteQueues.get(dirPath) ?? Promise.resolve()
     const next = prev
@@ -219,14 +245,23 @@ export class ProjectService {
   private async findChapterFile(
     dirPath: string,
     chapterId: string
-  ): Promise<{ filePath: string; fileName: string } | null> {
-    const files = await listFileNames(this.paths(dirPath).chapters)
-    for (const file of files) {
-      const full = path.join(this.paths(dirPath).chapters, file)
-      const chapter = await readJsonFile<Chapter>(full)
-      if (chapter?.id === chapterId) return { filePath: full, fileName: file }
+  ): Promise<{ filePath: string; fileName: string; relDir: string } | null> {
+    const files = await listFilesRecursive(this.paths(dirPath).chapters)
+    for (const f of files) {
+      const chapter = await readJsonFile<Chapter>(f.absPath)
+      if (chapter?.id === chapterId) {
+        return { filePath: f.absPath, fileName: f.fileName, relDir: f.relDir }
+      }
     }
     return null
+  }
+
+  private folderRelPath(
+    index: ProjectIndex,
+    folderId: string | null | undefined
+  ): string | null {
+    if (!folderId) return null
+    return index.chapterFolders.byId[folderId]?.relPath ?? null
   }
 
   // ── 项目 ──────────────────────────────────────────────
@@ -270,14 +305,15 @@ export class ProjectService {
     }
 
     await this.writeMeta(dirPath, meta)
-    await this.writeIndex(dirPath, emptyIndex())
+    await this.writeIndex(dirPath, emptyProjectIndex())
 
     return {
       meta,
-      index: emptyIndex(),
+      index: emptyProjectIndex(),
       beats: {},
       entities: {},
       chapters: {},
+      chapterFolders: {},
       conversationSummaries: [],
       dirPath
     }
@@ -302,8 +338,9 @@ export class ProjectService {
     await ensureDir(p.conversations)
     await ensureDir(p.sessions)
 
-    // v1 → v2：节点状态语义变更（旧 draft 与新 draft 撞名，必须按版本一次性迁移）
+    // v1→v2：节点状态；v2→v3：树形 index（由 normalizeProjectIndex 处理）
     const needsV2Migration = (meta.version ?? 1) < 2
+    const needsV3Migration = (meta.version ?? 1) < 3
 
     const beats: Record<string, Beat> = {}
     const beatFiles = await listFileNames(p.beats)
@@ -316,16 +353,21 @@ export class ProjectService {
       const status = needsV2Migration
         ? migrateLegacyBeatStatus(beat.status)
         : normalizeBeatStatus(beat.status)
+      const parentId = normalizeParentId(beat.parentId)
       const next: Beat = {
         ...beat,
         fileName: beat.fileName || file,
         content,
         status,
         entityRefs: beat.entityRefs ?? refs.entityRefs,
-        beatRefs: beat.beatRefs ?? refs.beatRefs
+        beatRefs: beat.beatRefs ?? refs.beatRefs,
+        parentId
       }
       beats[beat.id] = next
-      if (needsV2Migration && beat.status !== status) {
+      if (
+        (needsV2Migration && beat.status !== status) ||
+        (needsV3Migration && beat.parentId !== parentId)
+      ) {
         await writeJsonAtomic(full, next)
       }
     }
@@ -341,78 +383,183 @@ export class ProjectService {
       const status = normalizeEntityStatus(
         (entity as Entity & { status?: unknown }).status
       )
+      const parentId = normalizeParentId(entity.parentId)
       const next: Entity = {
         ...entity,
         fileName: entity.fileName || file,
         content,
         status,
         entityRefs: entity.entityRefs ?? refs.entityRefs,
-        beatRefs: entity.beatRefs ?? refs.beatRefs
+        beatRefs: entity.beatRefs ?? refs.beatRefs,
+        parentId
       }
       entities[entity.id] = next
-      if (needsV2Migration && (entity as Entity & { status?: unknown }).status !== status) {
+      if (needsV3Migration && entity.parentId !== parentId) {
         await writeJsonAtomic(full, next)
       }
     }
 
+    // 文章：递归扫描真实子目录
     const chapters: Record<string, Chapter> = {}
-    const chapterFiles = await listFileNames(p.chapters)
-    for (const file of chapterFiles) {
-      const full = path.join(p.chapters, file)
-      const chapter = await readJsonFile<Chapter>(full)
+    const chapterFiles = await listFilesRecursive(p.chapters)
+    // folder.relPath → folderId 反查
+    const relPathToFolderId = new Map<string, string>()
+    for (const [fid, metaF] of Object.entries(index.chapterFolders.byId)) {
+      relPathToFolderId.set(metaF.relPath.replace(/\\/g, '/'), fid)
+    }
+
+    for (const f of chapterFiles) {
+      const chapter = await readJsonFile<Chapter>(f.absPath)
       if (!chapter?.id) continue
       const content = chapter.content ?? ''
-      // 文章正文为纯文本；关联仅读元数据（兼容旧文件曾从 content 解析的 refs）
+      const relNorm = f.relDir.replace(/\\/g, '/')
+      const folderIdFromPath = relNorm ? (relPathToFolderId.get(relNorm) ?? null) : null
+      const folderId = normalizeParentId(chapter.folderId) ?? folderIdFromPath
       const next: Chapter = {
         ...chapter,
-        fileName: chapter.fileName || file,
+        fileName: chapter.fileName || f.fileName,
         content,
         status: normalizeChapterStatus(chapter.status),
         sourceBeatIds: chapter.sourceBeatIds ?? [],
         entityRefs: chapter.entityRefs ?? [],
-        beatRefs: chapter.beatRefs ?? chapter.sourceBeatIds ?? []
+        beatRefs: chapter.beatRefs ?? chapter.sourceBeatIds ?? [],
+        folderId
       }
       chapters[chapter.id] = next
+      if (needsV3Migration && chapter.folderId !== folderId) {
+        await writeJsonAtomic(f.absPath, next)
+      }
     }
 
-    index.beats.order = index.beats.order.filter((id) => beats[id])
+    // 用对象上的 parentId 重建/校验树，保留原 order 偏好
+    const beatTree = rebuildTreeFromParents(
+      Object.keys(beats),
+      (id) => beats[id]?.parentId ?? null,
+      index.beats.order?.length ? index.beats.order : index.beats.roots
+    )
+    // 同步对象 parentId（破环后可能变）
     for (const id of Object.keys(beats)) {
-      if (!index.beats.order.includes(id)) index.beats.order.push(id)
+      const inRoots = beatTree.roots.includes(id)
+      let parent: string | null = null
+      if (!inRoots) {
+        for (const [pId, kids] of Object.entries(beatTree.children)) {
+          if (kids.includes(id)) {
+            parent = pId
+            break
+          }
+        }
+      }
+      if ((beats[id].parentId ?? null) !== parent) {
+        beats[id] = { ...beats[id], parentId: parent }
+        const located = await this.findBeatFile(dirPath, id)
+        if (located) await writeJsonAtomic(located.filePath, beats[id])
+      }
     }
-    index.entities.order = index.entities.order.filter((id) => entities[id])
+    index.beats.roots = beatTree.roots
+    index.beats.children = beatTree.children
+
+    const entityTree = rebuildTreeFromParents(
+      Object.keys(entities),
+      (id) => entities[id]?.parentId ?? null,
+      index.entities.order?.length ? index.entities.order : index.entities.roots
+    )
     for (const id of Object.keys(entities)) {
-      if (!index.entities.order.includes(id)) index.entities.order.push(id)
+      const inRoots = entityTree.roots.includes(id)
+      let parent: string | null = null
+      if (!inRoots) {
+        for (const [pId, kids] of Object.entries(entityTree.children)) {
+          if (kids.includes(id)) {
+            parent = pId
+            break
+          }
+        }
+      }
+      if ((entities[id].parentId ?? null) !== parent) {
+        entities[id] = { ...entities[id], parentId: parent }
+        const located = await this.findEntityFile(dirPath, id)
+        if (located) await writeJsonAtomic(located.filePath, entities[id])
+      }
     }
-    index.chapters.order = (index.chapters?.order ?? []).filter((id) => chapters[id])
-    for (const id of Object.keys(chapters)) {
-      if (!index.chapters.order.includes(id)) index.chapters.order.push(id)
+    index.entities.roots = entityTree.roots
+    index.entities.children = entityTree.children
+
+    // 文章 order 对账
+    const chapterIds = new Set(Object.keys(chapters))
+    index.chapters.roots = index.chapters.roots.filter((id) => chapterIds.has(id))
+    for (const key of Object.keys(index.chapters.byFolder)) {
+      index.chapters.byFolder[key] = index.chapters.byFolder[key].filter((id) =>
+        chapterIds.has(id)
+      )
+      if (index.chapters.byFolder[key].length === 0) delete index.chapters.byFolder[key]
+    }
+    for (const id of chapterIds) {
+      const fid = chapters[id].folderId ?? null
+      const bucket = fid
+        ? (index.chapters.byFolder[fid] ?? (index.chapters.byFolder[fid] = []))
+        : index.chapters.roots
+      if (!bucket.includes(id)) bucket.push(id)
+      // 确保不在错误桶
+      if (fid) {
+        index.chapters.roots = index.chapters.roots.filter((x) => x !== id)
+        for (const k of Object.keys(index.chapters.byFolder)) {
+          if (k !== fid) {
+            index.chapters.byFolder[k] = index.chapters.byFolder[k].filter((x) => x !== id)
+          }
+        }
+      } else {
+        for (const k of Object.keys(index.chapters.byFolder)) {
+          index.chapters.byFolder[k] = index.chapters.byFolder[k].filter((x) => x !== id)
+        }
+      }
     }
 
-    // 会话摘要：由 ConversationService 侧 list 时也可单独拉；此处扫描文件
+    // 清理无效 folder 引用
+    const validFolders = new Set(Object.keys(index.chapterFolders.byId))
+    for (const key of Object.keys(index.chapters.byFolder)) {
+      if (!validFolders.has(key)) {
+        // 文章升到根
+        for (const cid of index.chapters.byFolder[key]) {
+          if (chapters[cid]) {
+            chapters[cid] = { ...chapters[cid], folderId: null }
+            const located = await this.findChapterFile(dirPath, cid)
+            if (located) await writeJsonAtomic(located.filePath, chapters[cid])
+          }
+          if (!index.chapters.roots.includes(cid)) index.chapters.roots.push(cid)
+        }
+        delete index.chapters.byFolder[key]
+      }
+    }
+
     const conversationSummaries = await this.loadConversationSummaries(dirPath, index)
 
-    if (needsV2Migration) {
+    if (needsV2Migration || needsV3Migration) {
       meta.version = PROJECT_SCHEMA_VERSION
       meta.updatedAt = nowIso()
       await this.writeMeta(dirPath, meta)
     }
 
-    // 仅当 order 有变化时才写回 index，减少 Windows 上 index.json 并发 rename 冲突
+    const finalIndex = withDerivedOrders(index)
     const prevRaw = await readJsonFile<ProjectIndex>(this.paths(dirPath).index)
     const orderChanged =
       !prevRaw ||
-      JSON.stringify(prevRaw.beats?.order ?? []) !== JSON.stringify(index.beats.order) ||
-      JSON.stringify(prevRaw.entities?.order ?? []) !== JSON.stringify(index.entities.order) ||
-      JSON.stringify(prevRaw.chapters?.order ?? []) !== JSON.stringify(index.chapters.order) ||
-      JSON.stringify(prevRaw.conversations?.order ?? []) !==
-        JSON.stringify(index.conversations?.order ?? []) ||
+      JSON.stringify(withDerivedOrders(normalizeProjectIndex(prevRaw).index)) !==
+        JSON.stringify(finalIndex) ||
       (prevRaw.version ?? 0) < INDEX_SCHEMA_VERSION
 
-    if (orderChanged || needsV2Migration) {
-      await this.writeIndex(dirPath, index)
+    if (orderChanged || needsV2Migration || needsV3Migration) {
+      await this.writeIndex(dirPath, finalIndex)
     }
 
-    return { meta, index, beats, entities, chapters, conversationSummaries, dirPath }
+    return {
+      meta,
+      index: finalIndex,
+      beats,
+      entities,
+      chapters,
+      chapterFolders: { ...finalIndex.chapterFolders.byId },
+      conversationSummaries,
+      dirPath
+    }
   }
 
   private async loadConversationSummaries(
@@ -447,7 +594,6 @@ export class ProjectService {
       }
     }
 
-    // 以 index 顺序为主，磁盘孤儿追加
     const order = [...(index.conversations?.order ?? [])]
     for (const id of Object.keys(map)) {
       if (!order.includes(id)) order.push(id)
@@ -491,6 +637,18 @@ export class ProjectService {
       const fileName = toBeatFileName(title, id)
       const content = input.content ?? ''
       const refs = refsFromContent(content, id)
+      let parentId = normalizeParentId(input.parentId)
+
+      const index = await this.readIndex(dirPath)
+      if (parentId && !index.beats.order.includes(parentId) && !index.beats.roots.includes(parentId)) {
+        // 父可能仅在 children 里
+        const all = new Set([
+          ...index.beats.roots,
+          ...Object.values(index.beats.children).flat()
+        ])
+        if (!all.has(parentId)) parentId = null
+      }
+
       const beat: Beat = {
         id,
         title,
@@ -499,24 +657,17 @@ export class ProjectService {
         status: input.status ?? 'idea',
         entityRefs: refs.entityRefs,
         beatRefs: refs.beatRefs,
+        parentId,
         createdAt: ts,
         updatedAt: ts
       }
 
       await writeJsonAtomic(this.beatPath(dirPath, fileName), beat)
 
-      const index = await this.readIndex(dirPath)
-      const list = [...index.beats.order.filter((x) => x !== id)]
-      if (input.afterId && list.includes(input.afterId)) {
-        list.splice(list.indexOf(input.afterId) + 1, 0, id)
-      } else {
-        list.push(id)
-      }
-      index.beats.order = list
+      insertIntoTree(index.beats, id, parentId, input.afterId)
       await this.writeIndex(dirPath, index)
       await this.touchProject(dirPath)
       const snapshot = await this.loadSnapshot(dirPath)
-      // 用内存中的 beat，避免 snapshot 加载竞态导致找不到
       return { snapshot, created: snapshot.beats[id] ?? beat }
     })
   }
@@ -545,6 +696,21 @@ export class ProjectService {
         beat.beatRefs = refs.beatRefs
       }
       if (patch.status !== undefined) beat.status = patch.status
+
+      // parentId 变更走 reparent 语义
+      if (patch.parentId !== undefined) {
+        const nextParent = normalizeParentId(patch.parentId)
+        if (nextParent !== (beat.parentId ?? null)) {
+          await this.reparentBeatInDir(dirPath, beatId, { parentId: nextParent })
+          // reparent 已写盘；重新读
+          const again = await this.findBeatFile(dirPath, beatId)
+          if (again) {
+            const b2 = await readJsonFile<Beat>(again.filePath)
+            if (b2) Object.assign(beat, b2)
+          }
+        }
+      }
+
       beat.updatedAt = nowIso()
 
       if (titleChanged) {
@@ -563,7 +729,8 @@ export class ProjectService {
         )
       } else {
         beat.fileName = beat.fileName || located.fileName
-        await writeJsonAtomic(located.filePath, beat)
+        const cur = await this.findBeatFile(dirPath, beatId)
+        await writeJsonAtomic(cur?.filePath ?? located.filePath, beat)
       }
 
       await this.touchProject(dirPath)
@@ -571,13 +738,79 @@ export class ProjectService {
     })
   }
 
+  async reparentBeat(
+    projectId: string,
+    beatId: string,
+    input: ReparentInput
+  ): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    return this.enqueueMutation(dirPath, async () => {
+      await this.reparentBeatInDir(dirPath, beatId, input)
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
+  }
+
+  private async reparentBeatInDir(
+    dirPath: string,
+    beatId: string,
+    input: ReparentInput
+  ): Promise<void> {
+    const located = await this.findBeatFile(dirPath, beatId)
+    if (!located) throw new Error(`节点不存在: ${beatId}`)
+    const beat = await readJsonFile<Beat>(located.filePath)
+    if (!beat) throw new Error(`节点不存在: ${beatId}`)
+
+    const newParent = normalizeParentId(input.parentId)
+    if (newParent) {
+      const parentFile = await this.findBeatFile(dirPath, newParent)
+      if (!parentFile) throw new Error(`父节点不存在: ${newParent}`)
+    }
+
+    const index = await this.readIndex(dirPath)
+    const parentOf = (id: string): string | null => {
+      if (id === beatId) return beat.parentId ?? null
+      // 从树反查
+      if (index.beats.roots.includes(id)) return null
+      for (const [p, kids] of Object.entries(index.beats.children)) {
+        if (kids.includes(id)) return p
+      }
+      return null
+    }
+    if (wouldCreateCycle(beatId, newParent, parentOf)) {
+      throw new Error('不能将节点挂到其子树下（会成环）')
+    }
+
+    const oldParent = beat.parentId ?? null
+    removeFromTree(index.beats, beatId, oldParent)
+    insertIntoTree(index.beats, beatId, newParent, input.afterId)
+    beat.parentId = newParent
+    beat.updatedAt = nowIso()
+    await writeJsonAtomic(located.filePath, beat)
+    await this.writeIndex(dirPath, index)
+  }
+
   async deleteBeat(projectId: string, beatId: string): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
     return this.enqueueMutation(dirPath, async () => {
       const index = await this.readIndex(dirPath)
       const located = await this.findBeatFile(dirPath, beatId)
+      const beat = located ? await readJsonFile<Beat>(located.filePath) : null
+      const oldParent = beat?.parentId ?? null
 
-      index.beats.order = index.beats.order.filter((id) => id !== beatId)
+      // 子节点提升
+      const kids = getChildIds(index.beats, beatId)
+      deleteAndPromote(index.beats, beatId, oldParent)
+      for (const kidId of kids) {
+        const kidLoc = await this.findBeatFile(dirPath, kidId)
+        if (!kidLoc) continue
+        const kid = await readJsonFile<Beat>(kidLoc.filePath)
+        if (!kid) continue
+        kid.parentId = oldParent
+        kid.updatedAt = nowIso()
+        await writeJsonAtomic(kidLoc.filePath, kid)
+      }
+
       if (located) {
         try {
           await fs.unlink(located.filePath)
@@ -589,8 +822,6 @@ export class ProjectService {
       await this.rewriteMentionsEverywhere(dirPath, 'beat', beatId, (c) =>
         breakLinksInContent(c, 'beat', beatId)
       )
-
-      // 清理章节 sourceBeatIds
       await this.stripSourceBeatFromChapters(dirPath, beatId)
 
       await this.writeIndex(dirPath, index)
@@ -600,29 +831,34 @@ export class ProjectService {
   }
 
   private async stripSourceBeatFromChapters(dirPath: string, beatId: string): Promise<void> {
-    const p = this.paths(dirPath)
-    for (const file of await listFileNames(p.chapters)) {
-      const full = path.join(p.chapters, file)
-      const chapter = await readJsonFile<Chapter>(full)
+    const files = await listFilesRecursive(this.paths(dirPath).chapters)
+    for (const f of files) {
+      const chapter = await readJsonFile<Chapter>(f.absPath)
       if (!chapter?.sourceBeatIds?.includes(beatId)) continue
       chapter.sourceBeatIds = chapter.sourceBeatIds.filter((id) => id !== beatId)
       chapter.updatedAt = nowIso()
-      await writeJsonAtomic(full, chapter)
+      await writeJsonAtomic(f.absPath, chapter)
     }
   }
 
+  /**
+   * 兼容旧 API：仅当全部为根且集合一致时重排 roots
+   */
   async reorderBeats(projectId: string, input: ReorderBeatsInput): Promise<ProjectSnapshot> {
+    return this.reorderBeatSiblings(projectId, {
+      parentId: null,
+      orderedIds: input.orderedIds
+    })
+  }
+
+  async reorderBeatSiblings(
+    projectId: string,
+    input: ReorderSiblingsInput
+  ): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
     return this.enqueueMutation(dirPath, async () => {
       const index = await this.readIndex(dirPath)
-
-      const currentSet = new Set(index.beats.order)
-      const nextSet = new Set(input.orderedIds)
-      if (currentSet.size !== nextSet.size || [...currentSet].some((id) => !nextSet.has(id))) {
-        throw new Error('重排失败：有序 id 列表与当前节点集合不一致')
-      }
-
-      index.beats.order = [...input.orderedIds]
+      reorderSiblings(index.beats, input.parentId ?? null, input.orderedIds)
       await this.writeIndex(dirPath, index)
       await this.touchProject(dirPath)
       return this.loadSnapshot(dirPath)
@@ -645,6 +881,17 @@ export class ProjectService {
       const fileName = toEntityFileName(name, id)
       const content = input.content ?? ''
       const refs = refsFromContent(content, id)
+      let parentId = normalizeParentId(input.parentId)
+
+      const index = await this.readIndex(dirPath)
+      if (parentId) {
+        const all = new Set([
+          ...index.entities.roots,
+          ...Object.values(index.entities.children).flat()
+        ])
+        if (!all.has(parentId)) parentId = null
+      }
+
       const entity: Entity = {
         id,
         name,
@@ -653,14 +900,14 @@ export class ProjectService {
         status: input.status ?? 'active',
         entityRefs: refs.entityRefs,
         beatRefs: refs.beatRefs,
+        parentId,
         createdAt: ts,
         updatedAt: ts
       }
 
       await writeJsonAtomic(this.entityPath(dirPath, fileName), entity)
 
-      const index = await this.readIndex(dirPath)
-      index.entities.order = [...index.entities.order.filter((x) => x !== id), id]
+      insertIntoTree(index.entities, id, parentId, input.afterId)
       await this.writeIndex(dirPath, index)
       await this.touchProject(dirPath)
       const snapshot = await this.loadSnapshot(dirPath)
@@ -692,6 +939,19 @@ export class ProjectService {
         entity.beatRefs = refs.beatRefs
       }
       if (patch.status !== undefined) entity.status = patch.status
+
+      if (patch.parentId !== undefined) {
+        const nextParent = normalizeParentId(patch.parentId)
+        if (nextParent !== (entity.parentId ?? null)) {
+          await this.reparentEntityInDir(dirPath, entityId, { parentId: nextParent })
+          const again = await this.findEntityFile(dirPath, entityId)
+          if (again) {
+            const e2 = await readJsonFile<Entity>(again.filePath)
+            if (e2) Object.assign(entity, e2)
+          }
+        }
+      }
+
       entity.updatedAt = nowIso()
 
       if (nameChanged) {
@@ -710,7 +970,8 @@ export class ProjectService {
         )
       } else {
         entity.fileName = entity.fileName || located.fileName
-        await writeJsonAtomic(located.filePath, entity)
+        const cur = await this.findEntityFile(dirPath, entityId)
+        await writeJsonAtomic(cur?.filePath ?? located.filePath, entity)
       }
 
       await this.touchProject(dirPath)
@@ -718,13 +979,77 @@ export class ProjectService {
     })
   }
 
+  async reparentEntity(
+    projectId: string,
+    entityId: string,
+    input: ReparentInput
+  ): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    return this.enqueueMutation(dirPath, async () => {
+      await this.reparentEntityInDir(dirPath, entityId, input)
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
+  }
+
+  private async reparentEntityInDir(
+    dirPath: string,
+    entityId: string,
+    input: ReparentInput
+  ): Promise<void> {
+    const located = await this.findEntityFile(dirPath, entityId)
+    if (!located) throw new Error(`实体不存在: ${entityId}`)
+    const entity = await readJsonFile<Entity>(located.filePath)
+    if (!entity) throw new Error(`实体不存在: ${entityId}`)
+
+    const newParent = normalizeParentId(input.parentId)
+    if (newParent) {
+      const parentFile = await this.findEntityFile(dirPath, newParent)
+      if (!parentFile) throw new Error(`父实体不存在: ${newParent}`)
+    }
+
+    const index = await this.readIndex(dirPath)
+    const parentOf = (id: string): string | null => {
+      if (id === entityId) return entity.parentId ?? null
+      if (index.entities.roots.includes(id)) return null
+      for (const [p, kids] of Object.entries(index.entities.children)) {
+        if (kids.includes(id)) return p
+      }
+      return null
+    }
+    if (wouldCreateCycle(entityId, newParent, parentOf)) {
+      throw new Error('不能将实体挂到其子树下（会成环）')
+    }
+
+    const oldParent = entity.parentId ?? null
+    removeFromTree(index.entities, entityId, oldParent)
+    insertIntoTree(index.entities, entityId, newParent, input.afterId)
+    entity.parentId = newParent
+    entity.updatedAt = nowIso()
+    await writeJsonAtomic(located.filePath, entity)
+    await this.writeIndex(dirPath, index)
+  }
+
   async deleteEntity(projectId: string, entityId: string): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
     return this.enqueueMutation(dirPath, async () => {
       const index = await this.readIndex(dirPath)
       const located = await this.findEntityFile(dirPath, entityId)
+      const entity = located ? await readJsonFile<Entity>(located.filePath) : null
+      const oldParent = entity?.parentId ?? null
 
-      index.entities.order = index.entities.order.filter((id) => id !== entityId)
+      const kids = getChildIds(index.entities, entityId)
+      deleteAndPromote(index.entities, entityId, oldParent)
+      for (const kidId of kids) {
+        const kidLoc = await this.findEntityFile(dirPath, kidId)
+        if (!kidLoc) continue
+        const kid = await readJsonFile<Entity>(kidLoc.filePath)
+        if (!kid) continue
+        kid.parentId = oldParent
+        kid.updatedAt = nowIso()
+        await writeJsonAtomic(kidLoc.filePath, kid)
+      }
+
       if (located) {
         try {
           await fs.unlink(located.filePath)
@@ -737,6 +1062,24 @@ export class ProjectService {
         breakLinksInContent(c, 'entity', entityId)
       )
 
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
+  }
+
+  async reorderEntities(projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> {
+    return this.reorderEntitySiblings(projectId, { parentId: null, orderedIds })
+  }
+
+  async reorderEntitySiblings(
+    projectId: string,
+    input: ReorderSiblingsInput
+  ): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    return this.enqueueMutation(dirPath, async () => {
+      const index = await this.readIndex(dirPath)
+      reorderSiblings(index.entities, input.parentId ?? null, input.orderedIds)
       await this.writeIndex(dirPath, index)
       await this.touchProject(dirPath)
       return this.loadSnapshot(dirPath)
@@ -784,31 +1127,252 @@ export class ProjectService {
       await writeJsonAtomic(full, entity)
     }
 
-    // 文章 content 为纯正文、无双链；仅清理旧数据中可能残留的 mention 语法，不改 refs 元数据
-    for (const file of await listFileNames(p.chapters)) {
-      const full = path.join(p.chapters, file)
-      const chapter = await readJsonFile<Chapter>(full)
+    // 文章 content 为纯正文、无双链；仅清理旧数据中可能残留的 mention 语法
+    for (const f of await listFilesRecursive(p.chapters)) {
+      const chapter = await readJsonFile<Chapter>(f.absPath)
       if (!chapter) continue
       const next = transform(chapter.content ?? '')
       if (next === chapter.content) continue
       chapter.content = next
       chapter.updatedAt = nowIso()
-      await writeJsonAtomic(full, chapter)
+      await writeJsonAtomic(f.absPath, chapter)
     }
   }
 
-  async reorderEntities(projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> {
+  // ── 文章文件夹 ──────────────────────────────────────────
+
+  async createChapterFolder(
+    projectId: string,
+    input: CreateChapterFolderInput
+  ): Promise<CreateMutationResult<ChapterFolderMeta>> {
     const dirPath = await this.resolveDir(projectId)
     return this.enqueueMutation(dirPath, async () => {
       const index = await this.readIndex(dirPath)
+      const name = input.name.trim() || '未命名文件夹'
+      const safeSeg = toFolderName(name)
+      const parentId = normalizeParentId(input.parentId)
+      if (parentId && !index.chapterFolders.byId[parentId]) {
+        throw new Error(`父文件夹不存在: ${parentId}`)
+      }
+      const parentRel = parentId ? index.chapterFolders.byId[parentId].relPath : ''
+      let relPath = parentRel ? `${parentRel}/${safeSeg}` : safeSeg
+      // 路径冲突则加后缀
+      const used = new Set(
+        Object.values(index.chapterFolders.byId).map((f) => f.relPath.replace(/\\/g, '/'))
+      )
+      let n = 2
+      let candidate = relPath
+      while (used.has(candidate.replace(/\\/g, '/'))) {
+        candidate = `${relPath}-${n}`
+        n += 1
+      }
+      relPath = candidate
 
-      const currentSet = new Set(index.entities.order)
-      const nextSet = new Set(orderedIds)
-      if (currentSet.size !== nextSet.size || [...currentSet].some((id) => !nextSet.has(id))) {
-        throw new Error('重排失败：实体有序 id 列表与当前集合不一致')
+      const abs = this.folderAbsPath(dirPath, relPath)
+      await ensureDir(abs)
+
+      const ts = nowIso()
+      const id = createId('fold')
+      const folder: ChapterFolderMeta = {
+        id,
+        name,
+        parentId,
+        relPath,
+        createdAt: ts,
+        updatedAt: ts
+      }
+      index.chapterFolders.byId[id] = folder
+      insertIntoTree(index.chapterFolders, id, parentId)
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      const snapshot = await this.loadSnapshot(dirPath)
+      return {
+        snapshot,
+        created: snapshot.chapterFolders[id] ?? folder
+      }
+    })
+  }
+
+  async updateChapterFolder(
+    projectId: string,
+    folderId: string,
+    patch: UpdateChapterFolderInput
+  ): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    return this.enqueueMutation(dirPath, async () => {
+      const index = await this.readIndex(dirPath)
+      const folder = index.chapterFolders.byId[folderId]
+      if (!folder) throw new Error(`文件夹不存在: ${folderId}`)
+
+      // 改父
+      if (patch.parentId !== undefined) {
+        const newParent = normalizeParentId(patch.parentId)
+        if (newParent !== (folder.parentId ?? null)) {
+          if (newParent && !index.chapterFolders.byId[newParent]) {
+            throw new Error(`父文件夹不存在: ${newParent}`)
+          }
+          const parentOf = (id: string): string | null =>
+            index.chapterFolders.byId[id]?.parentId ?? null
+          if (wouldCreateCycle(folderId, newParent, parentOf)) {
+            throw new Error('不能将文件夹挂到其子树下（会成环）')
+          }
+          // 计算新 relPath
+          const nameSeg = folder.relPath.split(/[/\\]/).pop() || toFolderName(folder.name)
+          const parentRel = newParent ? index.chapterFolders.byId[newParent].relPath : ''
+          const newRel = parentRel ? `${parentRel}/${nameSeg}` : nameSeg
+          await this.relocateFolderTree(dirPath, index, folderId, newRel)
+          removeFromTree(index.chapterFolders, folderId, folder.parentId)
+          insertIntoTree(index.chapterFolders, folderId, newParent)
+          folder.parentId = newParent
+        }
       }
 
-      index.entities.order = [...orderedIds]
+      // 改名 → 改路径最后一段
+      if (patch.name !== undefined && patch.name.trim() && patch.name.trim() !== folder.name) {
+        const newName = patch.name.trim()
+        const safeSeg = toFolderName(newName)
+        const parts = folder.relPath.split(/[/\\]/).filter(Boolean)
+        parts[parts.length - 1] = safeSeg
+        let newRel = parts.join('/')
+        const used = new Set(
+          Object.entries(index.chapterFolders.byId)
+            .filter(([id]) => id !== folderId)
+            .map(([, f]) => f.relPath.replace(/\\/g, '/'))
+        )
+        let n = 2
+        let candidate = newRel
+        while (used.has(candidate)) {
+          const p2 = [...parts]
+          p2[p2.length - 1] = `${safeSeg}-${n}`
+          candidate = p2.join('/')
+          n += 1
+        }
+        newRel = candidate
+        await this.relocateFolderTree(dirPath, index, folderId, newRel)
+        folder.name = newName
+      }
+
+      folder.updatedAt = nowIso()
+      index.chapterFolders.byId[folderId] = folder
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
+  }
+
+  /** 移动磁盘目录并更新子孙 relPath */
+  private async relocateFolderTree(
+    dirPath: string,
+    index: ProjectIndex,
+    folderId: string,
+    newRelPath: string
+  ): Promise<void> {
+    const folder = index.chapterFolders.byId[folderId]
+    if (!folder) return
+    const oldRel = folder.relPath
+    if (oldRel.replace(/\\/g, '/') === newRelPath.replace(/\\/g, '/')) return
+
+    const oldAbs = this.folderAbsPath(dirPath, oldRel)
+    const newAbs = this.folderAbsPath(dirPath, newRelPath)
+    await ensureDir(path.dirname(newAbs))
+    if (await pathExists(oldAbs)) {
+      if (await pathExists(newAbs)) {
+        throw new Error(`目标文件夹已存在: ${newRelPath}`)
+      }
+      await fs.rename(oldAbs, newAbs)
+    } else {
+      await ensureDir(newAbs)
+    }
+
+    // 更新本夹 + 所有以 oldRel 为前缀的子孙
+    const oldPrefix = oldRel.replace(/\\/g, '/')
+    for (const [id, meta] of Object.entries(index.chapterFolders.byId)) {
+      const cur = meta.relPath.replace(/\\/g, '/')
+      if (cur === oldPrefix || cur.startsWith(oldPrefix + '/')) {
+        const rest = cur.slice(oldPrefix.length)
+        meta.relPath = (newRelPath.replace(/\\/g, '/') + rest).replace(/\\/g, '/')
+        meta.updatedAt = nowIso()
+        index.chapterFolders.byId[id] = meta
+      }
+    }
+  }
+
+  async deleteChapterFolder(
+    projectId: string,
+    folderId: string
+  ): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    return this.enqueueMutation(dirPath, async () => {
+      const index = await this.readIndex(dirPath)
+      const folder = index.chapterFolders.byId[folderId]
+      if (!folder) throw new Error(`文件夹不存在: ${folderId}`)
+
+      const parentId = folder.parentId ?? null
+      // 子文件夹提升
+      const subFolders = getChildIds(index.chapterFolders, folderId)
+      deleteAndPromote(index.chapterFolders, folderId, parentId)
+
+      // 子文件夹 relPath / parent 更新：提到 parent 下
+      const parentRel = parentId ? index.chapterFolders.byId[parentId]?.relPath ?? '' : ''
+      for (const subId of subFolders) {
+        const sub = index.chapterFolders.byId[subId]
+        if (!sub) continue
+        sub.parentId = parentId
+        const seg = sub.relPath.split(/[/\\]/).pop() || toFolderName(sub.name)
+        const newRel = parentRel ? `${parentRel}/${seg}` : seg
+        await this.relocateFolderTree(dirPath, index, subId, newRel)
+        sub.parentId = parentId
+        index.chapterFolders.byId[subId] = sub
+      }
+
+      // 本夹文章提升到父夹/根，并物理移动
+      const chapterIds = [...(index.chapters.byFolder[folderId] ?? [])]
+      const targetRel = parentRel || null
+      for (const cid of chapterIds) {
+        const located = await this.findChapterFile(dirPath, cid)
+        if (!located) continue
+        const chapter = await readJsonFile<Chapter>(located.filePath)
+        if (!chapter) continue
+        const dest = this.chapterAbsPath(dirPath, chapter.fileName || located.fileName, targetRel)
+        await ensureDir(path.dirname(dest))
+        if (path.resolve(located.filePath) !== path.resolve(dest)) {
+          await fs.rename(located.filePath, dest)
+        }
+        chapter.folderId = parentId
+        chapter.updatedAt = nowIso()
+        await writeJsonAtomic(dest, chapter)
+        removeChapterFromOrder(index.chapters, cid)
+        insertChapterIntoOrder(index.chapters, cid, parentId)
+      }
+      delete index.chapters.byFolder[folderId]
+
+      // 删空目录
+      const abs = this.folderAbsPath(dirPath, folder.relPath)
+      try {
+        // 若仍有残留文件，不强制 rm；只尝试删空目录
+        const entries = await fs.readdir(abs).catch(() => [])
+        if (entries.length === 0) {
+          await fs.rmdir(abs).catch(() => undefined)
+        }
+      } catch {
+        // 忽略
+      }
+
+      delete index.chapterFolders.byId[folderId]
+      await this.writeIndex(dirPath, index)
+      await this.touchProject(dirPath)
+      return this.loadSnapshot(dirPath)
+    })
+  }
+
+  async reorderChapterFolders(
+    projectId: string,
+    input: ReorderSiblingsInput
+  ): Promise<ProjectSnapshot> {
+    const dirPath = await this.resolveDir(projectId)
+    return this.enqueueMutation(dirPath, async () => {
+      const index = await this.readIndex(dirPath)
+      reorderSiblings(index.chapterFolders, input.parentId ?? null, input.orderedIds)
       await this.writeIndex(dirPath, index)
       await this.touchProject(dirPath)
       return this.loadSnapshot(dirPath)
@@ -829,11 +1393,16 @@ export class ProjectService {
       const id = createId('chap')
       const title = input.title.trim() || '未命名文章'
       const fileName = toChapterFileName(title, id)
-      // 正文保持纯文本；关联仅存元数据字段
       const content = input.content ?? ''
       const sourceBeatIds = input.sourceBeatIds ?? []
       const beatRefs = input.beatRefs ?? sourceBeatIds
       const entityRefs = input.entityRefs ?? []
+      let folderId = normalizeParentId(input.folderId)
+
+      const index = await this.readIndex(dirPath)
+      if (folderId && !index.chapterFolders.byId[folderId]) folderId = null
+      const rel = this.folderRelPath(index, folderId)
+
       const chapter: Chapter = {
         id,
         title,
@@ -843,15 +1412,17 @@ export class ProjectService {
         sourceBeatIds,
         entityRefs,
         beatRefs,
+        folderId,
         conversationId: input.conversationId,
         createdAt: ts,
         updatedAt: ts
       }
 
-      await writeJsonAtomic(this.chapterPath(dirPath, fileName), chapter)
+      const abs = this.chapterAbsPath(dirPath, fileName, rel)
+      await ensureDir(path.dirname(abs))
+      await writeJsonAtomic(abs, chapter)
 
-      const index = await this.readIndex(dirPath)
-      index.chapters.order = [...index.chapters.order.filter((x) => x !== id), id]
+      insertChapterIntoOrder(index.chapters, id, folderId)
       await this.writeIndex(dirPath, index)
       await this.touchProject(dirPath)
       const snapshot = await this.loadSnapshot(dirPath)
@@ -877,7 +1448,6 @@ export class ProjectService {
 
       if (patch.title !== undefined) chapter.title = patch.title.trim() || chapter.title
       if (patch.content !== undefined) {
-        // 纯正文，不从 content 解析双链
         chapter.content = patch.content
       }
       if (patch.status !== undefined) chapter.status = patch.status
@@ -885,26 +1455,64 @@ export class ProjectService {
       if (patch.entityRefs !== undefined) chapter.entityRefs = patch.entityRefs
       if (patch.beatRefs !== undefined) chapter.beatRefs = patch.beatRefs
       if (patch.conversationId !== undefined) chapter.conversationId = patch.conversationId
+
+      const index = await this.readIndex(dirPath)
+      let destPath = located.filePath
+
+      // 移动文件夹
+      if (patch.folderId !== undefined) {
+        const nextFolder = normalizeParentId(patch.folderId)
+        if (nextFolder && !index.chapterFolders.byId[nextFolder]) {
+          throw new Error(`文件夹不存在: ${nextFolder}`)
+        }
+        if (nextFolder !== (chapter.folderId ?? null)) {
+          const rel = this.folderRelPath(index, nextFolder)
+          const fileName = chapter.fileName || located.fileName
+          destPath = this.chapterAbsPath(dirPath, fileName, rel)
+          await ensureDir(path.dirname(destPath))
+          if (path.resolve(located.filePath) !== path.resolve(destPath)) {
+            await fs.rename(located.filePath, destPath)
+          }
+          removeChapterFromOrder(index.chapters, chapterId)
+          insertChapterIntoOrder(index.chapters, chapterId, nextFolder)
+          chapter.folderId = nextFolder
+        }
+      }
+
       chapter.updatedAt = nowIso()
 
       if (titleChanged) {
         const newFileName = toChapterFileName(chapter.title, chapter.id)
+        const rel = this.folderRelPath(index, chapter.folderId)
+        const newPath = this.chapterAbsPath(dirPath, newFileName, rel)
         chapter.fileName = newFileName
-        await writeJsonAtomic(this.chapterPath(dirPath, newFileName), chapter)
-        if (newFileName !== located.fileName) {
+        await ensureDir(path.dirname(newPath))
+        await writeJsonAtomic(newPath, chapter)
+        if (path.resolve(newPath) !== path.resolve(destPath)) {
           try {
-            await fs.unlink(located.filePath)
+            await fs.unlink(destPath)
           } catch {
             // 忽略
           }
         }
       } else {
         chapter.fileName = chapter.fileName || located.fileName
-        await writeJsonAtomic(located.filePath, chapter)
+        await writeJsonAtomic(destPath, chapter)
       }
 
+      await this.writeIndex(dirPath, index)
       await this.touchProject(dirPath)
       return this.loadSnapshot(dirPath)
+    })
+  }
+
+  async moveChapter(
+    projectId: string,
+    chapterId: string,
+    input: MoveChapterInput
+  ): Promise<ProjectSnapshot> {
+    return this.updateChapter(projectId, chapterId, {
+      folderId: input.folderId ?? null
     })
   }
 
@@ -913,8 +1521,9 @@ export class ProjectService {
     return this.enqueueMutation(dirPath, async () => {
       const index = await this.readIndex(dirPath)
       const located = await this.findChapterFile(dirPath, chapterId)
+      const chapter = located ? await readJsonFile<Chapter>(located.filePath) : null
 
-      index.chapters.order = index.chapters.order.filter((id) => id !== chapterId)
+      removeChapterFromOrder(index.chapters, chapterId, chapter?.folderId)
       if (located) {
         try {
           await fs.unlink(located.filePath)
@@ -929,18 +1538,24 @@ export class ProjectService {
     })
   }
 
+  /**
+   * 兼容旧 API：仅当全部文章都在根且集合一致时重排 roots
+   */
   async reorderChapters(projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> {
+    return this.reorderChaptersInFolder(projectId, {
+      folderId: null,
+      orderedIds
+    })
+  }
+
+  async reorderChaptersInFolder(
+    projectId: string,
+    input: ReorderChaptersInFolderInput
+  ): Promise<ProjectSnapshot> {
     const dirPath = await this.resolveDir(projectId)
     return this.enqueueMutation(dirPath, async () => {
       const index = await this.readIndex(dirPath)
-
-      const currentSet = new Set(index.chapters.order)
-      const nextSet = new Set(orderedIds)
-      if (currentSet.size !== nextSet.size || [...currentSet].some((id) => !nextSet.has(id))) {
-        throw new Error('重排失败：文章有序 id 列表与当前集合不一致')
-      }
-
-      index.chapters.order = [...orderedIds]
+      reorderChaptersInFolder(index.chapters, input.folderId ?? null, input.orderedIds)
       await this.writeIndex(dirPath, index)
       await this.touchProject(dirPath)
       return this.loadSnapshot(dirPath)

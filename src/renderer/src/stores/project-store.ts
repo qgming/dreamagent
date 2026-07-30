@@ -1,17 +1,24 @@
 import { create } from 'zustand'
 import type {
   CreateBeatInput,
+  CreateChapterFolderInput,
   CreateChapterInput,
   CreateEntityInput,
   CreateProjectInput,
+  MoveChapterInput,
   ProjectMeta,
   ProjectSnapshot,
   ProjectSummary,
   ReorderBeatsInput,
+  ReorderChaptersInFolderInput,
+  ReorderSiblingsInput,
+  ReparentInput,
   UpdateBeatInput,
+  UpdateChapterFolderInput,
   UpdateChapterInput,
   UpdateEntityInput
 } from '@shared/project-types'
+import { getChildIds } from '@shared/tree-index'
 
 /** 项目内视图 */
 export type ProjectView = 'overview' | 'beats' | 'entities' | 'create'
@@ -24,14 +31,14 @@ export type ProjectFormMode =
   | { mode: 'create' }
   | { mode: 'edit'; projectId: string; title: string; description?: string }
 
-/** 节点表单模态：新建或编辑名称 */
+/** 节点表单模态：新建或编辑名称；create 可带 parentId 建子节点 */
 export type BeatFormMode =
-  | { mode: 'create' }
+  | { mode: 'create'; parentId?: string | null }
   | { mode: 'edit'; beatId: string; title: string }
 
-/** 实体表单模态：新建或编辑名称 */
+/** 实体表单模态：新建或编辑名称；create 可带 parentId 建子实体 */
 export type EntityFormMode =
-  | { mode: 'create' }
+  | { mode: 'create'; parentId?: string | null }
   | { mode: 'edit'; entityId: string; name: string }
 
 interface ProjectState {
@@ -69,10 +76,10 @@ interface ProjectState {
   openCreateProjectModal: () => void
   openEditProjectModal: (projectId: string) => void
   closeProjectFormModal: () => void
-  openCreateBeatModal: () => void
+  openCreateBeatModal: (parentId?: string | null) => void
   openEditBeatModal: (beatId: string) => void
   closeBeatFormModal: () => void
-  openCreateEntityModal: () => void
+  openCreateEntityModal: (parentId?: string | null) => void
   openEditEntityModal: (entityId: string) => void
   closeEntityFormModal: () => void
 
@@ -90,6 +97,19 @@ interface ProjectState {
   updateChapter: (chapterId: string, patch: UpdateChapterInput) => Promise<void>
   deleteChapter: (chapterId: string) => Promise<void>
   reorderChapters: (orderedIds: string[]) => Promise<void>
+  reorderChaptersInFolder: (input: ReorderChaptersInFolderInput) => Promise<void>
+  moveChapter: (chapterId: string, input: MoveChapterInput) => Promise<void>
+
+  reparentBeat: (beatId: string, input: ReparentInput) => Promise<void>
+  reparentEntity: (entityId: string, input: ReparentInput) => Promise<void>
+  reorderBeatSiblings: (input: ReorderSiblingsInput) => Promise<void>
+  reorderEntitySiblings: (input: ReorderSiblingsInput) => Promise<void>
+
+  createChapterFolder: (input: CreateChapterFolderInput) => Promise<void>
+  updateChapterFolder: (folderId: string, patch: UpdateChapterFolderInput) => Promise<void>
+  deleteChapterFolder: (folderId: string) => Promise<void>
+  reorderChapterFolders: (input: ReorderSiblingsInput) => Promise<void>
+
   /** 外部（create-store）写入 snapshot */
   applyExternalSnapshot: (snap: ProjectSnapshot) => void
 }
@@ -105,6 +125,7 @@ function applySnapshot(
     snapshot: {
       ...snap,
       chapters: snap.chapters ?? {},
+      chapterFolders: snap.chapterFolders ?? snap.index?.chapterFolders?.byId ?? {},
       conversationSummaries: snap.conversationSummaries ?? []
     },
     activeProjectId: snap.meta.id,
@@ -313,7 +334,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   closeProjectFormModal: () => set({ projectForm: null }),
 
-  openCreateBeatModal: () => set({ beatForm: { mode: 'create' } }),
+  openCreateBeatModal: (parentId) =>
+    set({ beatForm: { mode: 'create', parentId: parentId ?? null } }),
   openEditBeatModal: (beatId) => {
     const beat = get().snapshot?.beats[beatId]
     if (!beat) return
@@ -321,7 +343,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   closeBeatFormModal: () => set({ beatForm: null }),
 
-  openCreateEntityModal: () => set({ entityForm: { mode: 'create' } }),
+  openCreateEntityModal: (parentId) =>
+    set({ entityForm: { mode: 'create', parentId: parentId ?? null } }),
   openEditEntityModal: (entityId) => {
     const entity = get().snapshot?.entities[entityId]
     if (!entity) return
@@ -503,30 +526,201 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  reorderChaptersInFolder: async (input) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.reorderChaptersInFolder(activeProjectId, input)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      const snap = await window.api.project.open(activeProjectId)
+      applySnapshot(set, get, snap)
+    }
+  },
+
+  moveChapter: async (chapterId, input) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.moveChapter(activeProjectId, chapterId, input)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  },
+
+  reparentBeat: async (beatId, input) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.reparentBeat(activeProjectId, beatId, input)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  },
+
+  reparentEntity: async (entityId, input) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.reparentEntity(activeProjectId, entityId, input)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  },
+
+  reorderBeatSiblings: async (input) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.reorderBeatSiblings(activeProjectId, input)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      const snap = await window.api.project.open(activeProjectId)
+      applySnapshot(set, get, snap)
+    }
+  },
+
+  reorderEntitySiblings: async (input) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.reorderEntitySiblings(activeProjectId, input)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      const snap = await window.api.project.open(activeProjectId)
+      applySnapshot(set, get, snap)
+    }
+  },
+
+  createChapterFolder: async (input) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const { snapshot: snap } = await window.api.project.createChapterFolder(
+        activeProjectId,
+        input
+      )
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  },
+
+  updateChapterFolder: async (folderId, patch) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.updateChapterFolder(
+        activeProjectId,
+        folderId,
+        patch
+      )
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  },
+
+  deleteChapterFolder: async (folderId) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.deleteChapterFolder(activeProjectId, folderId)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+    }
+  },
+
+  reorderChapterFolders: async (input) => {
+    const { activeProjectId } = get()
+    if (!activeProjectId) return
+    try {
+      const snap = await window.api.project.reorderChapterFolders(activeProjectId, input)
+      applySnapshot(set, get, snap)
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+      const snap = await window.api.project.open(activeProjectId)
+      applySnapshot(set, get, snap)
+    }
+  },
+
   applyExternalSnapshot: (snap) => {
     applySnapshot(set, get, snap)
   }
 }))
 
-/** 按 index 得到有序节点列表（扁平） */
+/** 按 index 得到有序节点列表（DFS 扁平，兼容旧调用） */
 export function getOrderedBeats(snapshot: ProjectSnapshot | null) {
   if (!snapshot) return []
-  return snapshot.index.beats.order
-    .map((id) => snapshot.beats[id])
-    .filter(Boolean)
+  const order = snapshot.index.beats.order?.length
+    ? snapshot.index.beats.order
+    : [...(snapshot.index.beats.roots ?? [])]
+  return order.map((id) => snapshot.beats[id]).filter(Boolean)
 }
 
-/** 有序实体列表 */
+/** 有序实体列表（DFS 扁平） */
 export function getOrderedEntities(snapshot: ProjectSnapshot | null) {
   if (!snapshot) return []
-  return snapshot.index.entities.order
-    .map((id) => snapshot.entities[id])
-    .filter(Boolean)
+  const order = snapshot.index.entities.order?.length
+    ? snapshot.index.entities.order
+    : [...(snapshot.index.entities.roots ?? [])]
+  return order.map((id) => snapshot.entities[id]).filter(Boolean)
 }
 
-/** 有序文章列表（按 index.chapters.order） */
+/** 有序文章列表（扁平） */
 export function getOrderedChapters(snapshot: ProjectSnapshot | null) {
   if (!snapshot) return []
   const order = snapshot.index.chapters?.order ?? []
   return order.map((id) => snapshot.chapters[id]).filter(Boolean)
+}
+
+/** 某父下的直接子节点 */
+export function getBeatChildren(snapshot: ProjectSnapshot | null, parentId?: string | null) {
+  if (!snapshot) return []
+  return getChildIds(snapshot.index.beats, parentId)
+    .map((id) => snapshot.beats[id])
+    .filter(Boolean)
+}
+
+/** 某父下的直接子实体 */
+export function getEntityChildren(snapshot: ProjectSnapshot | null, parentId?: string | null) {
+  if (!snapshot) return []
+  return getChildIds(snapshot.index.entities, parentId)
+    .map((id) => snapshot.entities[id])
+    .filter(Boolean)
+}
+
+/** 文件夹内文章 */
+export function getChaptersInFolder(
+  snapshot: ProjectSnapshot | null,
+  folderId?: string | null
+) {
+  if (!snapshot) return []
+  const ids = !folderId
+    ? (snapshot.index.chapters.roots ?? [])
+    : (snapshot.index.chapters.byFolder?.[folderId] ?? [])
+  return ids.map((id) => snapshot.chapters[id]).filter(Boolean)
+}
+
+/** 某父下的子文件夹 */
+export function getChapterFolderChildren(
+  snapshot: ProjectSnapshot | null,
+  parentId?: string | null
+) {
+  if (!snapshot) return []
+  return getChildIds(snapshot.index.chapterFolders, parentId)
+    .map((id) => snapshot.chapterFolders[id] ?? snapshot.index.chapterFolders.byId[id])
+    .filter(Boolean)
 }

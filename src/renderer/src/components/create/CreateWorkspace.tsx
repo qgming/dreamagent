@@ -12,6 +12,7 @@ import {
   MessageSquarePlus,
   Minus,
   MoreHorizontal,
+  Pencil,
   RotateCcw,
   Sparkles,
   Trash2,
@@ -38,6 +39,13 @@ import {
   SortableList
 } from '@/components/ui/sortable-list'
 import {
+  flattenVisibleTree,
+  TreeRowShell,
+  TreeSortableSections,
+  useExpandedSet
+} from '@/components/ui/tree-list'
+import { FolderPlus } from 'lucide-react'
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -50,17 +58,22 @@ import {
   arrayMove,
   BEAT_STATUS_DOT_CLASS,
   CHAPTER_STATUS_DOT_CLASS,
-  ENTITY_STATUS_DOT_CLASS,
-  formatUpdatedAt
+  ENTITY_STATUS_DOT_CLASS
 } from '@/lib/project-utils'
 import { mentionChipStyles } from '@/lib/mention-styles'
 import { computeBacklinks } from '@/lib/backlinks'
 import {
+  getBeatChildren,
+  getChapterFolderChildren,
+  getChaptersInFolder,
+  getEntityChildren,
   getOrderedBeats,
   getOrderedChapters,
   getOrderedEntities,
   useProjectStore
 } from '@/stores/project-store'
+import type { ChapterFolderMeta } from '@shared/project-types'
+import { NamePromptModal } from '@/components/ui/name-prompt-modal'
 import {
   isDetailTargetAvailable,
   useCreateStore,
@@ -191,6 +204,76 @@ function CreateLeftSidebar(): React.JSX.Element {
   const beats = getOrderedBeats(snapshot)
   const entities = getOrderedEntities(snapshot)
   const articles = getOrderedChapters(snapshot)
+  const createChapterFolder = useProjectStore((s) => s.createChapterFolder)
+  const deleteChapterFolder = useProjectStore((s) => s.deleteChapterFolder)
+  const reorderChaptersInFolder = useProjectStore((s) => s.reorderChaptersInFolder)
+  const reorderChapterFolders = useProjectStore((s) => s.reorderChapterFolders)
+  const [folderPrompt, setFolderPrompt] = useState<{
+    open: boolean
+    parentId: string | null
+  }>({ open: false, parentId: null })
+
+  const projectId = snapshot?.meta.id ?? null
+  const expandKey = projectId
+    ? `dreamagent:article-folders-expanded:${projectId}`
+    : null
+  const { expanded, toggle, expandAll } = useExpandedSet(expandKey)
+
+  // 资料区节点/实体树展开状态
+  const beatExpandKey = projectId ? `dreamagent:create-beats-expanded:${projectId}` : null
+  const entityExpandKey = projectId
+    ? `dreamagent:create-entities-expanded:${projectId}`
+    : null
+  const {
+    expanded: beatExpanded,
+    toggle: toggleBeat,
+    expandAll: expandAllBeats
+  } = useExpandedSet(beatExpandKey)
+  const {
+    expanded: entityExpanded,
+    toggle: toggleEntity,
+    expandAll: expandAllEntities
+  } = useExpandedSet(entityExpandKey)
+
+  const rootBeats = useMemo(() => {
+    if (!snapshot) return []
+    return (snapshot.index.beats.roots ?? [])
+      .map((id) => snapshot.beats[id])
+      .filter(Boolean)
+  }, [snapshot])
+
+  const rootEntities = useMemo(() => {
+    if (!snapshot) return []
+    return (snapshot.index.entities.roots ?? [])
+      .map((id) => snapshot.entities[id])
+      .filter(Boolean)
+  }, [snapshot])
+
+  const beatRows = useMemo(() => {
+    if (!snapshot) return []
+    return flattenVisibleTree(rootBeats, (b) => getBeatChildren(snapshot, b.id), beatExpanded)
+  }, [snapshot, rootBeats, beatExpanded])
+
+  const entityRows = useMemo(() => {
+    if (!snapshot) return []
+    return flattenVisibleTree(
+      rootEntities,
+      (e) => getEntityChildren(snapshot, e.id),
+      entityExpanded
+    )
+  }, [snapshot, rootEntities, entityExpanded])
+
+  useEffect(() => {
+    if (!snapshot) return
+    const withKids = Object.keys(snapshot.index.chapterFolders?.children ?? {})
+    // 也展开有文章的文件夹
+    const withArts = Object.keys(snapshot.index.chapters?.byFolder ?? {})
+    expandAll([...withKids, ...withArts])
+    // 资料树：默认展开已有子项的父节点
+    expandAllBeats(Object.keys(snapshot.index.beats.children ?? {}))
+    expandAllEntities(Object.keys(snapshot.index.entities.children ?? {}))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot?.meta.id])
 
   const handleListTabChange = (v: string): void => {
     const next = v as 'conversations' | 'articles'
@@ -203,16 +286,17 @@ function CreateLeftSidebar(): React.JSX.Element {
 
   const handleArticlesReorder = (from: number, to: number): void => {
     if (!snapshot || from === to) return
-    void useProjectStore
-      .getState()
-      .reorderChapters(arrayMove(snapshot.index.chapters.order, from, to))
+    // 兼容：根级文章重排
+    void reorderChaptersInFolder({
+      folderId: null,
+      orderedIds: arrayMove(snapshot.index.chapters.roots ?? [], from, to)
+    })
   }
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
       {/* 上：节点 / 实体（可折叠，默认收起） */}
       <div className="shrink-0 px-3 pt-3">
-        <SectionLabel>资料</SectionLabel>
         <CollapsibleSection
           count={beats.length}
           icon={CircleDot}
@@ -220,17 +304,22 @@ function CreateLeftSidebar(): React.JSX.Element {
           onToggle={() => setLeftBeatsOpen(!leftBeatsOpen)}
           open={leftBeatsOpen}
         >
-          {beats.length === 0 ? (
+          {rootBeats.length === 0 ? (
             <p className="px-2 py-2 text-xs text-muted-foreground">暂无节点</p>
           ) : (
-            beats.map((b) => (
+            beatRows.map((row) => (
               <SourceRow
-                active={detailTarget?.type === 'beat' && detailTarget.id === b.id}
-                dotClass={BEAT_STATUS_DOT_CLASS[b.status]}
-                key={b.id}
-                label={b.title || '未命名节点'}
-                onClick={() => openDetail({ type: 'beat', id: b.id })}
-                statusTitle={BEAT_STATUS_LABELS[b.status]}
+                active={detailTarget?.type === 'beat' && detailTarget.id === row.item.id}
+                depth={row.depth}
+                dotClass={BEAT_STATUS_DOT_CLASS[row.item.status]}
+                hasChildren={row.hasChildren}
+                key={row.item.id}
+                label={row.item.title || '未命名节点'}
+                onClick={() => {
+                  openDetail({ type: 'beat', id: row.item.id })
+                  if (row.hasChildren) toggleBeat(row.item.id)
+                }}
+                statusTitle={BEAT_STATUS_LABELS[row.item.status]}
               />
             ))
           )}
@@ -243,17 +332,22 @@ function CreateLeftSidebar(): React.JSX.Element {
           onToggle={() => setLeftEntitiesOpen(!leftEntitiesOpen)}
           open={leftEntitiesOpen}
         >
-          {entities.length === 0 ? (
+          {rootEntities.length === 0 ? (
             <p className="px-2 py-2 text-xs text-muted-foreground">暂无实体</p>
           ) : (
-            entities.map((e) => (
+            entityRows.map((row) => (
               <SourceRow
-                active={detailTarget?.type === 'entity' && detailTarget.id === e.id}
-                dotClass={ENTITY_STATUS_DOT_CLASS[e.status]}
-                key={e.id}
-                label={e.name}
-                onClick={() => openDetail({ type: 'entity', id: e.id })}
-                statusTitle={ENTITY_STATUS_LABELS[e.status]}
+                active={detailTarget?.type === 'entity' && detailTarget.id === row.item.id}
+                depth={row.depth}
+                dotClass={ENTITY_STATUS_DOT_CLASS[row.item.status]}
+                hasChildren={row.hasChildren}
+                key={row.item.id}
+                label={row.item.name}
+                onClick={() => {
+                  openDetail({ type: 'entity', id: row.item.id })
+                  if (row.hasChildren) toggleEntity(row.item.id)
+                }}
+                statusTitle={ENTITY_STATUS_LABELS[row.item.status]}
               />
             ))
           )}
@@ -322,33 +416,82 @@ function CreateLeftSidebar(): React.JSX.Element {
             ) : (
               <motion.div
                 animate={{ x: 0, opacity: 1 }}
-                className="absolute inset-0 overflow-y-auto app-scrollbar"
+                className="absolute inset-0 flex flex-col overflow-hidden"
                 exit={{ x: tabDirection >= 0 ? -20 : 20, opacity: 0 }}
                 initial={{ x: tabDirection >= 0 ? 20 : -20, opacity: 0 }}
                 key="articles"
                 transition={TAB_SLIDE_EASE}
               >
-                {articles.length === 0 ? (
-                  <p className="px-2 py-4 text-xs text-muted-foreground">
-                    还没有文章。在对话里生成后会出现在这里。
-                  </p>
-                ) : (
-                  <SortableList
-                    as="div"
-                    className="space-y-0.5"
-                    ids={articles.map((a) => a.id)}
-                    onReorder={handleArticlesReorder}
+                <div className="min-h-0 flex-1 overflow-y-auto app-scrollbar">
+                  {!snapshot ||
+                  (articles.length === 0 &&
+                    Object.keys(snapshot.chapterFolders ?? {}).length === 0) ? (
+                    <p className="px-2 py-4 text-xs text-muted-foreground">
+                      还没有文章。在对话里生成后会出现在这里。
+                    </p>
+                  ) : (
+                    <ArticlesTree
+                      detailTarget={detailTarget}
+                      expanded={expanded}
+                      onOpenChapter={(id) => openDetail({ type: 'chapter', id })}
+                      onReorderChapters={(folderId, from, to) => {
+                        if (!snapshot) return
+                        const ids = !folderId
+                          ? [...(snapshot.index.chapters.roots ?? [])]
+                          : [...(snapshot.index.chapters.byFolder[folderId] ?? [])]
+                        void reorderChaptersInFolder({
+                          folderId,
+                          orderedIds: arrayMove(ids, from, to)
+                        })
+                      }}
+                      onReorderFolders={(parentId, from, to) => {
+                        if (!snapshot) return
+                        const ids =
+                          parentId === null
+                            ? [...snapshot.index.chapterFolders.roots]
+                            : [
+                                ...(snapshot.index.chapterFolders.children[parentId] ??
+                                  [])
+                              ]
+                        void reorderChapterFolders({
+                          parentId,
+                          orderedIds: arrayMove(ids, from, to)
+                        })
+                      }}
+                      onToggle={toggle}
+                      snapshot={snapshot}
+                    />
+                  )}
+                </div>
+                <div className="shrink-0 border-t border-border py-2">
+                  <button
+                    className="flex h-8 w-full items-center justify-center gap-2 rounded-md text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                    onClick={() => setFolderPrompt({ open: true, parentId: null })}
+                    type="button"
                   >
-                    {articles.map((a) => (
-                      <ArticleListRow
-                        active={detailTarget?.type === 'chapter' && detailTarget.id === a.id}
-                        article={a}
-                        key={a.id}
-                        onOpen={() => openDetail({ type: 'chapter', id: a.id })}
-                      />
-                    ))}
-                  </SortableList>
-                )}
+                    <FolderPlus className="size-3.5" />
+                    新建文件夹
+                  </button>
+                </div>
+                <NamePromptModal
+                  confirmLabel="创建"
+                  initialValue=""
+                  label="文件夹名称"
+                  onOpenChange={(open) => {
+                    if (!open) setFolderPrompt({ open: false, parentId: null })
+                  }}
+                  onSubmit={async (name) => {
+                    await createChapterFolder({
+                      name,
+                      parentId: folderPrompt.parentId
+                    })
+                    setFolderPrompt({ open: false, parentId: null })
+                  }}
+                  open={folderPrompt.open}
+                  placeholder="例如：卷一"
+                  submittingLabel="创建中…"
+                  title="新建文章文件夹"
+                />
               </motion.div>
             )}
           </AnimatePresence>
@@ -383,30 +526,25 @@ function ConversationListRow({
   return (
     <div
       className={cn(
-        // 与实体/节点列表一致：text-sm + px-1 py-1
-        'group flex items-start gap-0.5 rounded-md px-1 py-1 text-sm transition-colors',
+        // 单行：只保留对话名称，与节点/文章行高一致
+        // hover 用黑/白半透明：侧栏 bg-sidebar≈muted，hover:bg-muted 几乎不可见
+        'group flex items-center gap-0.5 rounded-md px-1 py-1 text-sm transition-colors',
         active
           ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          : 'text-muted-foreground hover:bg-black/[0.06] hover:text-foreground dark:hover:bg-white/[0.08]'
       )}
     >
       <button
-        className="flex min-w-0 flex-1 items-start rounded-md px-0.5 py-0.5 text-left"
+        className="min-w-0 flex-1 truncate text-left"
         onClick={onOpen}
         type="button"
       >
-        <span className="min-w-0 flex-1">
-          <span className="block truncate">{summary.title}</span>
-          <span className="mt-0.5 block text-xs text-muted-foreground">
-            {formatUpdatedAt(summary.updatedAt)}
-            {summary.messageCount > 0 ? ` · ${summary.messageCount} 条` : ''}
-          </span>
-        </span>
+        {summary.title || '新对话'}
       </button>
       <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(
-            'mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none',
+            'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none',
             'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
             'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
           )}
@@ -426,14 +564,216 @@ function ConversationListRow({
   )
 }
 
+/** 文章树：文件夹 + 文章，同级可排序 */
+function ArticlesTree({
+  snapshot,
+  expanded,
+  onToggle,
+  onOpenChapter,
+  onReorderChapters,
+  onReorderFolders,
+  detailTarget
+}: {
+  snapshot: NonNullable<ReturnType<typeof useProjectStore.getState>['snapshot']>
+  expanded: Set<string>
+  onToggle: (id: string) => void
+  onOpenChapter: (id: string) => void
+  onReorderChapters: (folderId: string | null, from: number, to: number) => void
+  onReorderFolders: (parentId: string | null, from: number, to: number) => void
+  detailTarget: DetailTarget | null
+}): React.JSX.Element {
+  const deleteChapterFolder = useProjectStore((s) => s.deleteChapterFolder)
+  const createChapterFolder = useProjectStore((s) => s.createChapterFolder)
+  const updateChapterFolder = useProjectStore((s) => s.updateChapterFolder)
+  const [subFolderPrompt, setSubFolderPrompt] = useState<string | null>(null)
+  const [renameFolder, setRenameFolder] = useState<{
+    id: string
+    name: string
+  } | null>(null)
+
+  type Mixed =
+    | { kind: 'folder'; id: string; folder: ChapterFolderMeta }
+    | { kind: 'chapter'; id: string; chapter: Chapter }
+
+  const rootFolders = getChapterFolderChildren(snapshot, null)
+  const rootChapters = getChaptersInFolder(snapshot, null)
+
+  const rootItems: Mixed[] = [
+    ...rootFolders.map((f) => ({ kind: 'folder' as const, id: f.id, folder: f })),
+    ...rootChapters.map((c) => ({ kind: 'chapter' as const, id: c.id, chapter: c }))
+  ]
+
+  const getChildren = (item: Mixed): Mixed[] => {
+    if (item.kind !== 'folder') return []
+    if (!expanded.has(item.id)) return []
+    const subs = getChapterFolderChildren(snapshot, item.id).map((f) => ({
+      kind: 'folder' as const,
+      id: f.id,
+      folder: f
+    }))
+    const chaps = getChaptersInFolder(snapshot, item.id).map((c) => ({
+      kind: 'chapter' as const,
+      id: c.id,
+      chapter: c
+    }))
+    return [...subs, ...chaps]
+  }
+
+  // 手动渲染：文件夹与文章混排时，同级排序分两类 API，简化为分组渲染
+  const renderFolderBranch = (folderId: string | null, depth: number): React.ReactNode => {
+    const folders = getChapterFolderChildren(snapshot, folderId)
+    const chapters = getChaptersInFolder(snapshot, folderId)
+    return (
+      <div className="space-y-0.5">
+        {folders.length > 0 ? (
+          <SortableList
+            as="div"
+            className="space-y-0.5"
+            ids={folders.map((f) => f.id)}
+            onReorder={(from, to) => onReorderFolders(folderId, from, to)}
+          >
+            {folders.map((f) => {
+              const open = expanded.has(f.id)
+              const childFolders = getChapterFolderChildren(snapshot, f.id)
+              const childChaps = getChaptersInFolder(snapshot, f.id)
+              const hasChildren = childFolders.length > 0 || childChaps.length > 0
+              return (
+                <div key={f.id}>
+                  <TreeRowShell depth={depth} id={f.id}>
+                    <button
+                      className="min-w-0 flex-1 truncate text-left text-xs font-medium"
+                      onClick={() => {
+                        if (hasChildren) onToggle(f.id)
+                      }}
+                      type="button"
+                    >
+                      {f.name}
+                    </button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        className={cn(
+                          'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none',
+                          'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
+                          'data-[state=open]:bg-muted data-[state=open]:opacity-100'
+                        )}
+                        type="button"
+                      >
+                        <MoreHorizontal className="size-3.5" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            setRenameFolder({ id: f.id, name: f.name })
+                          }
+                        >
+                          <Pencil className="size-3.5" />
+                          重命名
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => setSubFolderPrompt(f.id)}
+                        >
+                          <FolderPlus className="size-3.5" />
+                          新建子文件夹
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            void (async () => {
+                              const ok = await confirmDelete({
+                                title: '删除文件夹',
+                                description: `删除「${f.name}」后，内含文章与子文件夹将提升到上一级。`
+                              })
+                              if (!ok) return
+                              await deleteChapterFolder(f.id)
+                            })()
+                          }}
+                          variant="destructive"
+                        >
+                          <Trash2 className="size-3.5" />
+                          删除
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TreeRowShell>
+                  {open ? renderFolderBranch(f.id, depth + 1) : null}
+                </div>
+              )
+            })}
+          </SortableList>
+        ) : null}
+        {chapters.length > 0 ? (
+          <SortableList
+            as="div"
+            className="space-y-0.5"
+            ids={chapters.map((c) => c.id)}
+            onReorder={(from, to) => onReorderChapters(folderId, from, to)}
+          >
+            {chapters.map((c) => (
+              <ArticleListRow
+                active={detailTarget?.type === 'chapter' && detailTarget.id === c.id}
+                article={c}
+                depth={depth}
+                key={c.id}
+                onOpen={() => onOpenChapter(c.id)}
+              />
+            ))}
+          </SortableList>
+        ) : null}
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {renderFolderBranch(null, 0)}
+      <NamePromptModal
+        confirmLabel="创建"
+        initialValue=""
+        label="文件夹名称"
+        onOpenChange={(open) => {
+          if (!open) setSubFolderPrompt(null)
+        }}
+        onSubmit={async (name) => {
+          if (!subFolderPrompt) return
+          await createChapterFolder({ name, parentId: subFolderPrompt })
+          setSubFolderPrompt(null)
+        }}
+        open={subFolderPrompt !== null}
+        placeholder="例如：上"
+        submittingLabel="创建中…"
+        title="新建子文件夹"
+      />
+      <NamePromptModal
+        confirmLabel="保存"
+        initialValue={renameFolder?.name ?? ''}
+        label="文件夹名称"
+        onOpenChange={(open) => {
+          if (!open) setRenameFolder(null)
+        }}
+        onSubmit={async (name) => {
+          if (!renameFolder) return
+          await updateChapterFolder(renameFolder.id, { name })
+          setRenameFolder(null)
+        }}
+        open={renameFolder !== null}
+        placeholder="例如：卷一"
+        submittingLabel="保存中…"
+        title="重命名文件夹"
+      />
+    </>
+  )
+}
+
 function ArticleListRow({
   article,
   active,
-  onOpen
+  onOpen,
+  depth = 0
 }: {
   article: Chapter
   active: boolean
   onOpen: () => void
+  depth?: number
 }): React.JSX.Element {
   const updateChapter = useProjectStore((s) => s.updateChapter)
   const deleteChapter = useProjectStore((s) => s.deleteChapter)
@@ -455,20 +795,8 @@ function ArticleListRow({
   }
 
   return (
-    <SortableItem
-      as="div"
-      className={cn(
-        // 与实体/节点列表一致：text-sm + px-1 py-1
-        'group flex items-center gap-0.5 rounded-md px-1 py-1 text-sm transition-colors',
-        active
-          ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-      )}
-      id={article.id}
-    >
-      <SortableHandle className="size-5 shrink-0 text-muted-foreground">
-        <GripVertical className="size-3.5" />
-      </SortableHandle>
+    <TreeRowShell active={active} depth={depth} id={article.id}>
+      <span className="size-5 shrink-0" />
       <button
         className="min-w-0 flex-1 truncate text-left"
         onClick={onOpen}
@@ -517,26 +845,7 @@ function ArticleListRow({
         )}
         title={CHAPTER_STATUS_LABELS[article.status]}
       />
-    </SortableItem>
-  )
-}
-
-function SectionLabel({
-  children,
-  className
-}: {
-  children: React.ReactNode
-  className?: string
-}): React.JSX.Element {
-  return (
-    <div
-      className={cn(
-        'mb-1 px-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80',
-        className
-      )}
-    >
-      {children}
-    </div>
+    </TreeRowShell>
   )
 }
 
@@ -604,20 +913,34 @@ function CollapsibleSection({
   return (
     <div className="mb-0.5">
       <button
-        className="group flex h-9 w-full items-center gap-1.5 rounded-md px-1.5 text-sm text-sidebar-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="group flex h-9 w-full items-center gap-1.5 rounded-md px-1.5 text-sm text-sidebar-foreground transition-colors hover:bg-black/[0.06] hover:text-foreground dark:hover:bg-white/[0.08]"
         onClick={onToggle}
         type="button"
       >
-        <motion.span
-          animate={{ rotate: open ? 90 : 0 }}
-          className="inline-flex"
-          transition={{ type: 'spring', stiffness: 400, damping: 28 }}
-        >
-          <ChevronRight className="size-3.5 text-muted-foreground" />
-        </motion.span>
         <Icon className="size-3.5 shrink-0 opacity-70" />
         <span className="min-w-0 flex-1 truncate text-left font-medium">{label}</span>
-        <span className="tabular-nums text-[10px] text-muted-foreground">{count}</span>
+        {/* 右侧：数字固定；hover / 展开时箭头叠在数字上 */}
+        <span className="relative flex size-5 shrink-0 items-center justify-center">
+          <span
+            className={cn(
+              'tabular-nums text-[10px] text-muted-foreground transition-opacity',
+              'group-hover:opacity-0',
+              open && 'opacity-0'
+            )}
+          >
+            {count}
+          </span>
+          <motion.span
+            animate={{ rotate: open ? 90 : 0 }}
+            className={cn(
+              'absolute inset-0 inline-flex items-center justify-center transition-opacity',
+              open || 'opacity-0 group-hover:opacity-100'
+            )}
+            transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+          >
+            <ChevronRight className="size-3.5 text-muted-foreground" />
+          </motion.span>
+        </span>
       </button>
       <AnimatePresence initial={false}>
         {open ? (
@@ -643,23 +966,29 @@ function SourceRow({
   active,
   onClick,
   dotClass,
-  statusTitle
+  statusTitle,
+  depth = 0,
+  hasChildren = false
 }: {
   label: string
   active: boolean
   onClick: () => void
   dotClass: string
   statusTitle: string
+  depth?: number
+  hasChildren?: boolean
 }): React.JSX.Element {
   return (
     <div
       className={cn(
         // 字号放在容器上（与实体/节点页 li 一致），避免历史 button font 继承坑
-        'group flex items-center gap-0.5 rounded-md px-1 py-1 text-sm transition-colors',
+        // hover 用黑/白半透明：侧栏 bg-sidebar≈muted，hover:bg-muted 几乎不可见
+        'group flex items-center gap-0.5 rounded-md py-1 pr-1 text-sm transition-colors',
         active
           ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          : 'text-muted-foreground hover:bg-black/[0.06] hover:text-foreground dark:hover:bg-white/[0.08]'
       )}
+      style={{ paddingLeft: 4 + depth * 12 }}
     >
       <button
         className="min-w-0 flex-1 truncate text-left"
@@ -670,7 +999,9 @@ function SourceRow({
       </button>
       <span
         className={cn('size-2 shrink-0 rounded-full', dotClass)}
-        title={statusTitle}
+        title={
+          hasChildren ? `${statusTitle} · 点击标题可展开/收起子项` : statusTitle
+        }
       />
     </div>
   )

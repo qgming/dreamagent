@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
-  GripVertical,
+  CornerDownRight,
   MoreHorizontal,
   Pencil,
   Plus,
-  Trash2
+  Trash2,
+  Unlink
 } from 'lucide-react'
 import {
   ENTITY_STATUS_LABELS,
@@ -27,10 +28,12 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import {
-  SortableHandle,
-  SortableItem,
-  SortableList
-} from '@/components/ui/sortable-list'
+  flattenVisibleTree,
+  TreeExpandButton,
+  TreeRowShell,
+  TreeSortableSections,
+  useExpandedSet
+} from '@/components/ui/tree-list'
 import { BACKLINK_CHIP } from '@/lib/mention-styles'
 import { CollapsibleChipList } from '@/components/ui/collapsible-chip-list'
 import { cn } from '@/lib/utils'
@@ -41,6 +44,7 @@ import {
   entityStatusTitle
 } from '@/lib/project-utils'
 import {
+  getEntityChildren,
   getOrderedBeats,
   getOrderedEntities,
   useProjectStore
@@ -57,22 +61,44 @@ export function EntitiesPage(): React.JSX.Element {
   const openEditEntityModal = useProjectStore((s) => s.openEditEntityModal)
   const updateEntity = useProjectStore((s) => s.updateEntity)
   const deleteEntity = useProjectStore((s) => s.deleteEntity)
-  const reorderEntities = useProjectStore((s) => s.reorderEntities)
+  const reorderEntitySiblings = useProjectStore((s) => s.reorderEntitySiblings)
+  const reparentEntity = useProjectStore((s) => s.reparentEntity)
 
-  const entities = getOrderedEntities(snapshot)
+  const rootEntities = useMemo(() => {
+    if (!snapshot) return []
+    return (snapshot.index.entities.roots ?? [])
+      .map((id) => snapshot.entities[id])
+      .filter(Boolean)
+  }, [snapshot])
   const selected =
     selectedEntityId && snapshot ? snapshot.entities[selectedEntityId] : null
+  const expandKey = snapshot ? `dreamagent:entities-expanded:${snapshot.meta.id}` : null
+  const { expanded, toggle, expandAll } = useExpandedSet(expandKey)
 
-  const handleReorder = (from: number, to: number): void => {
-    if (!snapshot || from === to) return
-    void reorderEntities(arrayMove(snapshot.index.entities.order, from, to))
-  }
+  useEffect(() => {
+    if (!snapshot) return
+    const withKids = Object.keys(snapshot.index.entities.children ?? {})
+    if (withKids.length) expandAll(withKids)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot?.meta.id])
+
+  const rows = useMemo(() => {
+    if (!snapshot) return []
+    return flattenVisibleTree(
+      rootEntities,
+      (e) => getEntityChildren(snapshot, e.id),
+      expanded
+    )
+  }, [snapshot, rootEntities, expanded])
 
   const handleDelete = (entity: Entity): void => {
     void (async () => {
+      const kids = snapshot ? getEntityChildren(snapshot, entity.id) : []
       const ok = await confirmDelete({
         title: '删除实体',
-        description: `确定删除实体「${entity.name || '未命名实体'}」？\n正文中的双链将断为普通 @ 文本，此操作不可恢复。`
+        description: kids.length
+          ? `确定删除实体「${entity.name || '未命名实体'}」？\n其 ${kids.length} 个子实体将提升到上一级；双链将断为普通 @ 文本。`
+          : `确定删除实体「${entity.name || '未命名实体'}」？\n正文中的双链将断为普通 @ 文本，此操作不可恢复。`
       })
       if (!ok) return
       void deleteEntity(entity.id)
@@ -88,33 +114,55 @@ export function EntitiesPage(): React.JSX.Element {
       <div className="flex w-60 shrink-0 flex-col border-r border-border bg-card/30">
         <div className={cn(TOOLBAR_CLASS, 'justify-between')}>
           <span className="text-sm font-medium">实体</span>
-          <Button onClick={openCreateEntityModal} size="sm" type="button" variant="secondary">
+          <Button
+            onClick={() => openCreateEntityModal()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
             <Plus className="size-3.5" />
             新建
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto p-2 app-scrollbar">
-          {entities.length === 0 ? (
+          {rootEntities.length === 0 ? (
             <p className="px-2 py-6 text-center text-xs text-muted-foreground">
               暂无实体。人物、地点、物品都可建在这里。
             </p>
           ) : (
-            <SortableList
-              className="space-y-0.5"
-              ids={entities.map((e) => e.id)}
-              onReorder={handleReorder}
-            >
-              {entities.map((entity) => (
+            <TreeSortableSections
+              onReorderSiblings={(parentId, from, to) => {
+                const ids =
+                  parentId === null
+                    ? [...snapshot.index.entities.roots]
+                    : [...(snapshot.index.entities.children[parentId] ?? [])]
+                void reorderEntitySiblings({
+                  parentId,
+                  orderedIds: arrayMove(ids, from, to)
+                })
+              }}
+              renderRow={(row) => (
                 <EntityListRow
-                  active={selectedEntityId === entity.id}
-                  entity={entity}
-                  key={entity.id}
-                  onDelete={() => handleDelete(entity)}
-                  onEdit={() => openEditEntityModal(entity.id)}
-                  onSelect={() => setSelectedEntityId(entity.id)}
+                  active={selectedEntityId === row.item.id}
+                  depth={row.depth}
+                  entity={row.item}
+                  expanded={expanded.has(row.item.id)}
+                  hasChildren={row.hasChildren}
+                  key={row.item.id}
+                  onAddChild={() => openCreateEntityModal(row.item.id)}
+                  onDelete={() => handleDelete(row.item)}
+                  onEdit={() => openEditEntityModal(row.item.id)}
+                  onSelect={() => setSelectedEntityId(row.item.id)}
+                  onToggle={() => toggle(row.item.id)}
+                  onUnparent={
+                    row.parentId
+                      ? () => void reparentEntity(row.item.id, { parentId: null })
+                      : undefined
+                  }
                 />
-              ))}
-            </SortableList>
+              )}
+              rows={rows}
+            />
           )}
         </div>
       </div>
@@ -136,39 +184,55 @@ export function EntitiesPage(): React.JSX.Element {
 function EntityListRow({
   entity,
   active,
+  depth,
+  hasChildren,
+  expanded,
   onSelect,
   onEdit,
-  onDelete
+  onDelete,
+  onAddChild,
+  onToggle,
+  onUnparent
 }: {
   entity: Entity
   active: boolean
+  depth: number
+  hasChildren: boolean
+  expanded: boolean
   onSelect: () => void
   onEdit: () => void
   onDelete: () => void
+  onAddChild: () => void
+  onToggle: () => void
+  onUnparent?: () => void
 }): React.JSX.Element {
   const archived = entity.status === 'archived'
 
+  // 布局：拖动手柄 · 标题(有子则同时展开/收起) · 状态点(hover 换成更多)
+  const handleTitleClick = (): void => {
+    onSelect()
+    if (hasChildren) onToggle()
+  }
+
   return (
-    <SortableItem
-      className={cn(
-        'group flex items-center gap-0.5 rounded-md px-1 py-1 text-sm transition-colors',
-        active
-          ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-        archived && !active && 'opacity-55'
-      )}
+    <TreeRowShell
+      active={active}
+      className={archived && !active ? 'opacity-55' : undefined}
+      depth={depth}
       id={entity.id}
     >
-      <SortableHandle className="size-5 shrink-0 text-muted-foreground">
-        <GripVertical className="size-3.5" />
-      </SortableHandle>
-      <button className="min-w-0 flex-1 truncate text-left" onClick={onSelect} type="button">
+      <button
+        className="min-w-0 flex-1 truncate text-left"
+        onClick={handleTitleClick}
+        type="button"
+      >
         {entity.name || '未命名实体'}
       </button>
       <span className="relative flex size-6 shrink-0 items-center justify-center">
         <span
           className={cn(
-            'size-2 rounded-full transition-opacity group-hover:opacity-0 group-focus-within:opacity-0',
+            'size-2 rounded-full transition-opacity',
+            'group-hover:opacity-0 group-focus-within:opacity-0',
             ENTITY_STATUS_DOT_CLASS[entity.status]
           )}
           title={entityStatusTitle(entity.status)}
@@ -177,7 +241,8 @@ function EntityListRow({
           <DropdownMenuTrigger
             className={cn(
               'absolute inset-0 flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none',
-              'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
+              'opacity-0 hover:bg-muted hover:text-foreground',
+              'group-hover:opacity-100 group-focus-within:opacity-100',
               'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
             )}
             title="更多"
@@ -190,6 +255,16 @@ function EntityListRow({
               <Pencil className="size-3.5" />
               编辑
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onAddChild}>
+              <CornerDownRight className="size-3.5" />
+              新建子实体
+            </DropdownMenuItem>
+            {onUnparent ? (
+              <DropdownMenuItem onSelect={onUnparent}>
+                <Unlink className="size-3.5" />
+                移到根级
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onDelete} variant="destructive">
               <Trash2 className="size-3.5" />
@@ -198,7 +273,7 @@ function EntityListRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </span>
-    </SortableItem>
+    </TreeRowShell>
   )
 }
 

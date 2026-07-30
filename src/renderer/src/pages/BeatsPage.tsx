@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
-  GripVertical,
+  CornerDownRight,
   MoreHorizontal,
   Pencil,
   Plus,
-  Trash2
+  Trash2,
+  Unlink
 } from 'lucide-react'
 import {
   BEAT_STATUS_LABELS,
@@ -27,10 +28,12 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import {
-  SortableHandle,
-  SortableItem,
-  SortableList
-} from '@/components/ui/sortable-list'
+  flattenVisibleTree,
+  TreeExpandButton,
+  TreeRowShell,
+  TreeSortableSections,
+  useExpandedSet
+} from '@/components/ui/tree-list'
 import { BACKLINK_CHIP } from '@/lib/mention-styles'
 import { CollapsibleChipList } from '@/components/ui/collapsible-chip-list'
 import { cn } from '@/lib/utils'
@@ -41,6 +44,7 @@ import {
   beatStatusTitle
 } from '@/lib/project-utils'
 import {
+  getBeatChildren,
   getOrderedBeats,
   getOrderedEntities,
   useProjectStore
@@ -57,21 +61,45 @@ export function BeatsPage(): React.JSX.Element {
   const openEditBeatModal = useProjectStore((s) => s.openEditBeatModal)
   const updateBeat = useProjectStore((s) => s.updateBeat)
   const deleteBeat = useProjectStore((s) => s.deleteBeat)
-  const reorderBeats = useProjectStore((s) => s.reorderBeats)
+  const reorderBeatSiblings = useProjectStore((s) => s.reorderBeatSiblings)
+  const reparentBeat = useProjectStore((s) => s.reparentBeat)
 
-  const beats = getOrderedBeats(snapshot)
+  const rootBeats = useMemo(() => {
+    if (!snapshot) return []
+    return (snapshot.index.beats.roots ?? [])
+      .map((id) => snapshot.beats[id])
+      .filter(Boolean)
+  }, [snapshot])
   const selected = selectedBeatId && snapshot ? snapshot.beats[selectedBeatId] : null
+  const expandKey = snapshot ? `dreamagent:beats-expanded:${snapshot.meta.id}` : null
+  const { expanded, toggle, expandAll } = useExpandedSet(expandKey)
 
-  const handleReorder = (from: number, to: number): void => {
-    if (!snapshot || from === to) return
-    void reorderBeats({ orderedIds: arrayMove(snapshot.index.beats.order, from, to) })
-  }
+  // 默认展开已有子节点的项
+  useEffect(() => {
+    if (!snapshot) return
+    const withKids = Object.keys(snapshot.index.beats.children ?? {})
+    if (withKids.length) expandAll(withKids)
+    // 仅在项目切换时
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot?.meta.id])
+
+  const rows = useMemo(() => {
+    if (!snapshot) return []
+    return flattenVisibleTree(
+      rootBeats,
+      (b) => getBeatChildren(snapshot, b.id),
+      expanded
+    )
+  }, [snapshot, rootBeats, expanded])
 
   const handleDelete = (beat: Beat): void => {
     void (async () => {
+      const kids = snapshot ? getBeatChildren(snapshot, beat.id) : []
       const ok = await confirmDelete({
         title: '删除节点',
-        description: `确定删除节点「${beat.title || '未命名节点'}」？\n此操作不可恢复。`
+        description: kids.length
+          ? `确定删除节点「${beat.title || '未命名节点'}」？\n其 ${kids.length} 个子节点将提升到上一级。`
+          : `确定删除节点「${beat.title || '未命名节点'}」？\n此操作不可恢复。`
       })
       if (!ok) return
       void deleteBeat(beat.id)
@@ -87,33 +115,55 @@ export function BeatsPage(): React.JSX.Element {
       <div className="flex w-60 shrink-0 flex-col border-r border-border bg-card/30">
         <div className={cn(TOOLBAR_CLASS, 'justify-between')}>
           <span className="text-sm font-medium">节点</span>
-          <Button onClick={openCreateBeatModal} size="sm" type="button" variant="secondary">
+          <Button
+            onClick={() => openCreateBeatModal()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
             <Plus className="size-3.5" />
             新建
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto p-2 app-scrollbar">
-          {beats.length === 0 ? (
+          {rootBeats.length === 0 ? (
             <p className="px-2 py-6 text-center text-xs text-muted-foreground">
               暂无节点，点击上方新建
             </p>
           ) : (
-            <SortableList
-              className="space-y-0.5"
-              ids={beats.map((b) => b.id)}
-              onReorder={handleReorder}
-            >
-              {beats.map((beat) => (
+            <TreeSortableSections
+              onReorderSiblings={(parentId, from, to) => {
+                const ids =
+                  parentId === null
+                    ? [...snapshot.index.beats.roots]
+                    : [...(snapshot.index.beats.children[parentId] ?? [])]
+                void reorderBeatSiblings({
+                  parentId,
+                  orderedIds: arrayMove(ids, from, to)
+                })
+              }}
+              renderRow={(row) => (
                 <BeatListRow
-                  active={selectedBeatId === beat.id}
-                  beat={beat}
-                  key={beat.id}
-                  onDelete={() => handleDelete(beat)}
-                  onEdit={() => openEditBeatModal(beat.id)}
-                  onSelect={() => setSelectedBeatId(beat.id)}
+                  active={selectedBeatId === row.item.id}
+                  beat={row.item}
+                  depth={row.depth}
+                  expanded={expanded.has(row.item.id)}
+                  hasChildren={row.hasChildren}
+                  key={row.item.id}
+                  onAddChild={() => openCreateBeatModal(row.item.id)}
+                  onDelete={() => handleDelete(row.item)}
+                  onEdit={() => openEditBeatModal(row.item.id)}
+                  onSelect={() => setSelectedBeatId(row.item.id)}
+                  onToggle={() => toggle(row.item.id)}
+                  onUnparent={
+                    row.parentId
+                      ? () => void reparentBeat(row.item.id, { parentId: null })
+                      : undefined
+                  }
                 />
-              ))}
-            </SortableList>
+              )}
+              rows={rows}
+            />
           )}
         </div>
       </div>
@@ -135,36 +185,48 @@ export function BeatsPage(): React.JSX.Element {
 function BeatListRow({
   beat,
   active,
+  depth,
+  hasChildren,
+  expanded,
   onSelect,
   onEdit,
-  onDelete
+  onDelete,
+  onAddChild,
+  onToggle,
+  onUnparent
 }: {
   beat: Beat
   active: boolean
+  depth: number
+  hasChildren: boolean
+  expanded: boolean
   onSelect: () => void
   onEdit: () => void
   onDelete: () => void
+  onAddChild: () => void
+  onToggle: () => void
+  onUnparent?: () => void
 }): React.JSX.Element {
+  // 布局：拖动手柄 · 标题(有子则同时展开/收起) · 状态点(hover 换成更多)
+  const handleTitleClick = (): void => {
+    onSelect()
+    if (hasChildren) onToggle()
+  }
+
   return (
-    <SortableItem
-      className={cn(
-        'group flex items-center gap-0.5 rounded-md px-1 py-1 text-sm transition-colors',
-        active
-          ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-      )}
-      id={beat.id}
-    >
-      <SortableHandle className="size-5 shrink-0 text-muted-foreground">
-        <GripVertical className="size-3.5" />
-      </SortableHandle>
-      <button className="min-w-0 flex-1 truncate text-left" onClick={onSelect} type="button">
+    <TreeRowShell active={active} depth={depth} id={beat.id}>
+      <button
+        className="min-w-0 flex-1 truncate text-left"
+        onClick={handleTitleClick}
+        type="button"
+      >
         {beat.title || '未命名节点'}
       </button>
       <span className="relative flex size-6 shrink-0 items-center justify-center">
         <span
           className={cn(
-            'size-2 rounded-full transition-opacity group-hover:opacity-0 group-focus-within:opacity-0',
+            'size-2 rounded-full transition-opacity',
+            'group-hover:opacity-0 group-focus-within:opacity-0',
             BEAT_STATUS_DOT_CLASS[beat.status]
           )}
           title={beatStatusTitle(beat.status)}
@@ -173,7 +235,8 @@ function BeatListRow({
           <DropdownMenuTrigger
             className={cn(
               'absolute inset-0 flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none',
-              'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
+              'opacity-0 hover:bg-muted hover:text-foreground',
+              'group-hover:opacity-100 group-focus-within:opacity-100',
               'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
             )}
             title="更多"
@@ -186,6 +249,16 @@ function BeatListRow({
               <Pencil className="size-3.5" />
               编辑
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onAddChild}>
+              <CornerDownRight className="size-3.5" />
+              新建子节点
+            </DropdownMenuItem>
+            {onUnparent ? (
+              <DropdownMenuItem onSelect={onUnparent}>
+                <Unlink className="size-3.5" />
+                移到根级
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onDelete} variant="destructive">
               <Trash2 className="size-3.5" />
@@ -194,7 +267,7 @@ function BeatListRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </span>
-    </SortableItem>
+    </TreeRowShell>
   )
 }
 

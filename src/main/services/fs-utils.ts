@@ -130,3 +130,32 @@ export async function listFileNames(dir: string, ext = '.json'): Promise<string[
     .filter((e) => e.isFile() && e.name.endsWith(ext) && !e.name.startsWith('.'))
     .map((e) => e.name)
 }
+
+/**
+ * 递归列出目录下匹配扩展名的文件
+ * @returns relPath 相对 root 的路径（posix 风格用 path.sep 实际值），fileName 基名
+ */
+export async function listFilesRecursive(
+  root: string,
+  ext = '.json'
+): Promise<Array<{ absPath: string; relDir: string; fileName: string }>> {
+  if (!(await pathExists(root))) return []
+  const out: Array<{ absPath: string; relDir: string; fileName: string }> = []
+
+  async function walk(dir: string, relDir: string): Promise<void> {
+    const entries = await fs.readdir(dir, { withFileTypes: true })
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue
+      const abs = path.join(dir, e.name)
+      if (e.isDirectory()) {
+        const nextRel = relDir ? path.join(relDir, e.name) : e.name
+        await walk(abs, nextRel)
+      } else if (e.isFile() && e.name.endsWith(ext)) {
+        out.push({ absPath: abs, relDir, fileName: e.name })
+      }
+    }
+  }
+
+  await walk(root, '')
+  return out
+}

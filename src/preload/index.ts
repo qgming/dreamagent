@@ -101,6 +101,16 @@ const projectApi = {
     ipcRenderer.invoke('beat:delete', projectId, beatId),
   reorderBeats: (projectId: string, input: ReorderBeatsInput): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke('beat:reorder', projectId, input),
+  reorderBeatSiblings: (
+    projectId: string,
+    input: import('../shared/project-types').ReorderSiblingsInput
+  ): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('beat:reorderSiblings', projectId, input),
+  reparentBeat: (
+    projectId: string,
+    beatId: string,
+    input: import('../shared/project-types').ReparentInput
+  ): Promise<ProjectSnapshot> => ipcRenderer.invoke('beat:reparent', projectId, beatId, input),
 
   createEntity: (
     projectId: string,
@@ -117,6 +127,17 @@ const projectApi = {
     ipcRenderer.invoke('entity:delete', projectId, entityId),
   reorderEntities: (projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> =>
     ipcRenderer.invoke('entity:reorder', projectId, orderedIds),
+  reorderEntitySiblings: (
+    projectId: string,
+    input: import('../shared/project-types').ReorderSiblingsInput
+  ): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('entity:reorderSiblings', projectId, input),
+  reparentEntity: (
+    projectId: string,
+    entityId: string,
+    input: import('../shared/project-types').ReparentInput
+  ): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('entity:reparent', projectId, entityId, input),
 
   createChapter: (
     projectId: string,
@@ -134,7 +155,37 @@ const projectApi = {
   getChapter: (projectId: string, chapterId: string): Promise<Chapter> =>
     ipcRenderer.invoke('chapter:get', projectId, chapterId),
   reorderChapters: (projectId: string, orderedIds: string[]): Promise<ProjectSnapshot> =>
-    ipcRenderer.invoke('chapter:reorder', projectId, orderedIds)
+    ipcRenderer.invoke('chapter:reorder', projectId, orderedIds),
+  reorderChaptersInFolder: (
+    projectId: string,
+    input: import('../shared/project-types').ReorderChaptersInFolderInput
+  ): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('chapter:reorderInFolder', projectId, input),
+  moveChapter: (
+    projectId: string,
+    chapterId: string,
+    input: import('../shared/project-types').MoveChapterInput
+  ): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('chapter:move', projectId, chapterId, input),
+  createChapterFolder: (
+    projectId: string,
+    input: import('../shared/project-types').CreateChapterFolderInput
+  ): Promise<
+    CreateMutationResult<import('../shared/project-types').ChapterFolderMeta>
+  > => ipcRenderer.invoke('chapterFolder:create', projectId, input),
+  updateChapterFolder: (
+    projectId: string,
+    folderId: string,
+    patch: import('../shared/project-types').UpdateChapterFolderInput
+  ): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('chapterFolder:update', projectId, folderId, patch),
+  deleteChapterFolder: (projectId: string, folderId: string): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('chapterFolder:delete', projectId, folderId),
+  reorderChapterFolders: (
+    projectId: string,
+    input: import('../shared/project-types').ReorderSiblingsInput
+  ): Promise<ProjectSnapshot> =>
+    ipcRenderer.invoke('chapterFolder:reorder', projectId, input)
 }
 
 /**

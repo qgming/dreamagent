@@ -6,7 +6,7 @@ description: |
   触发方式：/dreamagent-guide、/使用指南、「怎么建双链」「双链怎么写」「工具怎么用」
 metadata:
   displayName: 造梦师使用指南
-  version: "1.2.0"
+  version: "1.3.0"
 ---
 
 # dreamagent-guide
@@ -23,6 +23,56 @@ metadata:
 
 - 成稿进文章，**不要**把长正文回写进 `beat.content`。
 - 文章与图谱的关系靠**元数据**：`sourceBeatIds` / `entityRefs` / `beatRefs`。
+
+## 结构树 vs 双链（两套正交关系）
+
+| | 结构树 `parentId` | 双链 mention |
+|--|------------------|--------------|
+| 用途 | 大纲树 / 设定树 / 卷册归属 | 「提到了谁」 |
+| 方向 | **严格单父树**（同类型） | 多对多图 |
+| 节点 | `parentId` 指向另一 beat | `[@名](beat:id)` |
+| 实体 | `parentId` 指向另一 entity | `[@名](entity:id)` |
+| 文章 | **文件夹** `folderId`（真实磁盘子目录） | 禁止双链 |
+
+### 子节点 / 子实体
+
+```text
+write({ type: "beat", title: "开场冲突", parentId: "beat_父id" })
+write({ type: "entity", name: "林晚", parentId: "ent_主角团" })
+```
+
+- `read(beats/{id})` 返回 `parentId` + **直接** `children[]`（不递归）。
+- `list({ path: "beats", parentId: "" })` 只列根；`parentId: "beat_x"` 只列该父的直接子。
+- 删除父节点时：**子项提升**到祖父/根，不级联删除。
+- 不能把节点挂到自己的子树下（防环）；不能跨类型挂父。
+
+### 文章文件夹
+
+- 如「卷一」：真实目录 `documents/chapters/卷一/`。
+- **先建文件夹，再写文章进夹**（推荐流程）：
+
+```text
+# 1) 创建文件夹
+write({ type: "folder", name: "卷一" })
+# → data.id 例如 fold_xxx
+
+# 2) 子文件夹（可选）
+write({ type: "folder", name: "上", parentId: "fold_xxx" })
+
+# 3) 文章写入该夹
+write({ type: "chapter", title: "第一章", content: "…", folderId: "fold_xxx" })
+```
+
+- 列表：
+  - `list({ path: "folders" })` / `list({ path: "folders", parentId: "" })` 只列根夹。
+  - `list({ path: "chapters" })` **结构化**返回 `{ items, folderCount, chapterCount }`：
+    - `items[].kind === "folder"`：文件夹（`name` / `relPath` / `chapterCount` / `childFolderCount` / `depth`）
+    - `items[].kind === "chapter"`：文章（`title` / `status` / `folderId` / `folderName` / `folderPath` / `depth`）
+    - 省略 `folderId` = 整棵树（深度优先，夹→文）；`folderId: ""` = 仅根级夹+根级文；`folderId: "fold_xxx"` = 该夹直接子夹 + 夹内文。
+- 读取：`read({ path: "folders/fold_xxx" })` 返回子夹 + 夹内文章清单。
+- 改名/改挂：`edit({ path: "folders/fold_xxx", name: "第一卷" })` 或 `parentId`。
+- 删除：`delete({ path: "folders/fold_xxx" })` — 内含文章与子夹**提升**到上一级，不级联删文。
+- 移动已有文章进夹：`edit({ path: "chapters/{id}", folderId: "fold_xxx" })`；移出根用 `folderId: ""`。
 
 ## 双链：唯一合法语法
 
@@ -148,13 +198,15 @@ write({ type: "beat",
 
 | 目的 | 工具 |
 |------|------|
-| 看全局 | `list({ path: "outline" })` / `list({ path: "beats" })` / `list({ path: "entities" })` |
-| 读详情 | `read({ path: "beats/{id}" })` 等（看出入链） |
-| 创建 | `write({ type: "beat"\|"entity"\|"chapter", title/name, content })` |
+| 看全局 | `list({ path: "outline" })` / `list({ path: "beats" })` / `list({ path: "entities" })` / `list({ path: "folders" })` |
+| 读详情 | `read({ path: "beats/{id}" })` / `read({ path: "folders/{id}" })`（夹内文章清单） |
+| 创建 | `write({ type: "beat"\|"entity"\|"chapter"\|"folder", title/name, content? })` |
+| 建文件夹 | `write({ type: "folder", name: "卷一" })`；子夹加 `parentId` |
+| 文章进夹 | `write({ type: "chapter", …, folderId })` 或 `edit({ path: "chapters/{id}", folderId })` |
 | 全量覆盖 | `write({ path: "beats/{id}", content })` |
-| 局部改 | `edit({ path, edits: [{ oldText, newText }] })` 或改 status |
-| 删除 | `delete({ path: "entities/{id}" })` |
-| 写正文 | `write({ type: "chapter", title, content, sourceBeatIds, entityRefs })` |
+| 局部改 | `edit({ path, edits: [{ oldText, newText }] })` 或改 status/name/parentId |
+| 删除 | `delete({ path: "entities/{id}" })` / `delete({ path: "folders/{id}" })`（夹内提升） |
+| 写正文 | `write({ type: "chapter", title, content, sourceBeatIds, entityRefs, folderId? })` |
 | 搜索/读网 | `web_search` / `web_fetch` |
 | 技能 | `list_skills` → `read_skill` → `read_skill_file` |
 

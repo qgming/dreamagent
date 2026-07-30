@@ -2,12 +2,18 @@ import { ipcMain, shell } from 'electron'
 import type { ProjectService } from '../services/project-service'
 import type {
   CreateBeatInput,
+  CreateChapterFolderInput,
   CreateChapterInput,
   CreateEntityInput,
   CreateProjectInput,
+  MoveChapterInput,
   ProjectMeta,
   ReorderBeatsInput,
+  ReorderChaptersInFolderInput,
+  ReorderSiblingsInput,
+  ReparentInput,
   UpdateBeatInput,
+  UpdateChapterFolderInput,
   UpdateChapterInput,
   UpdateEntityInput
 } from '../../shared/project-types'
@@ -24,7 +30,7 @@ function handle<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * 注册项目/节点/实体相关 IPC
+ * 注册项目/节点/实体/文章文件夹相关 IPC
  */
 export function registerProjectIpc(projectService: ProjectService): void {
   ipcMain.handle('library:getRoot', () => handle(() => projectService.getLibraryRoot()))
@@ -64,7 +70,7 @@ export function registerProjectIpc(projectService: ProjectService): void {
     })
   })
 
-  // 节点（扁平）
+  // 节点（树）
   ipcMain.handle('beat:create', (_e, projectId: string, input: CreateBeatInput) =>
     handle(() => projectService.createBeat(String(projectId), input))
   )
@@ -83,7 +89,19 @@ export function registerProjectIpc(projectService: ProjectService): void {
     handle(() => projectService.reorderBeats(String(projectId), input))
   )
 
-  // 实体
+  ipcMain.handle(
+    'beat:reorderSiblings',
+    (_e, projectId: string, input: ReorderSiblingsInput) =>
+      handle(() => projectService.reorderBeatSiblings(String(projectId), input))
+  )
+
+  ipcMain.handle(
+    'beat:reparent',
+    (_e, projectId: string, beatId: string, input: ReparentInput) =>
+      handle(() => projectService.reparentBeat(String(projectId), String(beatId), input))
+  )
+
+  // 实体（树）
   ipcMain.handle('entity:create', (_e, projectId: string, input: CreateEntityInput) =>
     handle(() => projectService.createEntity(String(projectId), input))
   )
@@ -102,7 +120,19 @@ export function registerProjectIpc(projectService: ProjectService): void {
     handle(() => projectService.reorderEntities(String(projectId), orderedIds))
   )
 
-  // 章节
+  ipcMain.handle(
+    'entity:reorderSiblings',
+    (_e, projectId: string, input: ReorderSiblingsInput) =>
+      handle(() => projectService.reorderEntitySiblings(String(projectId), input))
+  )
+
+  ipcMain.handle(
+    'entity:reparent',
+    (_e, projectId: string, entityId: string, input: ReparentInput) =>
+      handle(() => projectService.reparentEntity(String(projectId), String(entityId), input))
+  )
+
+  // 文章
   ipcMain.handle('chapter:create', (_e, projectId: string, input: CreateChapterInput) =>
     handle(() => projectService.createChapter(String(projectId), input))
   )
@@ -123,5 +153,42 @@ export function registerProjectIpc(projectService: ProjectService): void {
 
   ipcMain.handle('chapter:reorder', (_e, projectId: string, orderedIds: string[]) =>
     handle(() => projectService.reorderChapters(String(projectId), orderedIds))
+  )
+
+  ipcMain.handle(
+    'chapter:reorderInFolder',
+    (_e, projectId: string, input: ReorderChaptersInFolderInput) =>
+      handle(() => projectService.reorderChaptersInFolder(String(projectId), input))
+  )
+
+  ipcMain.handle(
+    'chapter:move',
+    (_e, projectId: string, chapterId: string, input: MoveChapterInput) =>
+      handle(() => projectService.moveChapter(String(projectId), String(chapterId), input))
+  )
+
+  // 文章文件夹
+  ipcMain.handle(
+    'chapterFolder:create',
+    (_e, projectId: string, input: CreateChapterFolderInput) =>
+      handle(() => projectService.createChapterFolder(String(projectId), input))
+  )
+
+  ipcMain.handle(
+    'chapterFolder:update',
+    (_e, projectId: string, folderId: string, patch: UpdateChapterFolderInput) =>
+      handle(() =>
+        projectService.updateChapterFolder(String(projectId), String(folderId), patch)
+      )
+  )
+
+  ipcMain.handle('chapterFolder:delete', (_e, projectId: string, folderId: string) =>
+    handle(() => projectService.deleteChapterFolder(String(projectId), String(folderId)))
+  )
+
+  ipcMain.handle(
+    'chapterFolder:reorder',
+    (_e, projectId: string, input: ReorderSiblingsInput) =>
+      handle(() => projectService.reorderChapterFolders(String(projectId), input))
   )
 }

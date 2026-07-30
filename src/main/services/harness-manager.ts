@@ -82,17 +82,24 @@ export class HarnessManager {
       .catch(() => [])
     const pins = readPinsFromBranch(branch)
 
-    const outlineLines = snap.index.beats.order
-      .map((id) => snap.beats[id])
-      .filter(Boolean)
-      .map((b) => {
+    const outlineLines: string[] = []
+    const walkOutline = (ids: string[], depth: number): void => {
+      for (const id of ids) {
+        const b = snap.beats[id]
+        if (!b) continue
         const summary = (b.content || '')
           .replace(/\[@([^\]]+)\]\((?:entity|beat):[^)]+\)/g, '@$1')
           .replace(/\s+/g, ' ')
           .trim()
           .slice(0, 60)
-        return `- [${b.status}] ${b.title || '未命名'} (${b.id})${summary ? ` — ${summary}` : ''}`
-      })
+        const pad = '  '.repeat(depth)
+        outlineLines.push(
+          `${pad}- [${b.status}] ${b.title || '未命名'} (${b.id})${summary ? ` — ${summary}` : ''}`
+        )
+        walkOutline(snap.index.beats.children[id] ?? [], depth + 1)
+      }
+    }
+    walkOutline(snap.index.beats.roots, 0)
 
     const pinBeatLines = pins.pinnedBeatIds
       .map((id) => snap.beats[id])

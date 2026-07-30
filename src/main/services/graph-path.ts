@@ -3,13 +3,14 @@
  * beats | beats/{id} | beat:{id}
  * entities | entities/{id} | entity:{id}
  * chapters | chapters/{id} | chapter:{id}
+ * folders | folders/{id} | folder:{id}   # 文章文件夹
  * outline
  */
 import type { GraphResourceType } from '../../shared/agent-tools'
 
 export type ParsedGraphPath =
-  | { kind: 'collection'; type: 'beat' | 'entity' | 'chapter' }
-  | { kind: 'item'; type: 'beat' | 'entity' | 'chapter'; id: string }
+  | { kind: 'collection'; type: 'beat' | 'entity' | 'chapter' | 'folder' }
+  | { kind: 'item'; type: 'beat' | 'entity' | 'chapter' | 'folder'; id: string }
   | { kind: 'outline' }
 
 export function parseGraphPath(raw: string): ParsedGraphPath {
@@ -25,7 +26,7 @@ export function parseGraphPath(raw: string): ParsedGraphPath {
   if (lower === 'outline') return { kind: 'outline' }
 
   // type:id 别名
-  const colon = input.match(/^(beat|entity|chapter|ent|chap)s?:(.+)$/i)
+  const colon = input.match(/^(beat|entity|chapter|folder|fold|ent|chap)s?:(.+)$/i)
   if (colon) {
     const t = normalizeType(colon[1])
     const id = colon[2].trim()
@@ -44,28 +45,39 @@ export function parseGraphPath(raw: string): ParsedGraphPath {
     if (!id) throw new Error(`无效 path：${raw}`)
     return { kind: 'item', type: t, id }
   }
-  throw new Error(`无法解析 path：${raw}。示例：beats、beats/{id}、beat:{id}、outline`)
+  throw new Error(
+    `无法解析 path：${raw}。示例：beats、beats/{id}、folders、folders/{id}、folder:{id}、outline`
+  )
 }
 
-function normalizeCollection(seg: string): 'beat' | 'entity' | 'chapter' {
+function normalizeCollection(seg: string): 'beat' | 'entity' | 'chapter' | 'folder' {
   const s = seg.toLowerCase()
   if (s === 'beat' || s === 'beats') return 'beat'
   if (s === 'entity' || s === 'entities' || s === 'ent' || s === 'ents') return 'entity'
   if (s === 'chapter' || s === 'chapters' || s === 'chap' || s === 'chaps') return 'chapter'
-  throw new Error(`未知集合：${seg}。请用 beats / entities / chapters / outline`)
+  if (s === 'folder' || s === 'folders' || s === 'fold' || s === 'folds') return 'folder'
+  throw new Error(`未知集合：${seg}。请用 beats / entities / chapters / folders / outline`)
 }
 
-function normalizeType(seg: string): 'beat' | 'entity' | 'chapter' {
+function normalizeType(seg: string): 'beat' | 'entity' | 'chapter' | 'folder' {
   const s = seg.toLowerCase()
   if (s.startsWith('beat')) return 'beat'
   if (s.startsWith('ent')) return 'entity'
   if (s.startsWith('chap')) return 'chapter'
+  if (s.startsWith('fold')) return 'folder'
   throw new Error(`未知类型：${seg}`)
 }
 
 export function formatItemPath(type: GraphResourceType, id: string): string {
   if (type === 'outline') return 'outline'
-  const plural = type === 'beat' ? 'beats' : type === 'entity' ? 'entities' : 'chapters'
+  const plural =
+    type === 'beat'
+      ? 'beats'
+      : type === 'entity'
+        ? 'entities'
+        : type === 'folder'
+          ? 'folders'
+          : 'chapters'
   return `${plural}/${id}`
 }
 
