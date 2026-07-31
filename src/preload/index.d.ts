@@ -10,6 +10,7 @@ import type {
 } from '../shared/llm-settings'
 import type {
   AgentCancelTurnInput,
+  AgentRunningRun,
   AgentStartTurnInput,
   AgentStartTurnResult,
   CreateSessionInput,
@@ -189,6 +190,10 @@ export interface AgentApi {
   steer: (input: import('../shared/ui-chat').AgentSteerInput) => Promise<void>
   followUp: (input: import('../shared/ui-chat').AgentFollowUpInput) => Promise<void>
   listTools: () => Promise<AgentToolDefinition[]>
+  getRunning: (input?: {
+    projectId?: string
+    sessionId?: string
+  }) => Promise<AgentRunningRun[]>
   onEvent: (handler: (event: AgentStreamEvent) => void) => () => void
 }
 

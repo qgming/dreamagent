@@ -1,4 +1,4 @@
-import { ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { ipcMain } from 'electron'
 import { AGENT_TOOL_DEFINITIONS } from '../../shared/agent-tools'
 import type {
   AgentCancelTurnInput,
@@ -21,14 +21,12 @@ function handle<T>(fn: () => Promise<T>): Promise<T> {
  * Agent IPC：startTurn / regenerate / cancel / steer / followUp / listTools
  */
 export function registerAgentIpc(runner: AgentRunner): void {
-  ipcMain.handle('agent:startTurn', (event: IpcMainInvokeEvent, input: AgentStartTurnInput) =>
-    handle(() => runner.startTurn(input, event.sender))
+  ipcMain.handle('agent:startTurn', (_e, input: AgentStartTurnInput) =>
+    handle(() => runner.startTurn(input))
   )
 
-  ipcMain.handle(
-    'agent:regenerateTurn',
-    (event: IpcMainInvokeEvent, input: AgentRegenerateTurnInput) =>
-      handle(() => runner.regenerateTurn(input, event.sender))
+  ipcMain.handle('agent:regenerateTurn', (_e, input: AgentRegenerateTurnInput) =>
+    handle(() => runner.regenerateTurn(input))
   )
 
   ipcMain.handle('agent:cancelTurn', (_e, input: AgentCancelTurnInput) =>
@@ -41,6 +39,12 @@ export function registerAgentIpc(runner: AgentRunner): void {
 
   ipcMain.handle('agent:followUp', (_e, input: AgentFollowUpInput) =>
     handle(() => runner.followUp(input))
+  )
+
+  ipcMain.handle(
+    'agent:getRunning',
+    (_e, input?: { projectId?: string; sessionId?: string }) =>
+      runner.listRunningRuns(input)
   )
 
   ipcMain.handle('agent:listTools', () => AGENT_TOOL_DEFINITIONS)

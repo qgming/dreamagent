@@ -223,6 +223,27 @@ function applySelectedModelToSessionUsage(
   })
 }
 
+/**
+ * 主进程若仍有该会话的回合在跑（用户离开创作页后返回 / 页面重载），
+ * 恢复“运行中”状态，让流式事件与取消/插话控制继续可用。
+ * 运行本身始终在主进程执行，不依赖本页面是否一直挂载。
+ */
+async function restoreRunningRun(
+  set: SetState,
+  projectId: string,
+  sessionId: string
+): Promise<void> {
+  try {
+    const runs = await window.api.agent.getRunning({ projectId, sessionId })
+    const run = runs[0]
+    if (run) {
+      set({ sending: true, runId: run.runId, error: null })
+    }
+  } catch {
+    // 主进程无运行状态时忽略
+  }
+}
+
 let unsubAgent: (() => void) | null = null
 
 function ensureAgentSubscription(
@@ -637,6 +658,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
           compactionState: 'idle',
           compactionError: null
         })
+        // 离开创作页后返回：若该会话仍在后台运行，恢复“运行中”状态
+        await restoreRunningRun(set, projectId, view.id)
       } catch (error) {
         set({ error: error instanceof Error ? error.message : String(error) })
       }
@@ -714,6 +737,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         compactionError: null
       })
       applySelectedModelToSessionUsage(get, set)
+      // 若该会话仍在后台运行（离开页面后返回），恢复“运行中”状态
+      await restoreRunningRun(set, projectId, view.id)
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
     }

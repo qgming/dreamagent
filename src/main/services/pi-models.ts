@@ -134,7 +134,9 @@ export class PiModelsService {
             input: ['text'],
             cost: info.price,
             contextWindow: m.contextWindow ?? info.contextWindow,
-            maxTokens: Math.min(m.maxTokens ?? info.maxOutputTokens, 32768)
+            // 输出上限取 models.dev 的真实上限（不再硬编码 32k）；pi-ai 内部还会按
+            // contextWindow - 输入 二次钳制，避免超出窗口。
+            maxTokens: m.maxTokens ?? info.maxOutputTokens
           }
         })
 
@@ -178,7 +180,7 @@ export class PiModelsService {
         input: ['text'],
         cost: info.price,
         contextWindow: selection.contextWindow,
-        maxTokens: Math.min(selection.maxTokens, 32768)
+        maxTokens: selection.maxTokens
       }
     }
 

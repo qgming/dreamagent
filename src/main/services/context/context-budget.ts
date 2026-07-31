@@ -103,7 +103,9 @@ function clampOutputReserve(
   configured: number,
   maxOutput: number
 ): number {
-  const cap = Math.min(maxOutput, Math.min(32768, Math.floor(C * 0.2)))
+  // 输出预留与模型真实输出上限对齐（不再硬编码 32k）；
+  // 同时不超过上下文窗口的一半，避免小窗口被输出预留占满。
+  const cap = Math.min(maxOutput, Math.floor(C * 0.5))
   const target = Math.max(2048, Math.min(configured || 2048, cap))
   return Math.min(target, Math.max(1, C - 2048))
 }

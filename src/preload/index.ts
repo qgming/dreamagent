@@ -11,6 +11,7 @@ import type {
 } from '../shared/llm-settings'
 import type {
   AgentCancelTurnInput,
+  AgentRunningRun,
   AgentStartTurnInput,
   AgentStartTurnResult,
   CreateSessionInput,
@@ -255,6 +256,9 @@ const agentApi = {
   followUp: (input: import('../shared/ui-chat').AgentFollowUpInput): Promise<void> =>
     ipcRenderer.invoke('agent:followUp', input),
   listTools: (): Promise<AgentToolDefinition[]> => ipcRenderer.invoke('agent:listTools'),
+  getRunning: (
+    input?: { projectId?: string; sessionId?: string }
+  ): Promise<AgentRunningRun[]> => ipcRenderer.invoke('agent:getRunning', input),
   onEvent: (handler: (event: AgentStreamEvent) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, event: AgentStreamEvent): void => {
       handler(event)

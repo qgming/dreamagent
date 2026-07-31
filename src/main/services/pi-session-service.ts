@@ -36,6 +36,7 @@ import {
   type SessionContextUsage,
   type TokenUsageBreakdown
 } from '../../shared/context-usage'
+import { computeBudget } from './context/context-budget'
 import type { ProjectActivityDay } from '../../shared/activity'
 import type { ActivityLedgerService } from './activity-ledger'
 import {
@@ -221,6 +222,16 @@ export class PiSessionService {
 
     const compactions = entries.filter((entry) => entry.type === 'compaction')
     const lastCompaction = compactions[compactions.length - 1]
+    // 输出预留随模型真实输出上限变大后，自动压缩阈值收紧到“输入预算”以内，
+    // 避免输入 + 输出同时逼近窗口导致 Provider 拒绝请求。
+    const budget = computeBudget({
+      contextWindow: model.contextWindow,
+      maxOutputTokens: model.maxOutputTokens
+    })
+    const effectiveThreshold =
+      model.contextWindow > 0
+        ? Math.min(AUTO_COMPACT_RATIO, budget.inputBudget / model.contextWindow)
+        : AUTO_COMPACT_RATIO
     return {
       model,
       contextTokens,
@@ -229,7 +240,7 @@ export class PiSessionService {
         model.contextWindow > 0
           ? Math.min((providerPayloadTokens / model.contextWindow) * 100, 100)
           : 0,
-      autoCompactThreshold: AUTO_COMPACT_RATIO,
+      autoCompactThreshold: effectiveThreshold,
       estimated,
       cumulative,
       compactionCount: compactions.length,

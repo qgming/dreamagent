@@ -1,13 +1,14 @@
 /**
  * 真实 Agent Runner：AgentHarness + 流式事件
  */
-import type { WebContents } from 'electron'
+import { BrowserWindow } from 'electron'
 import { createId } from '../../shared/ids'
 import type { AgentStreamEvent } from '../../shared/agent-events'
 import type {
   AgentCancelTurnInput,
   AgentFollowUpInput,
   AgentRegenerateTurnInput,
+  AgentRunningRun,
   AgentStartTurnInput,
   AgentStartTurnResult,
   AgentSteerInput,
@@ -33,7 +34,6 @@ interface ActiveRun {
   runId: string
   projectId: string
   sessionId: string
-  sender: WebContents
   aborted: boolean
   selection?: HarnessSelection
   /** 排队文案预览（followUp） */
@@ -87,9 +87,21 @@ export class AgentRunner {
     return `${projectId}::${sessionId}`
   }
 
-  private emit(sender: WebContents, event: AgentStreamEvent): void {
-    if (sender.isDestroyed()) return
-    sender.send('agent:event', event)
+  /**
+   * 广播到所有存活窗口的渲染进程。
+   * 运行不绑定发起页面：用户离开创作页 / 页面重载后，任意页面仍能收到事件。
+   */
+  private emit(event: AgentStreamEvent): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue
+      const wc = win.webContents
+      if (wc.isDestroyed()) continue
+      try {
+        wc.send('agent:event', event)
+      } catch {
+        // 页面正在重载/销毁时静默跳过
+      }
+    }
   }
 
   private async compactIfNeeded(
@@ -97,7 +109,7 @@ export class AgentRunner {
     harness: DreamHarness,
     estimatedInputTokens: number
   ): Promise<SessionContextUsage> {
-    const { projectId, sessionId, runId, sender } = run
+    const { projectId, sessionId, runId } = run
     const usage = await this.sessions.getUsage(projectId, sessionId, run.selection, {
       estimatedInputTokens
     })
@@ -106,7 +118,7 @@ export class AgentRunner {
     const estimated =
       estimatedInputTokens > 0 ? estimatedInputTokens : usage.providerPayloadTokens
     if (estimated < threshold) {
-      this.emit(sender, {
+      this.emit({
         type: 'context_update',
         projectId,
         sessionId,
@@ -117,7 +129,7 @@ export class AgentRunner {
       return usage
     }
 
-    this.emit(sender, {
+    this.emit({
       type: 'context_update',
       projectId,
       sessionId,
@@ -162,7 +174,7 @@ export class AgentRunner {
         sessionId,
         run.selection
       )
-      this.emit(sender, {
+      this.emit({
         type: 'context_update',
         projectId,
         sessionId,
@@ -177,7 +189,7 @@ export class AgentRunner {
       const latestUsage = await this.sessions
         .getUsage(projectId, sessionId, run.selection)
         .catch(() => usage)
-      this.emit(sender, {
+      this.emit({
         type: 'context_update',
         projectId,
         sessionId,
@@ -190,10 +202,7 @@ export class AgentRunner {
     }
   }
 
-  async startTurn(
-    input: AgentStartTurnInput,
-    sender: WebContents
-  ): Promise<AgentStartTurnResult> {
+  async startTurn(input: AgentStartTurnInput): Promise<AgentStartTurnResult> {
     const { projectId, sessionId } = input
     const userMessage = (input.userMessage ?? '').trim()
     if (!userMessage) throw new Error('消息不能为空')
@@ -207,7 +216,6 @@ export class AgentRunner {
     const run = this.beginRun(
       projectId,
       sessionId,
-      sender,
       selection,
       input.contextRefs,
       input.activeDocument
@@ -224,10 +232,7 @@ export class AgentRunner {
   /**
    * 重新生成：navigateTree 回到用户消息，截断其后分支，再 prompt 同一条用户文本
    */
-  async regenerateTurn(
-    input: AgentRegenerateTurnInput,
-    sender: WebContents
-  ): Promise<AgentStartTurnResult> {
+  async regenerateTurn(input: AgentRegenerateTurnInput): Promise<AgentStartTurnResult> {
     const { projectId, sessionId, userMessageId } = input
     if (!userMessageId?.trim()) throw new Error('缺少用户消息 id')
 
@@ -237,7 +242,7 @@ export class AgentRunner {
       modelId: input.modelId,
       thinkingLevel: input.thinkingLevel
     }
-    const run = this.beginRun(projectId, sessionId, sender, selection)
+    const run = this.beginRun(projectId, sessionId, selection)
 
     void this.executeRegenerate(run, userMessageId.trim()).catch((error) => {
       this.handleRunError(run, error)
@@ -264,7 +269,7 @@ export class AgentRunner {
     )
     await harness.steer(text)
     run.steerCount += 1
-    this.emit(run.sender, {
+    this.emit({
       type: 'queue_update',
       projectId: run.projectId,
       sessionId: run.sessionId,
@@ -274,7 +279,7 @@ export class AgentRunner {
       followUpPreview: run.followUpPreview
     })
     // 乐观用户气泡
-    this.emit(run.sender, {
+    this.emit({
       type: 'user_message',
       projectId: run.projectId,
       sessionId: run.sessionId,
@@ -308,7 +313,7 @@ export class AgentRunner {
     await harness.followUp(text)
     run.followUpCount += 1
     run.followUpPreview = text.slice(0, 80)
-    this.emit(run.sender, {
+    this.emit({
       type: 'queue_update',
       projectId: run.projectId,
       sessionId: run.sessionId,
@@ -322,7 +327,6 @@ export class AgentRunner {
   private beginRun(
     projectId: string,
     sessionId: string,
-    sender: WebContents,
     selection?: HarnessSelection,
     contextRefs?: UiContextRef[],
     activeDocument?: UiActiveDocumentRef
@@ -339,7 +343,6 @@ export class AgentRunner {
       runId,
       projectId,
       sessionId,
-      sender,
       aborted: false,
       selection,
       followUpCount: 0,
@@ -356,7 +359,7 @@ export class AgentRunner {
     console.error('[agent-runner]', message)
     const key = this.sessionKey(run.projectId, run.sessionId)
     if (!run.aborted) {
-      this.emit(run.sender, {
+      this.emit({
         type: 'error',
         projectId: run.projectId,
         sessionId: run.sessionId,
@@ -368,10 +371,10 @@ export class AgentRunner {
   }
 
   private async executeRegenerate(run: ActiveRun, userMessageId: string): Promise<void> {
-    const { projectId, sessionId, runId, sender } = run
+    const { projectId, sessionId, runId } = run
     const key = this.sessionKey(projectId, sessionId)
 
-    this.emit(sender, { type: 'turn_start', projectId, sessionId, runId })
+    this.emit({ type: 'turn_start', projectId, sessionId, runId })
 
     const pendingCompaction = this.compactions.get(key)
     if (pendingCompaction) await pendingCompaction
@@ -413,7 +416,7 @@ export class AgentRunner {
       status: 'complete'
     }
 
-    this.emit(sender, {
+    this.emit({
       type: 'branch_reset',
       projectId,
       sessionId,
@@ -422,7 +425,7 @@ export class AgentRunner {
     })
 
     if (run.aborted) {
-      this.emit(sender, { type: 'aborted', projectId, sessionId, runId })
+      this.emit({ type: 'aborted', projectId, sessionId, runId })
       if (this.active.get(key)?.runId === runId) this.active.delete(key)
       return
     }
@@ -445,12 +448,37 @@ export class AgentRunner {
     if (input.runId && input.runId !== run.runId) return
     run.aborted = true
     this.harnesses.abortSession(input.projectId, input.sessionId)
-    this.emit(run.sender, {
+    this.emit({
       type: 'aborted',
       projectId: run.projectId,
       sessionId: run.sessionId,
       runId: run.runId
     })
+  }
+
+  /**
+   * 返回仍在运行的回合（供页面重新挂载 / 离开创作页后恢复“运行中”状态）。
+   * 运行本身始终在主进程执行，不依赖发起页面是否存活。
+   */
+  listRunningRuns(query?: {
+    projectId?: string
+    sessionId?: string
+  }): AgentRunningRun[] {
+    const out: AgentRunningRun[] = []
+    for (const run of this.active.values()) {
+      if (run.aborted) continue
+      if (query?.projectId && run.projectId !== query.projectId) continue
+      if (query?.sessionId && run.sessionId !== query.sessionId) continue
+      out.push({
+        projectId: run.projectId,
+        sessionId: run.sessionId,
+        runId: run.runId,
+        providerId: run.selection?.providerId,
+        modelId: run.selection?.modelId,
+        thinkingLevel: run.selection?.thinkingLevel
+      })
+    }
+    return out
   }
 
   private async executeTurn(
@@ -462,7 +490,7 @@ export class AgentRunner {
       harness?: DreamHarness
     }
   ): Promise<void> {
-    const { projectId, sessionId, runId, sender } = run
+    const { projectId, sessionId, runId } = run
     const key = this.sessionKey(projectId, sessionId)
 
     const pendingCompaction = this.compactions.get(key)
@@ -470,7 +498,7 @@ export class AgentRunner {
 
     // regenerate 路径已发过 turn_start
     if (!options?.harnessAlreadyCreated) {
-      this.emit(sender, { type: 'turn_start', projectId, sessionId, runId })
+      this.emit({ type: 'turn_start', projectId, sessionId, runId })
     }
 
     // 乐观用户消息（真实落盘由 harness.prompt 完成）
@@ -482,7 +510,7 @@ export class AgentRunner {
         parts: [{ type: 'text', text: userText }],
         status: 'complete'
       }
-      this.emit(sender, {
+      this.emit({
         type: 'user_message',
         projectId,
         sessionId,
@@ -536,7 +564,7 @@ export class AgentRunner {
       const delta = textBuffer
       textBuffer = ''
       lastTextFlush = now
-      this.emit(sender, {
+      this.emit({
         type: 'text_delta',
         projectId,
         sessionId,
@@ -553,7 +581,7 @@ export class AgentRunner {
       const delta = thinkingBuffer
       thinkingBuffer = ''
       lastThinkingFlush = now
-      this.emit(sender, {
+      this.emit({
         type: 'thinking_delta',
         projectId,
         sessionId,
@@ -571,7 +599,7 @@ export class AgentRunner {
     const ensureAssistantStart = (): void => {
       if (assistantStarted) return
       assistantStarted = true
-      this.emit(sender, {
+      this.emit({
         type: 'assistant_start',
         projectId,
         sessionId,
@@ -618,7 +646,7 @@ export class AgentRunner {
               sessionId,
               run.selection
             )
-            this.emit(sender, {
+            this.emit({
               type: 'context_update',
               projectId,
               sessionId,
@@ -642,7 +670,7 @@ export class AgentRunner {
             status: 'running'
           }
           toolParts.set(event.toolCallId, tool)
-          this.emit(sender, {
+          this.emit({
             type: 'tool_start',
             projectId,
             sessionId,
@@ -710,7 +738,7 @@ export class AgentRunner {
             }
           }
 
-          this.emit(sender, {
+          this.emit({
             type: 'tool_end',
             projectId,
             sessionId,
@@ -727,7 +755,7 @@ export class AgentRunner {
             this.harnesses.invalidateProjectSnapshot(projectId)
             try {
               const snapshot = await this.projects.openProject(projectId)
-              this.emit(sender, {
+              this.emit({
                 type: 'snapshot',
                 projectId,
                 sessionId,
@@ -760,7 +788,7 @@ export class AgentRunner {
       flushAll(true)
 
       if (run.aborted) {
-        this.emit(sender, { type: 'aborted', projectId, sessionId, runId })
+        this.emit({ type: 'aborted', projectId, sessionId, runId })
         return
       }
 
@@ -771,7 +799,7 @@ export class AgentRunner {
           : null
 
       if (stopReason === 'aborted') {
-        this.emit(sender, { type: 'aborted', projectId, sessionId, runId })
+        this.emit({ type: 'aborted', projectId, sessionId, runId })
         return
       }
 
@@ -779,7 +807,7 @@ export class AgentRunner {
         // 尽量用 session 投影校准 UI（不发 turn_done，避免前端清掉 error）
         try {
           const sessionView = await this.sessions.open(projectId, sessionId)
-          this.emit(sender, {
+          this.emit({
             type: 'assistant_end',
             projectId,
             sessionId,
@@ -797,7 +825,7 @@ export class AgentRunner {
         } catch {
           // ignore
         }
-        this.emit(sender, {
+        this.emit({
           type: 'error',
           projectId,
           sessionId,
@@ -815,7 +843,7 @@ export class AgentRunner {
       // 从 session 最后一条 assistant 作为 assistant_end
       const lastAssistant = [...sessionView.messages].reverse().find((m) => m.role === 'assistant')
       if (lastAssistant) {
-        this.emit(sender, {
+        this.emit({
           type: 'assistant_end',
           projectId,
           sessionId,
@@ -824,7 +852,7 @@ export class AgentRunner {
         })
       }
 
-      this.emit(sender, {
+      this.emit({
         type: 'turn_done',
         projectId,
         sessionId,
@@ -852,10 +880,10 @@ export class AgentRunner {
     } catch (error) {
       flushAll(true)
       if (run.aborted) {
-        this.emit(sender, { type: 'aborted', projectId, sessionId, runId })
+        this.emit({ type: 'aborted', projectId, sessionId, runId })
       } else {
         const message = error instanceof Error ? error.message : String(error)
-        this.emit(sender, { type: 'error', projectId, sessionId, runId, message })
+        this.emit({ type: 'error', projectId, sessionId, runId, message })
       }
     } finally {
       this.harnesses.endRequest(projectId, sessionId)

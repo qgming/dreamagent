@@ -124,6 +124,16 @@ export interface AgentStartTurnResult {
   runId: string
 }
 
+/** 主进程仍在运行的 Agent 回合（用于页面重新挂载后恢复运行状态） */
+export interface AgentRunningRun {
+  projectId: string
+  sessionId: string
+  runId: string
+  providerId?: string
+  modelId?: string
+  thinkingLevel?: import('./llm-settings').LlmThinkingLevel
+}
+
 /** 重新生成：以某条用户消息为锚点，截断其后分支并再跑一轮 */
 export interface AgentRegenerateTurnInput {
   projectId: string
