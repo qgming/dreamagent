@@ -16,6 +16,7 @@ import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node'
 import { createId } from '../../shared/ids'
 import type {
   CreateSessionInput,
+  SessionTokenUsageDay,
   SessionSummary,
   SessionView,
   UpdateSessionInput
@@ -297,6 +298,48 @@ export class PiSessionService {
     // 最近更新优先
     summaries.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
     return summaries
+  }
+
+  /** 全部会话的真实模型用量，按 entry 发生日期汇总。 */
+  async tokenActivity(projectId: string): Promise<SessionTokenUsageDay[]> {
+    const rt = await this.runtimeFor(projectId)
+    const metas = await rt.repo.list({ cwd: '.' }).catch((error) => {
+      console.warn('[pi-session] tokenActivity list 失败', error)
+      return []
+    })
+    const byId = new Map<string, (typeof metas)[number]>()
+    for (const meta of metas) {
+      const previous = byId.get(meta.id)
+      if (!previous || (meta.path || '') > (previous.path || '')) {
+        byId.set(meta.id, meta)
+      }
+    }
+
+    const totals = new Map<string, number>()
+    for (const meta of byId.values()) {
+      try {
+        const session = await rt.repo.open(meta)
+        const entries = await session.getEntries()
+        for (const entry of entries) {
+          const usage = this.usageFromEntry(entry)
+          if (!usage?.totalTokens) continue
+          const date = new Date(entry.timestamp)
+          if (Number.isNaN(date.getTime())) continue
+          const key = [
+            date.getFullYear(),
+            String(date.getMonth() + 1).padStart(2, '0'),
+            String(date.getDate()).padStart(2, '0')
+          ].join('-')
+          totals.set(key, (totals.get(key) ?? 0) + usage.totalTokens)
+        }
+      } catch (error) {
+        console.warn('[pi-session] tokenActivity 跳过损坏会话', meta.id, error)
+      }
+    }
+
+    return [...totals.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, tokens]) => ({ date, tokens }))
   }
 
   async create(projectId: string, input: CreateSessionInput = {}): Promise<SessionView> {

@@ -29,6 +29,7 @@ import {
   type ReactNode
 } from 'react'
 import { cn } from '@/lib/utils'
+import { TooltipHint } from '@/components/ui/tooltip'
 
 type SortableItemContextValue = {
   attributes: DraggableAttributes
@@ -141,17 +142,18 @@ export function SortableHandle({
   if (!ctx) throw new Error('SortableHandle 必须在 SortableItem 内使用')
 
   return (
-    <span
-      className={cn(
-        'flex touch-none cursor-grab items-center justify-center active:cursor-grabbing',
-        className
-      )}
-      ref={ctx.setActivatorNodeRef}
-      title={title}
-      {...ctx.attributes}
-      {...ctx.listeners}
-    >
-      {children}
-    </span>
+    <TooltipHint label={title}>
+      <span
+        className={cn(
+          'flex touch-none cursor-grab items-center justify-center active:cursor-grabbing',
+          className
+        )}
+        ref={ctx.setActivatorNodeRef}
+        {...ctx.attributes}
+        {...ctx.listeners}
+      >
+        {children}
+      </span>
+    </TooltipHint>
   )
 }

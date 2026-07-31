@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { TooltipHint } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 /**
@@ -19,17 +20,18 @@ export function IconButton({
   onClick?: () => void
 }): React.JSX.Element {
   return (
-    <Button
-      className={cn('text-muted-foreground hover:text-foreground', className)}
-      disabled={disabled}
-      onClick={onClick}
-      size="icon-sm"
-      title={label}
-      type="button"
-      variant="ghost"
-    >
-      {children}
-      <span className="sr-only">{label}</span>
-    </Button>
+    <TooltipHint label={label}>
+      <Button
+        className={cn('text-muted-foreground hover:text-foreground', className)}
+        disabled={disabled}
+        onClick={onClick}
+        size="icon-sm"
+        type="button"
+        variant="ghost"
+      >
+        {children}
+        <span className="sr-only">{label}</span>
+      </Button>
+    </TooltipHint>
   )
 }

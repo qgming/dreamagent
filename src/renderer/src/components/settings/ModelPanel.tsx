@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { PageTitle, SettingDropdown, SettingRow } from './settings-shared'
 import { cn } from '@/lib/utils'
+import { TooltipHint } from '@/components/ui/tooltip'
 import type {
   LlmModelConfig,
   LlmModelModality,
@@ -682,21 +683,22 @@ function ProviderCard({
           <div className="pt-2">
             <div className="mb-2 flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-muted-foreground">模型列表</p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={fetching || !baseURL.trim()}
-                onClick={() => void fetchRemote()}
-                title="请求 Base URL /models 并选择保存"
-              >
-                {fetching ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="size-3.5" />
-                )}
-                从云端拉取
-              </Button>
+              <TooltipHint label="请求 Base URL /models 并选择保存">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={fetching || !baseURL.trim()}
+                  onClick={() => void fetchRemote()}
+                >
+                  {fetching ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-3.5" />
+                  )}
+                  从云端拉取
+                </Button>
+              </TooltipHint>
             </div>
             <div className="space-y-1.5">
               {provider.models.length === 0 ? (
@@ -733,14 +735,15 @@ function ProviderCard({
                         toolCall={m.toolCall}
                       />
                     </div>
-                    <button
-                      type="button"
-                      className="mt-0.5 shrink-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeModel(m.id)}
-                      title="移除"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
+                    <TooltipHint label="移除">
+                      <button
+                        type="button"
+                        className="mt-0.5 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeModel(m.id)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </TooltipHint>
                   </div>
                 ))
               )}

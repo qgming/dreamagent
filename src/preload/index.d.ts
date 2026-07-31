@@ -14,6 +14,7 @@ import type {
   AgentStartTurnResult,
   CreateSessionInput,
   SessionSummary,
+  SessionTokenUsageDay,
   SessionView,
   UpdateSessionInput
 } from '../shared/ui-chat'
@@ -156,6 +157,7 @@ export interface ProjectApi {
 
 export interface SessionApi {
   list: (projectId: string) => Promise<SessionSummary[]>
+  tokenActivity: (projectId: string) => Promise<SessionTokenUsageDay[]>
   create: (projectId: string, input?: CreateSessionInput) => Promise<SessionView>
   open: (projectId: string, sessionId: string) => Promise<SessionView>
   update: (

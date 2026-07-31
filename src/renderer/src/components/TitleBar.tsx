@@ -17,6 +17,7 @@ import {
   runWindowAction
 } from '@/lib/electron-window'
 import { cn } from '@/lib/utils'
+import { TooltipHint } from '@/components/ui/tooltip'
 
 interface TitleBarProps {
   /** 侧边栏是否收起 */
@@ -153,17 +154,18 @@ function WindowButton({
   onClick: () => void
 }): React.JSX.Element {
   return (
-    <button
-      className={cn(
-        'flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-        close && 'hover:bg-destructive hover:text-white'
-      )}
-      onClick={onClick}
-      title={label}
-      type="button"
-    >
-      {children}
-      <span className="sr-only">{label}</span>
-    </button>
+    <TooltipHint label={label} side="bottom">
+      <button
+        className={cn(
+          'flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+          close && 'hover:bg-destructive hover:text-white'
+        )}
+        onClick={onClick}
+        type="button"
+      >
+        {children}
+        <span className="sr-only">{label}</span>
+      </button>
+    </TooltipHint>
   )
 }

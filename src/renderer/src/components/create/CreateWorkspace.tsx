@@ -54,6 +54,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
 import { cn } from '@/lib/utils'
+import { TooltipHint } from '@/components/ui/tooltip'
 import {
   arrayMove,
   BEAT_STATUS_DOT_CLASS,
@@ -542,17 +543,18 @@ function ConversationListRow({
         {summary.title || '新对话'}
       </button>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          className={cn(
-            'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none',
-            'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
-            'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
-          )}
-          title="更多"
-          type="button"
-        >
-          <MoreHorizontal className="size-3.5" />
-        </DropdownMenuTrigger>
+        <TooltipHint label="更多">
+          <DropdownMenuTrigger
+            className={cn(
+              'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none',
+              'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
+              'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
+            )}
+            type="button"
+          >
+            <MoreHorizontal className="size-3.5" />
+          </DropdownMenuTrigger>
+        </TooltipHint>
         <DropdownMenuContent align="end" side="bottom">
           <DropdownMenuItem onSelect={handleDelete} variant="destructive">
             <Trash2 className="size-3.5" />
@@ -805,17 +807,18 @@ function ArticleListRow({
         {article.title || '未命名文章'}
       </button>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          className={cn(
-            'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none',
-            'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
-            'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
-          )}
-          title="更多"
-          type="button"
-        >
-          <MoreHorizontal className="size-3.5" />
-        </DropdownMenuTrigger>
+        <TooltipHint label="更多">
+          <DropdownMenuTrigger
+            className={cn(
+              'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none',
+              'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
+              'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
+            )}
+            type="button"
+          >
+            <MoreHorizontal className="size-3.5" />
+          </DropdownMenuTrigger>
+        </TooltipHint>
         <DropdownMenuContent align="end" side="bottom">
           <DropdownMenuItem onSelect={handleToggleStatus}>
             {article.status === 'final' ? (
@@ -838,13 +841,14 @@ function ArticleListRow({
         </DropdownMenuContent>
       </DropdownMenu>
       {/* 最右侧状态点，与节点/实体一致 */}
-      <span
-        className={cn(
-          'size-2 shrink-0 rounded-full',
-          CHAPTER_STATUS_DOT_CLASS[article.status]
-        )}
-        title={CHAPTER_STATUS_LABELS[article.status]}
-      />
+      <TooltipHint label={CHAPTER_STATUS_LABELS[article.status]}>
+        <span
+          className={cn(
+            'size-2 shrink-0 rounded-full',
+            CHAPTER_STATUS_DOT_CLASS[article.status]
+          )}
+        />
+      </TooltipHint>
     </TreeRowShell>
   )
 }
@@ -877,18 +881,18 @@ function SessionTodoPanel({ todos }: { todos: TodoItem[] }): React.JSX.Element {
       </div>
       <ul className="max-h-36 space-y-0.5 overflow-y-auto app-scrollbar">
         {todos.map((t) => (
-          <li
-            key={t.id}
-            className={cn(
-              'flex items-start gap-1.5 rounded-md px-2 py-1 text-[11px] leading-snug',
-              t.status === 'completed' && 'opacity-60',
-              t.status === 'cancelled' && 'opacity-40 line-through'
-            )}
-            title={`${t.id} · ${t.status}`}
-          >
-            {sessionTodoIcon(t.status)}
-            <span className="min-w-0 flex-1 truncate">{t.content}</span>
-          </li>
+          <TooltipHint key={t.id} label={`${t.id} · ${t.status}`} side="right">
+            <li
+              className={cn(
+                'flex items-start gap-1.5 rounded-md px-2 py-1 text-[11px] leading-snug',
+                t.status === 'completed' && 'opacity-60',
+                t.status === 'cancelled' && 'opacity-40 line-through'
+              )}
+            >
+              {sessionTodoIcon(t.status)}
+              <span className="min-w-0 flex-1 truncate">{t.content}</span>
+            </li>
+          </TooltipHint>
         ))}
       </ul>
     </div>
@@ -997,12 +1001,11 @@ function SourceRow({
       >
         {label}
       </button>
-      <span
-        className={cn('size-2 shrink-0 rounded-full', dotClass)}
-        title={
-          hasChildren ? `${statusTitle} · 点击标题可展开/收起子项` : statusTitle
-        }
-      />
+      <TooltipHint
+        label={hasChildren ? `${statusTitle} · 点击标题可展开/收起子项` : statusTitle}
+      >
+        <span className={cn('size-2 shrink-0 rounded-full', dotClass)} />
+      </TooltipHint>
     </div>
   )
 }
@@ -1092,14 +1095,15 @@ function PinnedChips(): React.JSX.Element {
           >
             @{p.label}
           </button>
-          <button
-            className="opacity-60 hover:opacity-100"
-            onClick={() => void (p.type === 'beat' ? unpinBeat(p.id) : unpinEntity(p.id))}
-            title="取消钉住"
-            type="button"
-          >
-            <X className="size-3" />
-          </button>
+          <TooltipHint label="取消钉住">
+            <button
+              className="opacity-60 hover:opacity-100"
+              onClick={() => void (p.type === 'beat' ? unpinBeat(p.id) : unpinEntity(p.id))}
+              type="button"
+            >
+              <X className="size-3" />
+            </button>
+          </TooltipHint>
         </span>
       ))}
     </div>

@@ -4,6 +4,7 @@ import { promises as fs } from 'fs'
 import {
   PROJECT_SCHEMA_VERSION,
   type ProjectMeta,
+  type ProjectIndex,
   type ProjectSummary
 } from '../../shared/project-types'
 import { ensureDir, listSubdirNames, pathExists, readJsonFile, writeJsonAtomic } from './fs-utils'
@@ -83,8 +84,10 @@ export class LibraryService {
 
     const beatsDir = path.join(dirPath, 'beats')
     const entitiesDir = path.join(dirPath, 'entities')
+    const indexPath = path.join(dirPath, 'index.json')
     let beatCount = 0
     let entityCount = 0
+    let chapterCount = 0
     try {
       const beatFiles = await fs.readdir(beatsDir)
       beatCount = beatFiles.filter((f) => f.endsWith('.json') && !f.startsWith('.')).length
@@ -97,6 +100,20 @@ export class LibraryService {
     } catch {
       // 忽略
     }
+    try {
+      const index = await readJsonFile<Partial<ProjectIndex>>(indexPath)
+      chapterCount = Array.isArray(index?.chapters?.order)
+        ? index.chapters.order.length
+        : Array.isArray(index?.chapters?.roots)
+          ? index.chapters.roots.length +
+            Object.values(index.chapters.byFolder ?? {}).reduce(
+              (sum, ids) => sum + (Array.isArray(ids) ? ids.length : 0),
+              0
+            )
+          : 0
+    } catch {
+      // 旧项目可能还没有文章索引
+    }
 
     return {
       id: meta.id,
@@ -107,7 +124,8 @@ export class LibraryService {
       updatedAt: meta.updatedAt,
       createdAt: meta.createdAt,
       beatCount,
-      entityCount
+      entityCount,
+      chapterCount
     }
   }
 

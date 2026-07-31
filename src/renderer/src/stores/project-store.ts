@@ -204,6 +204,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const prevId = get().activeProjectId
+      if (prevId !== projectId) {
+        const { useCreateStore } = await import('./create-store')
+        useCreateStore.getState().reset()
+      }
       const snap = await window.api.project.open(projectId)
       applySnapshot(set, get, snap)
       // 同步切视图：进创作立刻满宽出现，不做 transition 延迟
@@ -213,11 +217,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         selectedEntityId: snap.index.entities.order[0] ?? null,
         loading: false
       })
-      if (prevId !== projectId) {
-        void import('./create-store').then(({ useCreateStore }) => {
-          useCreateStore.getState().reset()
-        })
-      }
     } catch (error) {
       set({
         loading: false,

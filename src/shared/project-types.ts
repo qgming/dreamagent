@@ -209,6 +209,7 @@ export interface ProjectSummary {
   createdAt: string
   beatCount: number
   entityCount: number
+  chapterCount: number
 }
 
 export interface ProjectSnapshot {

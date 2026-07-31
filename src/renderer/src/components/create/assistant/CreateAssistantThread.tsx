@@ -45,6 +45,7 @@ import {
 } from '@/components/assistant-ui/tool-group'
 import { Sources } from '@/components/assistant-ui/sources'
 import { MessageTiming } from '@/components/assistant-ui/message-timing'
+import { TooltipHint } from '@/components/ui/tooltip'
 import { DotMatrix } from '@/components/assistant-ui/dot-matrix'
 import { UserMessageAttachments } from '@/components/assistant-ui/attachment'
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
@@ -91,21 +92,23 @@ function AssistantActionBar(): React.JSX.Element {
       autohide="never"
       className="mt-1.5 flex items-center gap-0.5 text-muted-foreground"
     >
-      <ActionBarPrimitive.Copy
-        className="group/copy flex size-7 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground data-[copied]:text-emerald-600"
-        title="复制"
-        aria-label="复制消息"
-      >
-        <CopyIcon className="size-3.5 group-data-[copied]/copy:hidden" />
-        <CheckIcon className="hidden size-3.5 group-data-[copied]/copy:inline" />
-      </ActionBarPrimitive.Copy>
-      <ActionBarPrimitive.Reload
-        className="flex size-7 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
-        title="重新生成"
-        aria-label="重新生成消息"
-      >
-        <RefreshCwIcon className="size-3.5" />
-      </ActionBarPrimitive.Reload>
+      <TooltipHint label="复制">
+        <ActionBarPrimitive.Copy
+          className="group/copy flex size-7 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground data-[copied]:text-emerald-600"
+          aria-label="复制消息"
+        >
+          <CopyIcon className="size-3.5 group-data-[copied]/copy:hidden" />
+          <CheckIcon className="hidden size-3.5 group-data-[copied]/copy:inline" />
+        </ActionBarPrimitive.Copy>
+      </TooltipHint>
+      <TooltipHint label="重新生成">
+        <ActionBarPrimitive.Reload
+          className="flex size-7 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
+          aria-label="重新生成消息"
+        >
+          <RefreshCwIcon className="size-3.5" />
+        </ActionBarPrimitive.Reload>
+      </TooltipHint>
       <MessageTiming side="top" />
     </ActionBarPrimitive.Root>
   )

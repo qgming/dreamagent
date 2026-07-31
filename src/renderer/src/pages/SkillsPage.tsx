@@ -29,6 +29,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
 import { cn } from '@/lib/utils'
+import { TooltipHint } from '@/components/ui/tooltip'
 import { skillLabel, useSkillsStore } from '@/stores/skills-store'
 import type { SkillSummary } from '@shared/skills'
 
@@ -397,24 +398,24 @@ export function SkillsPage(): React.JSX.Element {
                 {referencesExpanded && detail?.references.length ? (
                   <div className="ml-4 mt-1 space-y-0.5 border-l border-border pl-2">
                     {detail.references.map((ref) => (
-                      <button
-                        className={cn(
-                          'flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-                          selectedReferencePath === ref.path
-                            ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
-                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                        )}
-                        key={ref.path}
-                        onClick={() => {
-                          setDetailSection('references')
-                          void openReference(detail.id, ref.path)
-                        }}
-                        title={ref.path}
-                        type="button"
-                      >
-                        <FileText className="size-3.5 shrink-0" />
-                        <span className="min-w-0 truncate">{ref.name}</span>
-                      </button>
+                      <TooltipHint key={ref.path} label={ref.path} side="right">
+                        <button
+                          className={cn(
+                            'flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+                            selectedReferencePath === ref.path
+                              ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
+                              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                          )}
+                          onClick={() => {
+                            setDetailSection('references')
+                            void openReference(detail.id, ref.path)
+                          }}
+                          type="button"
+                        >
+                          <FileText className="size-3.5 shrink-0" />
+                          <span className="min-w-0 truncate">{ref.name}</span>
+                        </button>
+                      </TooltipHint>
                     ))}
                   </div>
                 ) : null}
@@ -684,28 +685,30 @@ function SkillCard({
       </button>
       <div className="flex shrink-0 items-center gap-1">
           {editable && onEdit ? (
-            <Button
-              disabled={busy}
-              size="icon-sm"
-              title="编辑"
-              type="button"
-              variant="ghost"
-              onClick={onEdit}
-            >
-              <Pencil className="size-4 text-muted-foreground" />
-            </Button>
+            <TooltipHint label="编辑">
+              <Button
+                disabled={busy}
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+                onClick={onEdit}
+              >
+                <Pencil className="size-4 text-muted-foreground" />
+              </Button>
+            </TooltipHint>
           ) : null}
           {removable && onUninstall ? (
-            <Button
-              disabled={busy}
-              size="icon-sm"
-              title="卸载"
-              type="button"
-              variant="ghost"
-              onClick={onUninstall}
-            >
-              <Trash2 className="size-4 text-muted-foreground" />
-            </Button>
+            <TooltipHint label="卸载">
+              <Button
+                disabled={busy}
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+                onClick={onUninstall}
+              >
+                <Trash2 className="size-4 text-muted-foreground" />
+              </Button>
+            </TooltipHint>
           ) : null}
         <Switch
           checked={skill.enabled}

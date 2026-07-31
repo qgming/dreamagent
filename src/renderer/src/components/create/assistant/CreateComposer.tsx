@@ -25,6 +25,7 @@ import {
   Zap
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { TooltipHint } from '@/components/ui/tooltip'
 import { useCreateStore } from '@/stores/create-store'
 import { useProjectStore } from '@/stores/project-store'
 import { skillLabel, useSkillsStore } from '@/stores/skills-store'
@@ -372,42 +373,45 @@ export function CreateComposer({
                     align="end"
                   />
                 ) : (
-                  <button
-                    type="button"
-                    className="h-8 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-accent"
-                    onClick={() => void loadSelectableModels()}
-                    title="加载模型列表"
-                  >
-                    未配置模型
-                  </button>
+                  <TooltipHint label="加载模型列表">
+                    <button
+                      type="button"
+                      className="h-8 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-accent"
+                      onClick={() => void loadSelectableModels()}
+                    >
+                      未配置模型
+                    </button>
+                  </TooltipHint>
                 )}
 
                 {sending ? (
-                  <button
-                    className={cn(
-                      'flex size-8 shrink-0 items-center justify-center rounded-full',
-                      'bg-muted text-foreground hover:bg-muted/80'
-                    )}
-                    onClick={() => void cancelTurn()}
-                    title="停止"
-                    type="button"
-                  >
-                    <Square className="size-3.5 fill-current" />
-                  </button>
-                ) : (
-                  <ComposerPrimitive.Send asChild>
+                  <TooltipHint label="停止">
                     <button
                       className={cn(
                         'flex size-8 shrink-0 items-center justify-center rounded-full',
-                        'bg-primary text-primary-foreground hover:bg-primary/90',
-                        'disabled:opacity-40'
+                        'bg-muted text-foreground hover:bg-muted/80'
                       )}
-                      title="发送"
+                      onClick={() => void cancelTurn()}
                       type="button"
                     >
-                      <ArrowUp className="size-4" />
+                      <Square className="size-3.5 fill-current" />
                     </button>
-                  </ComposerPrimitive.Send>
+                  </TooltipHint>
+                ) : (
+                  <TooltipHint label="发送">
+                    <ComposerPrimitive.Send asChild>
+                      <button
+                        className={cn(
+                          'flex size-8 shrink-0 items-center justify-center rounded-full',
+                          'bg-primary text-primary-foreground hover:bg-primary/90',
+                          'disabled:opacity-40'
+                        )}
+                        type="button"
+                      >
+                        <ArrowUp className="size-4" />
+                      </button>
+                    </ComposerPrimitive.Send>
+                  </TooltipHint>
                 )}
               </div>
             </div>

@@ -61,6 +61,12 @@ export interface SessionSummary {
   updatedAt: string
 }
 
+/** 按本地自然日汇总的模型 Token 消耗。 */
+export interface SessionTokenUsageDay {
+  date: string
+  tokens: number
+}
+
 /** 打开会话的完整 UI 视图 */
 export interface SessionView {
   id: string

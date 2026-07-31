@@ -35,6 +35,7 @@ import {
 import { BACKLINK_CHIP } from '@/lib/mention-styles'
 import { CollapsibleChipList } from '@/components/ui/collapsible-chip-list'
 import { cn } from '@/lib/utils'
+import { TooltipHint } from '@/components/ui/tooltip'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
 import {
   arrayMove,
@@ -227,27 +228,29 @@ function EntityListRow({
         {entity.name || '未命名实体'}
       </button>
       <span className="relative flex size-6 shrink-0 items-center justify-center">
-        <span
-          className={cn(
-            'size-2 rounded-full transition-opacity',
-            'group-hover:opacity-0 group-focus-within:opacity-0',
-            ENTITY_STATUS_DOT_CLASS[entity.status]
-          )}
-          title={entityStatusTitle(entity.status)}
-        />
-        <DropdownMenu>
-          <DropdownMenuTrigger
+        <TooltipHint label={entityStatusTitle(entity.status)}>
+          <span
             className={cn(
-              'absolute inset-0 flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none',
-              'opacity-0 hover:bg-muted hover:text-foreground',
-              'group-hover:opacity-100 group-focus-within:opacity-100',
-              'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
+              'size-2 rounded-full transition-opacity',
+              'group-hover:opacity-0 group-focus-within:opacity-0',
+              ENTITY_STATUS_DOT_CLASS[entity.status]
             )}
-            title="更多"
-            type="button"
-          >
-            <MoreHorizontal className="size-3.5" />
-          </DropdownMenuTrigger>
+          />
+        </TooltipHint>
+        <DropdownMenu>
+          <TooltipHint label="更多">
+            <DropdownMenuTrigger
+              className={cn(
+                'absolute inset-0 flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none',
+                'opacity-0 hover:bg-muted hover:text-foreground',
+                'group-hover:opacity-100 group-focus-within:opacity-100',
+                'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
+              )}
+              type="button"
+            >
+              <MoreHorizontal className="size-3.5" />
+            </DropdownMenuTrigger>
+          </TooltipHint>
           <DropdownMenuContent align="end" side="bottom">
             <DropdownMenuItem onSelect={onEdit}>
               <Pencil className="size-3.5" />

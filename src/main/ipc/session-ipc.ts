@@ -21,6 +21,10 @@ export function registerSessionIpc(sessions: PiSessionService): void {
     handle(() => sessions.list(projectId))
   )
 
+  ipcMain.handle('session:tokenActivity', (_e, projectId: string) =>
+    handle(() => sessions.tokenActivity(projectId))
+  )
+
   ipcMain.handle(
     'session:create',
     (_e, projectId: string, input?: CreateSessionInput) =>

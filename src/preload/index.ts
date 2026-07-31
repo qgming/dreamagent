@@ -15,6 +15,7 @@ import type {
   AgentStartTurnResult,
   CreateSessionInput,
   SessionSummary,
+  SessionTokenUsageDay,
   SessionView,
   UpdateSessionInput
 } from '../shared/ui-chat'
@@ -201,6 +202,8 @@ const projectApi = {
 const sessionApi = {
   list: (projectId: string): Promise<SessionSummary[]> =>
     ipcRenderer.invoke('session:list', projectId),
+  tokenActivity: (projectId: string): Promise<SessionTokenUsageDay[]> =>
+    ipcRenderer.invoke('session:tokenActivity', projectId),
   create: (projectId: string, input?: CreateSessionInput): Promise<SessionView> =>
     ipcRenderer.invoke('session:create', projectId, input),
   open: (projectId: string, sessionId: string): Promise<SessionView> =>

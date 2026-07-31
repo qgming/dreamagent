@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { TooltipHint } from '@/components/ui/tooltip'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useProjectStore, type ProjectView } from '@/stores/project-store'
@@ -95,14 +96,15 @@ export function AppSidebar(): React.JSX.Element {
       <div className="mt-3 flex min-h-0 flex-1 flex-col px-3">
         <div className="mb-1 flex items-center justify-between gap-2">
           <SectionLabel className="mb-0">项目</SectionLabel>
-          <button
-            className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={openCreateProjectModal}
-            title="新建项目"
-            type="button"
-          >
-            <Plus className="size-4" />
-          </button>
+          <TooltipHint label="新建项目">
+            <button
+              className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={openCreateProjectModal}
+              type="button"
+            >
+              <Plus className="size-4" />
+            </button>
+          </TooltipHint>
         </div>
 
         <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto app-scrollbar">
@@ -137,27 +139,29 @@ export function AppSidebar(): React.JSX.Element {
                         <ChevronRight className="size-3.5" />
                       </motion.span>
                     </button>
-                    <button
-                      className="min-w-0 flex-1 truncate text-left font-medium"
-                      onClick={() => toggleProjectExpanded(project.id)}
-                      title={project.title}
-                      type="button"
-                    >
-                      {project.title}
-                    </button>
-
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        className={cn(
-                          'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none',
-                          'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
-                          'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
-                        )}
-                        title="更多"
+                    <TooltipHint label={project.title} side="right">
+                      <button
+                        className="min-w-0 flex-1 truncate text-left font-medium"
+                        onClick={() => toggleProjectExpanded(project.id)}
                         type="button"
                       >
-                        <MoreHorizontal className="size-3.5" />
-                      </DropdownMenuTrigger>
+                        {project.title}
+                      </button>
+                    </TooltipHint>
+
+                    <DropdownMenu>
+                      <TooltipHint label="更多">
+                        <DropdownMenuTrigger
+                          className={cn(
+                            'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none',
+                            'opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100',
+                            'data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:opacity-100'
+                          )}
+                          type="button"
+                        >
+                          <MoreHorizontal className="size-3.5" />
+                        </DropdownMenuTrigger>
+                      </TooltipHint>
                       <DropdownMenuContent align="end" side="bottom">
                         <DropdownMenuItem onSelect={() => openEditProjectModal(project.id)}>
                           <Pencil className="size-3.5" />
@@ -211,7 +215,8 @@ export function AppSidebar(): React.JSX.Element {
                             onClick={() => openView(project.id, 'create')}
                           />
                           <p className="px-2 py-1 text-[10px] text-muted-foreground">
-                            {project.beatCount} 节点 · {project.entityCount} 实体
+                            {project.beatCount} 节点 · {project.entityCount} 实体 ·{' '}
+                            {project.chapterCount} 文章
                           </p>
                         </div>
                       </motion.div>
