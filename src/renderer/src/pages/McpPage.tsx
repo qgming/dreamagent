@@ -3,23 +3,18 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import {
-  ChevronDown,
   ChevronRight,
+  CircleGauge,
+  FileJson,
   Loader2,
   Plug,
   Plus,
   RefreshCw,
-  Trash2
+  Save,
+  Trash2,
+  Wrench
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle
-} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -42,7 +37,7 @@ import {
 import { confirmDelete } from '@/components/ui/confirm-dialog'
 import { cn } from '@/lib/utils'
 import { useMcpStore } from '@/stores/mcp-store'
-import type { McpServerConfig, McpTransport } from '@shared/mcp'
+import type { McpServerConfig, McpTransport, McpUpsertInput } from '@shared/mcp'
 
 const EXAMPLE_JSON = `{
   "mcpServers": {
@@ -72,7 +67,10 @@ export function McpPage(): React.JSX.Element {
   const toggleRemoteTool = useMcpStore((s) => s.toggleRemoteTool)
   const discover = useMcpStore((s) => s.discover)
 
-  const [expandedIds, setExpandedIds] = useState<string[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [detailSection, setDetailSection] = useState<'overview' | 'tools' | 'config'>(
+    'overview'
+  )
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorMode, setEditorMode] = useState<'form' | 'json'>('json')
   const [jsonText, setJsonText] = useState(EXAMPLE_JSON)
@@ -92,11 +90,9 @@ export function McpPage(): React.JSX.Element {
     [servers]
   )
 
-  const toggleExpand = (id: string): void => {
-    setExpandedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    )
-  }
+  const selectedServer = selectedId
+    ? servers.find((server) => server.id === selectedId) ?? null
+    : null
 
   const openCreate = (): void => {
     setEditorMode('json')
@@ -156,19 +152,22 @@ export function McpPage(): React.JSX.Element {
       })
       if (!ok) return
       await remove(server.id)
+      setSelectedId(null)
     })()
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-6 py-4">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">云端 MCP</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            添加 Streamable HTTP / SSE 远程 MCP，工具会自动注册到 Agent（pi-agent）。
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <div className="app-scrollbar h-full overflow-y-auto bg-background">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-8 py-10">
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">MCP SERVERS</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight">云端 MCP</h1>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+              管理通过 HTTP 或 SSE 连接并向创作助手提供工具的远程服务。
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
           <Button
             disabled={status === 'loading'}
             onClick={() => void reload()}
@@ -187,17 +186,16 @@ export function McpPage(): React.JSX.Element {
             添加 MCP
           </Button>
         </div>
-      </header>
+        </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto app-scrollbar p-6">
         {errorMessage ? (
-          <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {errorMessage}
           </div>
         ) : null}
 
         {status === 'loading' && sorted.length === 0 ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
             加载中…
           </div>
@@ -219,11 +217,9 @@ export function McpPage(): React.JSX.Element {
           </div>
         ) : null}
 
-        <div className="grid gap-3 md:grid-cols-1 xl:grid-cols-2">
+        <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
           {sorted.map((server) => {
-            const expanded = expandedIds.includes(server.id)
             const busy = busyId === server.id
-            const disabledSet = new Set(server.disabledToolNames ?? [])
             const tools = server.discoveredTools ?? []
             const statusLabel =
               server.installCheck?.status === 'installed'
@@ -233,25 +229,26 @@ export function McpPage(): React.JSX.Element {
                   : '未探测'
 
             return (
-              <Card key={server.id}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <CardTitle className="truncate text-base">{server.name}</CardTitle>
-                      <CardDescription className="mt-1 line-clamp-2">
-                        {server.description || server.server.url}
-                      </CardDescription>
-                    </div>
-                    <Switch
-                      checked={server.enabled}
-                      disabled={busy}
-                      onCheckedChange={(v) => void setEnabled(server.id, v)}
-                    />
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-2 text-xs text-muted-foreground">
-                  <div className="flex flex-wrap gap-2">
-                    <Badge>{transportLabel(server.server.transport)}</Badge>
+              <article
+                className={cn(
+                  'group flex min-h-[96px] items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/35',
+                  !server.enabled && 'opacity-80'
+                )}
+                key={server.id}
+              >
+                <button
+                  className="min-w-0 flex-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  onClick={() => {
+                    setDetailSection('overview')
+                    setSelectedId(server.id)
+                  }}
+                  type="button"
+                >
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <h2 className="truncate text-sm font-semibold">{server.name}</h2>
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      {transportLabel(server.server.transport)}
+                    </span>
                     <Badge
                       tone={
                         server.installCheck?.status === 'installed'
@@ -263,86 +260,51 @@ export function McpPage(): React.JSX.Element {
                     >
                       {statusLabel}
                     </Badge>
-                    {!server.enabled ? <Badge tone="muted">已禁用</Badge> : null}
                   </div>
-                  <p className="truncate font-mono text-[11px]">{server.server.url}</p>
-                  {server.installCheck?.message ? (
-                    <p className="line-clamp-2 text-[11px]">{server.installCheck.message}</p>
-                  ) : null}
-
-                  {tools.length > 0 ? (
-                    <div className="pt-1">
-                      <button
-                        className="flex items-center gap-1 text-[11px] font-medium text-foreground hover:underline"
-                        onClick={() => toggleExpand(server.id)}
-                        type="button"
-                      >
-                        {expanded ? (
-                          <ChevronDown className="size-3.5" />
-                        ) : (
-                          <ChevronRight className="size-3.5" />
-                        )}
-                        远端工具（{tools.length}）
-                      </button>
-                      {expanded ? (
-                        <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-2 app-scrollbar">
-                          {tools.map((tool) => {
-                            const on = !disabledSet.has(tool.name)
-                            return (
-                              <li
-                                className="flex items-center justify-between gap-2 rounded px-1.5 py-1 hover:bg-muted/60"
-                                key={tool.name}
-                              >
-                                <div className="min-w-0">
-                                  <p className="truncate text-[11px] font-medium text-foreground">
-                                    {tool.title || tool.name}
-                                  </p>
-                                  {tool.description ? (
-                                    <p className="truncate text-[10px] text-muted-foreground">
-                                      {tool.description}
-                                    </p>
-                                  ) : null}
-                                </div>
-                                <Switch
-                                  checked={on}
-                                  disabled={busy}
-                                  onCheckedChange={(v) =>
-                                    void toggleRemoteTool(server.id, tool.name, v)
-                                  }
-                                />
-                              </li>
-                            )
-                          })}
-                        </ul>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </CardContent>
-                <CardFooter className="justify-end gap-2">
-                  <Button
+                  <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                    {server.server.url}
+                  </p>
+                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Switch
+                    checked={server.enabled}
                     disabled={busy}
-                    onClick={() => void discover(server.id)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                    重新探测
-                  </Button>
+                    aria-label={`启用 ${server.name}`}
+                    onCheckedChange={(v) => void setEnabled(server.id, v)}
+                  />
                   <Button
-                    disabled={busy}
-                    onClick={() => handleDelete(server)}
-                    size="sm"
-                    variant="outline"
+                    aria-label={`查看 ${server.name} 详情`}
+                    onClick={() => {
+                      setDetailSection('overview')
+                      setSelectedId(server.id)
+                    }}
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
                   >
-                    <Trash2 className="size-3.5" />
-                    删除
+                    <ChevronRight className="size-4 text-muted-foreground" />
                   </Button>
-                </CardFooter>
-              </Card>
+                </div>
+              </article>
             )
           })}
         </div>
       </div>
+
+      <McpDetailDialog
+        busy={selectedServer ? busyId === selectedServer.id : false}
+        onDelete={handleDelete}
+        onDiscover={(id) => void discover(id)}
+        onOpenChange={(open) => !open && setSelectedId(null)}
+        onSaveConfig={(input) => upsert(input)}
+        onSectionChange={setDetailSection}
+        onToggleServer={(id, enabled) => void setEnabled(id, enabled)}
+        onToggleTool={(id, toolName, enabled) =>
+          void toggleRemoteTool(id, toolName, enabled)
+        }
+        section={detailSection}
+        server={selectedServer}
+      />
 
       <Dialog onOpenChange={setEditorOpen} open={editorOpen}>
         <DialogContent className="max-h-[calc(100vh-3rem)] overflow-y-auto">
@@ -448,6 +410,444 @@ export function McpPage(): React.JSX.Element {
   )
 }
 
+function McpDetailDialog({
+  busy,
+  onDelete,
+  onDiscover,
+  onOpenChange,
+  onSaveConfig,
+  onSectionChange,
+  onToggleServer,
+  onToggleTool,
+  section,
+  server
+}: {
+  busy: boolean
+  onDelete: (server: McpServerConfig) => void
+  onDiscover: (id: string) => void
+  onOpenChange: (open: boolean) => void
+  onSaveConfig: (input: McpUpsertInput) => Promise<McpServerConfig>
+  onSectionChange: (section: 'overview' | 'tools' | 'config') => void
+  onToggleServer: (id: string, enabled: boolean) => void
+  onToggleTool: (id: string, toolName: string, enabled: boolean) => void
+  section: 'overview' | 'tools' | 'config'
+  server: McpServerConfig | null
+}): React.JSX.Element {
+  const [rawConfig, setRawConfig] = useState('')
+  const [configSaving, setConfigSaving] = useState(false)
+  const [configError, setConfigError] = useState<string | null>(null)
+  const [configMessage, setConfigMessage] = useState<string | null>(null)
+  const tools = server?.discoveredTools ?? []
+  const disabledTools = new Set(server?.disabledToolNames ?? [])
+  const statusLabel =
+    server?.installCheck?.status === 'installed'
+      ? '连接正常'
+      : server?.installCheck?.status === 'failed'
+        ? '连接失败'
+        : '尚未探测'
+
+  useEffect(() => {
+    if (!server) return
+    setRawConfig(formatRawMcpConfig(server))
+    setConfigError(null)
+    setConfigMessage(null)
+  }, [server?.id, server?.updatedAt])
+
+  const saveRawConfig = async (): Promise<void> => {
+    if (!server) return
+    setConfigSaving(true)
+    setConfigError(null)
+    setConfigMessage(null)
+    try {
+      const input = parseRawMcpConfig(server, rawConfig)
+      await onSaveConfig(input)
+      setConfigMessage('配置已保存，工具列表已重新探测。')
+    } catch (error) {
+      setConfigError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={server !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="h-[min(760px,calc(100vh-3rem))] w-[min(960px,calc(100vw-3rem))] max-w-none overflow-hidden p-0 sm:max-w-none">
+        <DialogTitle className="sr-only">MCP 详情</DialogTitle>
+        {server ? (
+          <div className="grid min-h-0 grid-cols-[220px_minmax(0,1fr)]">
+            <aside className="flex min-h-0 flex-col border-r border-border bg-muted/25 p-4">
+              <div className="px-2 pb-3 pr-8">
+                <h2 className="truncate text-xl font-semibold tracking-tight">{server.name}</h2>
+                <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                  {transportLabel(server.server.transport)}
+                </p>
+              </div>
+              <nav className="mt-4 space-y-1">
+                <McpDetailNav
+                  active={section === 'overview'}
+                  icon={CircleGauge}
+                  label="概览"
+                  onClick={() => onSectionChange('overview')}
+                />
+                <McpDetailNav
+                  active={section === 'tools'}
+                  count={tools.length}
+                  icon={Wrench}
+                  label="远端工具"
+                  onClick={() => onSectionChange('tools')}
+                />
+                <McpDetailNav
+                  active={section === 'config'}
+                  icon={FileJson}
+                  label="连接配置"
+                  onClick={() => onSectionChange('config')}
+                />
+              </nav>
+              <div className="mt-auto space-y-2">
+                <Button
+                  className="w-full"
+                  disabled={busy}
+                  onClick={() => onDiscover(server.id)}
+                  size="sm"
+                  variant="outline"
+                >
+                  {busy ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-3.5" />
+                  )}
+                  重新探测
+                </Button>
+                <Button
+                  className="w-full text-destructive hover:text-destructive"
+                  disabled={busy}
+                  onClick={() => onDelete(server)}
+                  size="sm"
+                  variant="ghost"
+                >
+                  <Trash2 className="size-3.5" />
+                  删除服务
+                </Button>
+              </div>
+            </aside>
+
+            <main className="app-scrollbar min-h-0 overflow-y-auto px-8 py-7">
+              <p className="text-xs font-medium text-muted-foreground">
+                {transportLabel(server.server.transport)} SERVER
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight">
+                {section === 'overview'
+                  ? '概览'
+                  : section === 'tools'
+                    ? '远端工具'
+                    : '连接配置'}
+              </h2>
+
+              {section === 'overview' ? (
+                <div className="mt-6 space-y-6">
+                  <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+                    {server.description || '此服务未填写描述。'}
+                  </p>
+                  <div className="divide-y divide-border rounded-lg border border-border">
+                    <McpInfoRow label="连接状态" value={statusLabel} />
+                    <McpInfoRow
+                      label="服务状态"
+                      value={server.enabled ? '已启用' : '已停用'}
+                      control={
+                        <Switch
+                          checked={server.enabled}
+                          disabled={busy}
+                          onCheckedChange={(enabled) =>
+                            onToggleServer(server.id, enabled)
+                          }
+                        />
+                      }
+                    />
+                    <McpInfoRow label="工具数量" value={`${tools.length} 个`} />
+                    <McpInfoRow
+                      label="最近更新"
+                      value={formatTimestamp(server.updatedAt)}
+                    />
+                  </div>
+                  {server.installCheck?.message ? (
+                    <div
+                      className={cn(
+                        'rounded-lg border px-4 py-3 text-sm',
+                        server.installCheck.status === 'failed'
+                          ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                          : 'border-border bg-muted/25 text-muted-foreground'
+                      )}
+                    >
+                      {server.installCheck.message}
+                    </div>
+                  ) : null}
+                </div>
+              ) : section === 'tools' ? (
+                tools.length > 0 ? (
+                  <ul className="mt-6 divide-y divide-border overflow-hidden rounded-lg border border-border">
+                    {tools.map((tool) => {
+                      const enabled = !disabledTools.has(tool.name)
+                      return (
+                        <li className="flex items-center gap-4 px-4 py-3" key={tool.name}>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium">
+                              {tool.title || tool.name}
+                            </p>
+                            <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                              {tool.name}
+                            </p>
+                            {tool.description ? (
+                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                                {tool.description}
+                              </p>
+                            ) : null}
+                          </div>
+                          <Switch
+                            checked={enabled}
+                            disabled={busy}
+                            aria-label={`启用 ${tool.title || tool.name}`}
+                            onCheckedChange={(next) =>
+                              onToggleTool(server.id, tool.name, next)
+                            }
+                          />
+                        </li>
+                      )
+                    })}
+                  </ul>
+                ) : (
+                  <div className="mt-6 rounded-lg border border-dashed border-border px-5 py-12 text-center">
+                    <Wrench className="mx-auto size-6 text-muted-foreground" />
+                    <p className="mt-3 text-sm font-medium">尚未发现工具</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      重新探测服务后，工具会显示在这里。
+                    </p>
+                  </div>
+                )
+              ) : (
+                <div className="mt-6 space-y-6">
+                  <div className="divide-y divide-border rounded-lg border border-border">
+                    <McpInfoRow label="传输协议" value={transportLabel(server.server.transport)} />
+                    <McpInfoRow label="服务地址" value={server.server.url} mono />
+                    <McpInfoRow
+                      label="请求头"
+                      value={
+                        server.server.headers && Object.keys(server.server.headers).length > 0
+                          ? `${Object.keys(server.server.headers).length} 项`
+                          : '未配置'
+                      }
+                    />
+                    <McpInfoRow label="备注" value={server.notes || '未填写'} />
+                  </div>
+
+                  <section>
+                    <div className="flex items-end justify-between gap-4">
+                      <div>
+                        <h3 className="text-sm font-semibold">原始 JSON 配置</h3>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          修改后保存会更新连接并重新探测远端工具。
+                        </p>
+                      </div>
+                    </div>
+                    <Textarea
+                      className="app-scrollbar mt-3 min-h-[260px] resize-y font-mono text-xs leading-5"
+                      onChange={(event) => {
+                        setRawConfig(event.target.value)
+                        if (configError) setConfigError(null)
+                        if (configMessage) setConfigMessage(null)
+                      }}
+                      spellCheck={false}
+                      value={rawConfig}
+                    />
+                    {configError ? (
+                      <p className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                        {configError}
+                      </p>
+                    ) : null}
+                    <div className="mt-3 flex items-center justify-between gap-4">
+                      <p className="text-xs text-muted-foreground">
+                        {configMessage || '支持 HTTP、Streamable HTTP 与 SSE。'}
+                      </p>
+                      <Button
+                        disabled={configSaving || busy || !rawConfig.trim()}
+                        onClick={() => void saveRawConfig()}
+                        size="sm"
+                      >
+                        {configSaving ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Save className="size-3.5" />
+                        )}
+                        保存并重新配置
+                      </Button>
+                    </div>
+                  </section>
+                </div>
+              )}
+            </main>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function McpDetailNav({
+  active,
+  count,
+  icon: Icon,
+  label,
+  onClick
+}: {
+  active: boolean
+  count?: number
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  onClick: () => void
+}): React.JSX.Element {
+  return (
+    <button
+      className={cn(
+        'flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+        active
+          ? 'bg-black/[0.06] font-medium text-foreground dark:bg-white/[0.08]'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+      )}
+      onClick={onClick}
+      type="button"
+    >
+      <Icon className="size-4 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {typeof count === 'number' ? (
+        <span className="text-[10px] tabular-nums text-muted-foreground">{count}</span>
+      ) : null}
+    </button>
+  )
+}
+
+function McpInfoRow({
+  control,
+  label,
+  mono = false,
+  value
+}: {
+  control?: React.ReactNode
+  label: string
+  mono?: boolean
+  value: string
+}): React.JSX.Element {
+  return (
+    <div className="grid min-h-12 grid-cols-[120px_minmax(0,1fr)_auto] items-center gap-4 px-4 py-3 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn('min-w-0 break-all text-right', mono && 'font-mono text-xs')}>
+        {value}
+      </span>
+      {control ?? null}
+    </div>
+  )
+}
+
+function formatTimestamp(value?: number): string {
+  if (!value) return '未知'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(value)
+}
+
+function formatRawMcpConfig(server: McpServerConfig): string {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        [server.id]: {
+          type: server.server.transport === 'streamable-http' ? 'http' : 'sse',
+          url: server.server.url,
+          ...(server.server.headers && Object.keys(server.server.headers).length > 0
+            ? { headers: server.server.headers }
+            : {}),
+          name: server.name,
+          ...(server.description ? { description: server.description } : {}),
+          enabled: server.enabled,
+          ...(server.notes ? { notes: server.notes } : {})
+        }
+      }
+    },
+    null,
+    2
+  )
+}
+
+function parseRawMcpConfig(server: McpServerConfig, rawConfig: string): McpUpsertInput {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawConfig)
+  } catch (error) {
+    throw new Error(`JSON 格式错误：${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('MCP 配置必须是 JSON 对象。')
+  }
+
+  const envelope = parsed as Record<string, unknown>
+  const collection = envelope.mcpServers
+  if (!collection || typeof collection !== 'object' || Array.isArray(collection)) {
+    throw new Error('配置需要包含 mcpServers 对象。')
+  }
+  const entries = Object.entries(collection as Record<string, unknown>)
+  const entry = entries.find(([id]) => id === server.id) ?? entries[0]
+  if (!entry || !entry[1] || typeof entry[1] !== 'object' || Array.isArray(entry[1])) {
+    throw new Error('mcpServers 中需要包含一个有效服务配置。')
+  }
+
+  const value = entry[1] as Record<string, unknown>
+  const url = typeof value.url === 'string' ? value.url.trim() : ''
+  if (!url) throw new Error('服务配置缺少有效的 url。')
+
+  const transportValue = value.type ?? value.transport ?? server.server.transport
+  if (typeof transportValue !== 'string') {
+    throw new Error('type 或 transport 必须是字符串。')
+  }
+  const normalizedTransport = transportValue.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const transport: McpTransport =
+    normalizedTransport === 'sse'
+      ? 'sse'
+      : normalizedTransport === 'http' ||
+          normalizedTransport === 'streamablehttp' ||
+          normalizedTransport === 'streamhttp'
+        ? 'streamable-http'
+        : (() => {
+            throw new Error('仅支持 http、streamable-http 或 sse。')
+          })()
+
+  let headers: Record<string, string> | undefined
+  if (value.headers != null) {
+    if (typeof value.headers !== 'object' || Array.isArray(value.headers)) {
+      throw new Error('headers 必须是 JSON 对象。')
+    }
+    headers = {}
+    for (const [key, headerValue] of Object.entries(value.headers)) {
+      if (typeof headerValue !== 'string') {
+        throw new Error(`headers.${key} 必须是字符串。`)
+      }
+      headers[key] = headerValue
+    }
+  }
+
+  return {
+    id: server.id,
+    name:
+      typeof value.name === 'string' && value.name.trim() ? value.name.trim() : server.name,
+    description:
+      typeof value.description === 'string' ? value.description : server.description,
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : server.enabled,
+    notes: typeof value.notes === 'string' ? value.notes : server.notes,
+    server: { transport, url, headers },
+    discover: true
+  }
+}
+
 function transportLabel(t: McpTransport): string {
   return t === 'sse' ? 'SSE' : 'HTTP'
 }
@@ -462,7 +862,7 @@ function Badge({
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-medium',
+        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
         tone === 'ok' && 'bg-foreground text-background',
         tone === 'bad' && 'bg-destructive/15 text-destructive',
         tone === 'muted' && 'bg-muted text-muted-foreground'

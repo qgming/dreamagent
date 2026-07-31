@@ -1,24 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle,
+  ChevronDown,
+  ChevronRight,
   FileArchive,
+  FileText,
+  Info,
   Loader2,
   Pencil,
   Plus,
   RefreshCw,
   Search,
-  Trash2,
-  Zap
+  Trash2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle
-} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -38,6 +33,7 @@ import { skillLabel, useSkillsStore } from '@/stores/skills-store'
 import type { SkillSummary } from '@shared/skills'
 
 type SkillTab = 'builtin' | 'custom'
+type SkillDetailSection = 'overview' | 'references' | 'source'
 
 /**
  * 技能库全页：内置 / 已安装、启用、导入、新建、编辑、卸载
@@ -62,6 +58,12 @@ export function SkillsPage(): React.JSX.Element {
   const [search, setSearch] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
+  const [detailSection, setDetailSection] = useState<SkillDetailSection>('overview')
+  const [referencesExpanded, setReferencesExpanded] = useState(false)
+  const [selectedReferencePath, setSelectedReferencePath] = useState<string | null>(null)
+  const [referenceContent, setReferenceContent] = useState('')
+  const [referenceLoading, setReferenceLoading] = useState(false)
+  const [referenceError, setReferenceError] = useState<string | null>(null)
 
   const [createOpen, setCreateOpen] = useState(false)
   const [createName, setCreateName] = useState('')
@@ -190,17 +192,40 @@ export function SkillsPage(): React.JSX.Element {
     }
   }
 
+  const openReference = async (skillId: string, relativePath: string): Promise<void> => {
+    setSelectedReferencePath(relativePath)
+    setReferenceLoading(true)
+    setReferenceError(null)
+    try {
+      const content = await window.api.skills.readFile(skillId, relativePath)
+      setReferenceContent(content)
+    } catch (error) {
+      setReferenceContent('')
+      setReferenceError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setReferenceLoading(false)
+    }
+  }
+
+  const openReferenceSection = (): void => {
+    if (!detail) return
+    const nextExpanded = detailSection !== 'references' || !referencesExpanded
+    setDetailSection('references')
+    setReferencesExpanded(nextExpanded)
+    if (nextExpanded && !selectedReferencePath && detail.references[0]) {
+      void openReference(detail.id, detail.references[0].path)
+    }
+  }
+
   return (
     <div className="app-scrollbar h-full overflow-y-auto bg-background">
-      <div className="mx-auto w-full max-w-[960px] px-6 py-6">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-8 py-10">
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-foreground">
-              <Zap className="size-5 text-primary" />
-              <h1 className="text-xl font-semibold tracking-tight">技能库</h1>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              管理内置与自定义技能。可新建、编辑、导入 ZIP、卸载；启用后创作助手可读取。
+            <p className="text-xs font-medium text-muted-foreground">SKILLS</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight">技能库</h1>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+              管理创作助手可调用的内置与自定义技能。
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -239,7 +264,7 @@ export function SkillsPage(): React.JSX.Element {
           </div>
         </header>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="relative min-w-[200px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -251,8 +276,8 @@ export function SkillsPage(): React.JSX.Element {
           </div>
         </div>
 
-        <Tabs className="mt-4" value={tab} onValueChange={(v) => setTab(v as SkillTab)}>
-          <TabsList className="h-9 bg-transparent p-0">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as SkillTab)}>
+          <TabsList className="h-9">
             <TabsTrigger value="builtin">
               内置
               <span className="ml-1.5 rounded-md bg-muted px-2 py-0.5 text-[11px]">
@@ -275,12 +300,12 @@ export function SkillsPage(): React.JSX.Element {
         ) : null}
 
         {status === 'loading' && skills.length === 0 ? (
-          <div className="mt-8 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
             正在加载技能…
           </div>
         ) : visible.length === 0 ? (
-          <div className="mt-10 rounded-lg border border-dashed border-border px-6 py-12 text-center">
+          <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
             <h2 className="text-base font-medium text-foreground">
               {tab === 'builtin' ? '暂无内置技能' : '暂无已安装技能'}
             </h2>
@@ -303,7 +328,7 @@ export function SkillsPage(): React.JSX.Element {
             ) : null}
           </div>
         ) : (
-          <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <section className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
             {visible.map((skill) => (
               <SkillCard
                 key={skill.id}
@@ -311,7 +336,14 @@ export function SkillsPage(): React.JSX.Element {
                 editable={skill.sourceKind === 'custom'}
                 removable={skill.sourceKind === 'custom'}
                 skill={skill}
-                onDetail={() => void openDetail(skill.id)}
+                onDetail={() => {
+                  setDetailSection('overview')
+                  setReferencesExpanded(false)
+                  setSelectedReferencePath(null)
+                  setReferenceContent('')
+                  setReferenceError(null)
+                  void openDetail(skill.id)
+                }}
                 onEdit={
                   skill.sourceKind === 'custom' ? () => void openEdit(skill) : undefined
                 }
@@ -332,43 +364,115 @@ export function SkillsPage(): React.JSX.Element {
         open={detail !== null || detailLoading}
         onOpenChange={(open) => !open && closeDetail()}
       >
-        <DialogContent className="max-h-[85vh] overflow-hidden">
+        <DialogContent className="h-[min(760px,calc(100vh-3rem))] w-[min(960px,calc(100vw-3rem))] max-w-none overflow-hidden p-0 sm:max-w-none">
           <DialogTitle className="sr-only">技能详情</DialogTitle>
-          <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-            <Zap className="size-4 text-muted-foreground" />
-            <span className="truncate text-sm font-medium">
-              {detail ? skillLabel(detail) : '加载中…'}
-            </span>
-            {detail?.name ? (
-              <span className="truncate text-xs text-muted-foreground">· {detail.name}</span>
-            ) : null}
-            {detail?.sourceKind === 'custom' ? (
-              <Button
-                className="ml-auto"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (!detail) return
-                  closeDetail()
-                  void openEdit(detail)
-                }}
-              >
-                <Pencil className="size-3.5" />
-                编辑
-              </Button>
-            ) : null}
-          </header>
-          <div className="app-scrollbar max-h-[calc(85vh-4rem)] space-y-4 overflow-y-auto">
+          <div className="grid min-h-0 grid-cols-[220px_minmax(0,1fr)]">
+            <aside className="flex min-h-0 flex-col border-r border-border bg-muted/25 p-4">
+              <div className="px-2 pb-3 pr-8">
+                <h2 className="truncate text-xl font-semibold tracking-tight">
+                  {detail ? skillLabel(detail) : '加载中…'}
+                </h2>
+                {detail?.name ? (
+                  <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                    {detail.name}
+                  </p>
+                ) : null}
+              </div>
+              <nav className="mt-4 space-y-1">
+                <DetailNavButton
+                  active={detailSection === 'overview'}
+                  icon={Info}
+                  label="概览"
+                  onClick={() => setDetailSection('overview')}
+                />
+                <DetailNavButton
+                  active={detailSection === 'references'}
+                  count={detail?.references.length}
+                  expanded={referencesExpanded}
+                  expandable
+                  icon={FileArchive}
+                  label="参考文件"
+                  onClick={openReferenceSection}
+                />
+                {referencesExpanded && detail?.references.length ? (
+                  <div className="ml-4 mt-1 space-y-0.5 border-l border-border pl-2">
+                    {detail.references.map((ref) => (
+                      <button
+                        className={cn(
+                          'flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+                          selectedReferencePath === ref.path
+                            ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        )}
+                        key={ref.path}
+                        onClick={() => {
+                          setDetailSection('references')
+                          void openReference(detail.id, ref.path)
+                        }}
+                        title={ref.path}
+                        type="button"
+                      >
+                        <FileText className="size-3.5 shrink-0" />
+                        <span className="min-w-0 truncate">{ref.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <DetailNavButton
+                  active={detailSection === 'source'}
+                  icon={FileText}
+                  label="源文件"
+                  onClick={() => setDetailSection('source')}
+                />
+              </nav>
+              {detail?.sourceKind === 'custom' ? (
+                <Button
+                  className="mt-auto w-full"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    closeDetail()
+                    void openEdit(detail)
+                  }}
+                >
+                  <Pencil className="size-3.5" />
+                  编辑技能
+                </Button>
+              ) : null}
+            </aside>
+            <main className="app-scrollbar min-h-0 overflow-y-auto px-8 py-7">
             {detailLoading && !detail ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 读取技能…
               </div>
             ) : detail ? (
-              <>
-                <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-                  {detail.description}
+              <section>
+                <p className="text-xs font-medium text-muted-foreground">
+                  {detail.sourceKind === 'builtin' ? '内置技能' : '已安装技能'}
                 </p>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight">
+                  {detailSection === 'overview'
+                    ? '概览'
+                    : detailSection === 'references'
+                      ? detail.references.find((ref) => ref.path === selectedReferencePath)?.name ||
+                        '参考文件'
+                      : 'SKILL.md'}
+                </h2>
+                {detailSection === 'overview' ? (
+                  <div className="mt-6 space-y-5">
+                    <p className="max-w-2xl whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                      {detail.description}
+                    </p>
+                    <div className="divide-y divide-border rounded-lg border border-border">
+                      <InfoRow label="技能 ID" value={detail.name} mono />
+                      <InfoRow
+                        label="状态"
+                        value={detail.enabled ? '已启用' : '已停用'}
+                      />
+                      <InfoRow label="版本" value={detail.version || '未标注'} />
+                      <InfoRow label="安装位置" value={detail.installPath} mono />
+                    </div>
                 {!detail.isValid ? (
                   <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                     <AlertCircle className="mt-0.5 size-4 shrink-0" />
@@ -382,33 +486,41 @@ export function SkillsPage(): React.JSX.Element {
                     </div>
                   </div>
                 ) : null}
-                {detail.references.length > 0 ? (
-                  <div>
-                    <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      References
-                    </h3>
-                    <ul className="mt-2 space-y-1 text-sm">
-                      {detail.references.map((ref) => (
-                        <li
-                          key={ref.path}
-                          className="rounded-md bg-muted/50 px-2 py-1 font-mono text-xs"
-                        >
-                          {ref.path}
-                        </li>
-                      ))}
-                    </ul>
                   </div>
-                ) : null}
-                <div>
-                  <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    SKILL.md
-                  </h3>
-                  <pre className="mt-2 max-h-[40vh] overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-3 text-xs leading-5">
+                ) : detailSection === 'references' ? (
+                  referenceLoading ? (
+                    <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="size-4 animate-spin" />
+                      正在读取参考文件…
+                    </div>
+                  ) : referenceError ? (
+                    <div className="mt-6 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                      {referenceError}
+                    </div>
+                  ) : selectedReferencePath ? (
+                    <div className="mt-6">
+                      <p className="mb-2 break-all font-mono text-[11px] text-muted-foreground">
+                        {selectedReferencePath}
+                      </p>
+                      <pre className="select-text overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/25 p-4 text-xs leading-5">
+                        {referenceContent}
+                      </pre>
+                    </div>
+                  ) : (
+                    <p className="mt-6 rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
+                      {detail.references.length > 0
+                        ? '从左侧展开参考文件并选择一项。'
+                        : '这个技能没有参考文件。'}
+                    </p>
+                  )
+                ) : (
+                  <pre className="select-text mt-6 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/25 p-4 text-xs leading-5">
                     {detail.rawMarkdown}
                   </pre>
-                </div>
-              </>
+                )}
+              </section>
             ) : null}
+            </main>
           </div>
         </DialogContent>
       </Dialog>
@@ -542,57 +654,35 @@ function SkillCard({
   onUninstall?: () => void
 }): React.JSX.Element {
   const label = skillLabel(skill)
-  const showId = label !== skill.name
-
   return (
-    <Card
+    <article
       className={cn(
-        'h-full transition-colors hover:border-border/90 hover:bg-muted/20',
+        'group flex min-h-[96px] items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/35',
         !skill.enabled && 'opacity-80'
       )}
     >
-      <CardHeader className="pb-2">
-        <div className="flex items-start gap-2">
-          <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Zap className="size-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <CardTitle className="truncate">
-              <button
-                className="truncate text-left hover:underline"
-                type="button"
-                onClick={onDetail}
-              >
-                {label}
-              </button>
-            </CardTitle>
-            {showId ? (
-              <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-                {skill.name}
-              </p>
-            ) : null}
-          </div>
-        </div>
-        {!skill.isValid ? (
-          <span className="mt-2 inline-flex w-fit items-center gap-1 rounded-md border border-destructive/20 bg-destructive/8 px-1.5 py-0.5 text-[11px] text-destructive">
-            <AlertCircle className="size-3" />
-            校验异常
+      <button
+        className="min-w-0 flex-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        type="button"
+        onClick={onDetail}
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h2 className="truncate text-sm font-semibold">{label}</h2>
+          <span className="max-w-[240px] truncate rounded-full bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+            {skill.name}
           </span>
-        ) : null}
-      </CardHeader>
-      <CardContent>
-        <CardDescription className="line-clamp-3 min-h-[3.75rem]">
+          {!skill.isValid ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">
+              <AlertCircle className="size-3" />
+              校验异常
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
           {skill.description || '暂无描述'}
-        </CardDescription>
-        {skill.version ? (
-          <p className="mt-2 text-[11px] text-muted-foreground">v{skill.version}</p>
-        ) : null}
-      </CardContent>
-      <CardFooter className="justify-between">
-        <div className="flex items-center gap-0.5">
-          <Button size="sm" type="button" variant="ghost" onClick={onDetail}>
-            详情
-          </Button>
+        </p>
+      </button>
+      <div className="flex shrink-0 items-center gap-1">
           {editable && onEdit ? (
             <Button
               disabled={busy}
@@ -617,14 +707,85 @@ function SkillCard({
               <Trash2 className="size-4 text-muted-foreground" />
             </Button>
           ) : null}
-        </div>
         <Switch
           checked={skill.enabled}
           disabled={busy || !skill.isValid}
           aria-label={`启用 ${label}`}
           onCheckedChange={onToggle}
         />
-      </CardFooter>
-    </Card>
+        <Button
+          aria-label={`查看 ${label} 详情`}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+          onClick={onDetail}
+        >
+          <ChevronRight className="size-4 text-muted-foreground" />
+        </Button>
+      </div>
+    </article>
+  )
+}
+
+function DetailNavButton({
+  active,
+  count,
+  expandable = false,
+  expanded = false,
+  icon: Icon,
+  label,
+  onClick
+}: {
+  active: boolean
+  count?: number
+  expandable?: boolean
+  expanded?: boolean
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  onClick: () => void
+}): React.JSX.Element {
+  return (
+    <button
+      className={cn(
+        'flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+        active
+          ? 'bg-black/[0.06] font-medium text-foreground dark:bg-white/[0.08]'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+      )}
+      onClick={onClick}
+      type="button"
+    >
+      <Icon className="size-4 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {typeof count === 'number' ? (
+        <span className="text-[10px] tabular-nums text-muted-foreground">{count}</span>
+      ) : null}
+      {expandable ? (
+        expanded ? (
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+        )
+      ) : null}
+    </button>
+  )
+}
+
+function InfoRow({
+  label,
+  mono = false,
+  value
+}: {
+  label: string
+  mono?: boolean
+  value: string
+}): React.JSX.Element {
+  return (
+    <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-4 px-4 py-3 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn('min-w-0 break-all text-right', mono && 'font-mono text-xs')}>
+        {value}
+      </span>
+    </div>
   )
 }

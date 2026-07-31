@@ -1,11 +1,8 @@
 import { Bot, Globe, Info, Settings2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog'
 import { PreferencesPanel } from './PreferencesPanel'
@@ -45,23 +42,23 @@ export function SettingsModal(): React.JSX.Element {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
-        className="max-h-[calc(100vh-3rem)] overflow-y-auto"
+        className="h-[min(780px,calc(100vh-3rem))] w-[min(980px,calc(100vw-3rem))] max-w-none overflow-hidden p-0 sm:max-w-none"
         aria-describedby={undefined}
       >
-        <DialogHeader>
-          <DialogTitle>设置</DialogTitle>
-          <DialogDescription>管理应用偏好、模型与网络服务。</DialogDescription>
-        </DialogHeader>
+        <DialogTitle className="sr-only">设置</DialogTitle>
 
-        <div className="grid gap-6">
-          <aside>
-            <div>
+        <div className="grid min-h-0 grid-cols-[220px_minmax(0,1fr)]">
+          <aside className="app-scrollbar min-h-0 overflow-y-auto border-r border-border bg-muted/25 p-4">
+            <div className="px-2 pb-3 pr-8">
+              <h2 className="text-2xl font-semibold tracking-tight">设置</h2>
+            </div>
+            <div className="mt-4">
               {navGroups.map((group, index) => (
                 <div key={group.title} className={index > 0 ? 'mt-4' : undefined}>
-                  <p className="mb-2 text-xs font-medium text-muted-foreground">
+                  <p className="mb-1 px-2 text-[11px] font-medium text-muted-foreground">
                     {group.title}
                   </p>
-                  <nav className="grid grid-cols-2 gap-2">
+                  <nav className="space-y-1">
                     {group.items.map((itemId) => {
                       const item = navItems.find((n) => n.id === itemId)
                       if (!item) return null
@@ -81,8 +78,8 @@ export function SettingsModal(): React.JSX.Element {
             </div>
           </aside>
 
-          <main className="min-w-0 border-t border-border pt-6">
-            <div>
+          <main className="app-scrollbar min-h-0 min-w-0 overflow-y-auto px-8 py-7">
+            <div className="mx-auto w-full max-w-2xl">
               {activeSection === 'preferences' ? <PreferencesPanel /> : null}
               {activeSection === 'models' ? <ModelPanel /> : null}
               {activeSection === 'web-search' ? <WebSearchPanel /> : null}
@@ -110,18 +107,18 @@ function SettingsNavButton({
   onClick: () => void
 }): React.JSX.Element {
   return (
-    <Button
+    <button
       type="button"
       onClick={onClick}
-      size="default"
-      variant={active ? 'secondary' : 'ghost'}
       className={cn(
-        'w-full justify-start',
-        !active && 'text-muted-foreground'
+        'flex h-9 w-full items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+        active
+          ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
       )}
     >
       <Icon className="size-[18px] shrink-0" />
       <span className="truncate">{label}</span>
-    </Button>
+    </button>
   )
 }
