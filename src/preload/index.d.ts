@@ -44,10 +44,20 @@ import type {
   UninstallSkillResult,
   WriteSkillFileInput
 } from '../shared/skills'
+import type { UpdateStatus } from '../shared/updates'
 
 export interface AppApi {
   getVersion: () => Promise<string>
   getName: () => Promise<string>
+}
+
+export interface UpdatesApi {
+  getStatus: () => Promise<UpdateStatus>
+  check: () => Promise<UpdateStatus>
+  download: () => Promise<UpdateStatus>
+  quitAndInstall: () => Promise<void>
+  openReleases: () => Promise<void>
+  onStatus: (handler: (status: UpdateStatus) => void) => () => void
 }
 
 export interface WindowApi {
@@ -253,6 +263,7 @@ export interface McpApi {
 
 export interface DreamAgentApi {
   app: AppApi
+  updates: UpdatesApi
   window: WindowApi
   project: ProjectApi
   session: SessionApi

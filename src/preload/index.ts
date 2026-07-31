@@ -45,6 +45,7 @@ import type {
   UninstallSkillResult,
   WriteSkillFileInput
 } from '../shared/skills'
+import type { UpdateStatus } from '../shared/updates'
 
 /**
  * 应用信息 API
@@ -52,6 +53,24 @@ import type {
 const appApi = {
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
   getName: (): Promise<string> => ipcRenderer.invoke('app:getName')
+}
+
+/**
+ * 应用更新 API
+ */
+const updatesApi = {
+  getStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:getStatus'),
+  check: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:check'),
+  download: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:download'),
+  quitAndInstall: (): Promise<void> => ipcRenderer.invoke('updates:quitAndInstall'),
+  openReleases: (): Promise<void> => ipcRenderer.invoke('updates:openReleases'),
+  onStatus: (handler: (status: UpdateStatus) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: UpdateStatus): void => {
+      handler(status)
+    }
+    ipcRenderer.on('updates:status', listener)
+    return () => ipcRenderer.removeListener('updates:status', listener)
+  }
 }
 
 /**
@@ -349,6 +368,7 @@ const mcpApi = {
 
 const api = {
   app: appApi,
+  updates: updatesApi,
   window: windowApi,
   project: projectApi,
   session: sessionApi,

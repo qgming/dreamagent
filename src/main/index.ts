@@ -16,6 +16,8 @@ import { registerSettingsIpc } from './ipc/settings-ipc'
 import { registerSkillIpc } from './ipc/skill-ipc'
 import { registerNetworkIpc } from './ipc/network-ipc'
 import { registerMcpIpc } from './ipc/mcp-ipc'
+import { registerUpdateIpc } from './ipc/update-ipc'
+import { UpdateService } from './services/update-service'
 
 /** 是否为开发环境 */
 const isDev = !app.isPackaged
@@ -138,6 +140,9 @@ app.whenReady().then(async () => {
   // 窗口控制 IPC
   registerWindowIpc()
 
+  const updateService = new UpdateService()
+  registerUpdateIpc(updateService)
+
   // 项目库 / 节点 / 实体 / 章节 / pi 会话 / Agent / 设置 / 技能
   const libraryService = new LibraryService()
   await libraryService.init()
@@ -171,6 +176,9 @@ app.whenReady().then(async () => {
   registerMcpIpc()
 
   createWindow()
+  updateService.startAutomaticChecks()
+
+  app.once('before-quit', () => updateService.dispose())
 
   // macOS：点击 Dock 图标时重新创建窗口
   app.on('activate', () => {

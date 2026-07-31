@@ -2,11 +2,15 @@
   "name": "dreamagent",
   "productName": "造梦师",
   "version": "0.1.0",
-  "description": "造梦师 - Dream Agent",
+  "description": "本地优先的 AI 长篇创作工作台",
   "main": "./out/main/index.js",
   "author": "qgming",
   "license": "MIT",
   "homepage": "https://github.com/qgming/dreamagent",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qgming/dreamagent.git"
+  },
   "scripts": {
     "dev": "node scripts/dev.js",
     "build": "npm run typecheck && electron-vite build",
@@ -41,6 +45,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "electron-updater": "^6.8.9",
     "jszip": "^3.10.1",
     "lucide-react": "^1.27.0",
     "motion": "^12.43.0",
