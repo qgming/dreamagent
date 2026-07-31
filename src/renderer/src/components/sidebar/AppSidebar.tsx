@@ -252,14 +252,22 @@ export function AppSidebar({
         </div>
       </div>
 
-      <div className="border-t border-border p-3">
+      <div className="flex items-center gap-2 border-t border-border p-3">
+        <nav className="min-w-0 flex-1">
+          <SidebarButton
+            active={false}
+            icon={Settings}
+            label="设置"
+            onClick={() => openSettings('preferences')}
+          />
+        </nav>
         <AnimatePresence initial={false}>
           {showUpdate ? (
             <motion.div
-              animate={{ height: 28, opacity: 1, y: 0 }}
-              className="mb-2 flex justify-end overflow-hidden"
-              exit={{ height: 0, marginBottom: 0, opacity: 0, y: 3 }}
-              initial={{ height: 0, opacity: 0, y: 3 }}
+              animate={{ opacity: 1, width: 'auto' }}
+              className="shrink-0 overflow-hidden"
+              exit={{ opacity: 0, width: 0 }}
+              initial={{ opacity: 0, width: 0 }}
             >
               <button
                 aria-live="polite"
@@ -273,14 +281,6 @@ export function AppSidebar({
             </motion.div>
           ) : null}
         </AnimatePresence>
-        <nav className="space-y-1">
-          <SidebarButton
-            active={false}
-            icon={Settings}
-            label="设置"
-            onClick={() => openSettings('preferences')}
-          />
-        </nav>
       </div>
     </aside>
   )

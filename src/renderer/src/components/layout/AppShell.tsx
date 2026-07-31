@@ -5,6 +5,7 @@ import { AppSidebar } from '@/components/sidebar/AppSidebar'
 import { NameFormModals } from '@/components/NameFormModals'
 import { SettingsModal } from '@/components/settings/SettingsModal'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { Toaster } from '@/components/ui/sonner'
 import { useTheme } from '@/hooks/useTheme'
 import { BeatsPage } from '@/pages/BeatsPage'
 import { CreatePage } from '@/pages/CreatePage'
@@ -37,7 +38,7 @@ export function AppShell(): React.JSX.Element {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const collapsedBeforeCreate = useRef(false)
   const wasCreate = useRef(false)
-  useTheme()
+  const { theme } = useTheme()
   useBootstrapLibrary()
 
   useEffect(() => {
@@ -179,6 +180,7 @@ export function AppShell(): React.JSX.Element {
       <SettingsModal />
       <NameFormModals />
       <ConfirmDialog />
+      <Toaster position="top-center" theme={theme} />
     </div>
   )
 }

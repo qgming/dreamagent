@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Download, ExternalLink, Loader2, RefreshCw, RotateCcw } from 'lucide-react'
+import { toast } from 'sonner'
 import type { UpdateStatus } from '@shared/updates'
 import { BrandLogo } from '@/components/BrandLogo'
 import { Button } from '@/components/ui/button'
@@ -41,7 +42,11 @@ export function AboutPanel(): React.JSX.Element {
       await promptForUpdateRestart(status)
       return
     }
-    setStatus(await window.api.updates.check())
+    const next = await window.api.updates.check()
+    setStatus(next)
+    if (next.phase === 'not-available') {
+      toast.success('当前已是最新版本')
+    }
   }
 
   const busy = status?.phase === 'checking' || status?.phase === 'downloading'
