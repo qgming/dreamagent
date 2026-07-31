@@ -120,7 +120,8 @@ function applySnapshot(
   get: () => ProjectState,
   snap: ProjectSnapshot
 ): void {
-  const expanded = new Set(get().expandedProjectIds)
+  const state = get()
+  const expanded = new Set(state.expandedProjectIds)
   expanded.add(snap.meta.id)
   set({
     snapshot: {
@@ -132,6 +133,19 @@ function applySnapshot(
     activeProjectId: snap.meta.id,
     appSurface: 'project',
     expandedProjectIds: [...expanded],
+    library: state.library.map((project) =>
+      project.id === snap.meta.id
+        ? {
+            ...project,
+            title: snap.meta.title,
+            description: snap.meta.description,
+            updatedAt: snap.meta.updatedAt,
+            beatCount: Object.keys(snap.beats).length,
+            entityCount: Object.keys(snap.entities).length,
+            chapterCount: Object.keys(snap.chapters).length
+          }
+        : project
+    ),
     error: null
   })
 }

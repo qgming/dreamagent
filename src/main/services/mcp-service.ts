@@ -18,7 +18,9 @@ import type {
 } from '../../shared/mcp'
 import { ensureDir, readJsonFile, writeJsonAtomic } from './fs-utils'
 
-const CLIENT_INFO = { name: 'DreamAgent', version: '0.1.0' }
+function getClientInfo(): { name: string; version: string } {
+  return { name: 'DreamAgent', version: app.getVersion() }
+}
 
 function cleanHeaders(headers?: Record<string, string>): Record<string, string> {
   return Object.fromEntries(
@@ -348,7 +350,7 @@ export class McpService {
   ): Promise<T> {
     const url = endpoint.url?.trim()
     if (!url) throw new Error('MCP server 缺少 URL')
-    const client = new Client(CLIENT_INFO, { capabilities: {} })
+    const client = new Client(getClientInfo(), { capabilities: {} })
     const headers = cleanHeaders(endpoint.headers)
     const transport =
       endpoint.transport === 'sse'

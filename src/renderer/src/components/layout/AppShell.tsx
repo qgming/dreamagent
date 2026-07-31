@@ -19,6 +19,8 @@ import {
 } from '@/stores/create-store'
 import { useProjectStore, type ProjectView } from '@/stores/project-store'
 import { useSettingsStore } from '@/stores/settings-store'
+import type { UpdateStatus } from '@shared/updates'
+import { promptForUpdateRestart } from '@/lib/update-utils'
 
 const SIDEBAR_SPRING = { type: 'spring' as const, stiffness: 380, damping: 36 }
 
@@ -31,10 +33,30 @@ export function AppShell(): React.JSX.Element {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   /** true = 手动折叠可用 spring；false = 进/出创作硬切，不走 motion */
   const [animateSidebar, setAnimateSidebar] = useState(true)
+  const [appVersion, setAppVersion] = useState<string | null>(null)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const collapsedBeforeCreate = useRef(false)
   const wasCreate = useRef(false)
   useTheme()
   useBootstrapLibrary()
+
+  useEffect(() => {
+    let active = true
+    void Promise.all([window.api.app.getVersion(), window.api.updates.getStatus()]).then(
+      ([version, status]) => {
+        if (!active) return
+        setAppVersion(version)
+        setUpdateStatus(status)
+      }
+    )
+    const unsubscribe = window.api.updates.onStatus((status) => {
+      if (active) setUpdateStatus(status)
+    })
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
 
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const appSurface = useProjectStore((s) => s.appSurface)
@@ -81,6 +103,15 @@ export function AppShell(): React.JSX.Element {
     setSidebarCollapsed((value) => !value)
   }
 
+  const handleUpdate = async (): Promise<void> => {
+    if (!updateStatus || updateStatus.phase === 'downloading') return
+    let next = updateStatus
+    if (next.phase === 'error') next = await window.api.updates.check()
+    if (next.phase === 'available') next = await window.api.updates.download()
+    setUpdateStatus(next)
+    await promptForUpdateRestart(next)
+  }
+
   const showSidebar = !sidebarCollapsed
 
   return (
@@ -99,7 +130,11 @@ export function AppShell(): React.JSX.Element {
         {!animateSidebar ? (
           showSidebar ? (
             <div className="h-full w-60 shrink-0 overflow-hidden">
-              <AppSidebar />
+              <AppSidebar
+                onUpdate={() => void handleUpdate()}
+                updateStatus={updateStatus}
+                version={appVersion}
+              />
             </div>
           ) : null
         ) : (
@@ -114,7 +149,11 @@ export function AppShell(): React.JSX.Element {
                 transition={SIDEBAR_SPRING}
               >
                 <div className="h-full w-60">
-                  <AppSidebar />
+                  <AppSidebar
+                    onUpdate={() => void handleUpdate()}
+                    updateStatus={updateStatus}
+                    version={appVersion}
+                  />
                 </div>
               </motion.div>
             ) : null}

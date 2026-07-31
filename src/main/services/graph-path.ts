@@ -4,6 +4,7 @@
  * entities | entities/{id} | entity:{id}
  * chapters | chapters/{id} | chapter:{id}
  * folders | folders/{id} | folder:{id}   # 文章文件夹
+ * project                                # 项目标题与梗概
  * outline
  */
 import type { GraphResourceType } from '../../shared/agent-tools'
@@ -11,6 +12,7 @@ import type { GraphResourceType } from '../../shared/agent-tools'
 export type ParsedGraphPath =
   | { kind: 'collection'; type: 'beat' | 'entity' | 'chapter' | 'folder' }
   | { kind: 'item'; type: 'beat' | 'entity' | 'chapter' | 'folder'; id: string }
+  | { kind: 'project' }
   | { kind: 'outline' }
 
 export function parseGraphPath(raw: string): ParsedGraphPath {
@@ -24,6 +26,14 @@ export function parseGraphPath(raw: string): ParsedGraphPath {
 
   const lower = input.toLowerCase()
   if (lower === 'outline') return { kind: 'outline' }
+  if (
+    lower === 'project' ||
+    lower === 'project/summary' ||
+    lower === 'summary' ||
+    lower === 'synopsis'
+  ) {
+    return { kind: 'project' }
+  }
 
   // type:id 别名
   const colon = input.match(/^(beat|entity|chapter|folder|fold|ent|chap)s?:(.+)$/i)
@@ -46,7 +56,7 @@ export function parseGraphPath(raw: string): ParsedGraphPath {
     return { kind: 'item', type: t, id }
   }
   throw new Error(
-    `无法解析 path：${raw}。示例：beats、beats/{id}、folders、folders/{id}、folder:{id}、outline`
+    `无法解析 path：${raw}。示例：project、beats、beats/{id}、folders、folders/{id}、folder:{id}、outline`
   )
 }
 

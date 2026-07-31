@@ -10,6 +10,7 @@ import type {
   OutlineBeatItem,
   ReadBeatResult,
   ReadEntityResult,
+  ReadProjectResult,
   WriteChapterToolInput
 } from '../../shared/agent-tools'
 import type {
@@ -23,6 +24,7 @@ import type {
   Entity,
   EntityStatus,
   ProjectSnapshot,
+  UpdateProjectMetaInput,
   UpdateBeatInput,
   UpdateChapterFolderInput,
   UpdateChapterInput,
@@ -169,6 +171,7 @@ export class AgentToolRuntime {
           : String(input.folderId)
 
     if (parsed.kind === 'outline') return this.getOutline(projectId)
+    if (parsed.kind === 'project') return this.readProject(projectId)
     if (parsed.kind === 'item') {
       // list 传了具体 id：退化为 read
       return this.readPath(projectId, pathRaw)
@@ -218,6 +221,7 @@ export class AgentToolRuntime {
   private async readPath(projectId: string, pathRaw: string): Promise<AgentToolResult> {
     const parsed = parseGraphPath(pathRaw)
     if (parsed.kind === 'outline') return this.getOutline(projectId)
+    if (parsed.kind === 'project') return this.readProject(projectId)
     if (parsed.kind === 'collection') {
       return this.listPath(projectId, { path: pathRaw })
     }
@@ -234,6 +238,23 @@ export class AgentToolRuntime {
     const pathRaw = typeof input.path === 'string' ? input.path.trim() : ''
     if (pathRaw) {
       const parsed = parseGraphPath(pathRaw)
+      if (parsed.kind === 'project') {
+        const title = typeof input.title === 'string' ? input.title : undefined
+        const summary =
+          typeof input.summary === 'string'
+            ? input.summary
+            : typeof input.content === 'string'
+              ? input.content
+              : undefined
+        if (title === undefined && summary === undefined) {
+          return {
+            ok: false,
+            summary: '更新项目需要 title 或 summary',
+            error: 'empty_patch'
+          }
+        }
+        return this.updateProject(projectId, { title, description: summary })
+      }
       if (parsed.kind !== 'item') {
         return { ok: false, summary: 'write 覆盖需要具体对象 path', error: 'invalid_path' }
       }
@@ -367,10 +388,6 @@ export class AgentToolRuntime {
   ): Promise<AgentToolResult> {
     const pathRaw = String(input.path ?? '')
     const parsed = parseGraphPath(pathRaw)
-    if (parsed.kind !== 'item') {
-      return { ok: false, summary: 'edit 需要具体对象 path', error: 'invalid_path' }
-    }
-
     const editsRaw = Array.isArray(input.edits) ? input.edits : []
     const edits = editsRaw
       .filter((e): e is { oldText: string; newText: string } => {
@@ -382,6 +399,26 @@ export class AgentToolRuntime {
         )
       })
       .map((e) => ({ oldText: e.oldText, newText: e.newText }))
+
+    if (parsed.kind === 'project') {
+      const snap = await this.projects.openProject(projectId)
+      const current = snap.meta.description ?? ''
+      const nextSummary = edits.length
+        ? applyExactEdits(current, edits)
+        : typeof input.summary === 'string'
+          ? input.summary
+          : typeof input.content === 'string'
+            ? input.content
+            : undefined
+      const title = typeof input.title === 'string' ? input.title : undefined
+      if (title === undefined && nextSummary === undefined) {
+        return { ok: false, summary: '没有可更新的项目名称或梗概', error: 'empty_patch' }
+      }
+      return this.updateProject(projectId, { title, description: nextSummary })
+    }
+    if (parsed.kind !== 'item') {
+      return { ok: false, summary: 'edit 需要具体对象 path', error: 'invalid_path' }
+    }
 
     if (parsed.type === 'beat') {
       const snap = await this.projects.openProject(projectId)
@@ -472,6 +509,9 @@ export class AgentToolRuntime {
 
   private async deletePath(projectId: string, pathRaw: string): Promise<AgentToolResult> {
     const parsed = parseGraphPath(pathRaw)
+    if (parsed.kind === 'project') {
+      return { ok: false, summary: '不能通过工具删除项目', error: 'unsupported_operation' }
+    }
     if (parsed.kind !== 'item') {
       return { ok: false, summary: 'delete 需要具体对象 path', error: 'invalid_path' }
     }
@@ -479,6 +519,39 @@ export class AgentToolRuntime {
     if (parsed.type === 'entity') return this.deleteEntity(projectId, parsed.id)
     if (parsed.type === 'folder') return this.deleteFolder(projectId, parsed.id)
     return this.deleteChapter(projectId, parsed.id)
+  }
+
+  private async readProject(
+    projectId: string
+  ): Promise<AgentToolResult<ReadProjectResult>> {
+    const snap = await this.projects.openProject(projectId)
+    const data: ReadProjectResult = {
+      id: snap.meta.id,
+      title: snap.meta.title,
+      summary: snap.meta.description ?? ''
+    }
+    return {
+      ok: true,
+      summary: data.summary ? `已读取项目「${data.title}」的梗概` : `项目「${data.title}」暂无梗概`,
+      data
+    }
+  }
+
+  private async updateProject(
+    projectId: string,
+    patch: UpdateProjectMetaInput
+  ): Promise<AgentToolResult<ReadProjectResult>> {
+    const meta = await this.projects.updateProjectMeta(projectId, patch)
+    const data: ReadProjectResult = {
+      id: meta.id,
+      title: meta.title,
+      summary: meta.description ?? ''
+    }
+    return {
+      ok: true,
+      summary: `已更新项目「${data.title}」的名称或梗概`,
+      data
+    }
   }
 
   private async listBeats(

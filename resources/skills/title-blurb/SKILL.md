@@ -52,6 +52,7 @@ metadata:
 
 ## Inputs To Read
 
+- 项目梗概：`read({ path: "project" })`
 - `list({ path: "outline" })`
 - 定位/卖点类 `read({ path: "beats/{id}" })`；主角等 `read({ path: "entities/{id}" })`（姓名勿与书名设定冲突）
 - 用户平台与禁区
@@ -70,7 +71,7 @@ metadata:
 - `write({ type: "beat", ... })` / `write/edit path=beats/{id}`，标题如「作品定位 / 书名简介」
 - content 可含：书名候选、选定简介、标签；用双链挂 `[@主角](entity:…)`
 - **不要** `write({ type: "chapter", ... })` 把简介当成正文文章（除非用户要独立文案稿）
-- 项目 `description` 若需改，说明让用户在项目设置保存，或仅在定位节点存一份
+- 选定书名与简介后可一起写回项目：`write({ path: "project", title: "选定书名", summary: "选定简介" })`
 
 ## Quality Gates
 

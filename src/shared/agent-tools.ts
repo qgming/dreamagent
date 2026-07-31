@@ -142,6 +142,13 @@ export interface AgentToolResult<T = unknown> {
   error?: string
 }
 
+/** read({ path: "project" }) 返回的项目主要介绍。 */
+export interface ReadProjectResult {
+  id: string
+  title: string
+  summary: string
+}
+
 /** 图谱会变更的写工具（runner 用于刷新 snapshot） */
 export const GRAPH_MUTATING_TOOLS: ReadonlySet<AgentToolName> = new Set([
   'write',
@@ -185,7 +192,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'read',
     description:
-      '读取对象全文。path 形如 beats/{id}、entities/{id}、chapters/{id}、folders/{id}。节点/实体返回出入链与 children；文件夹返回 name/parentId/子文件夹与夹内文章清单。',
+      '读取项目或对象全文。path=project 返回项目标题与梗概；其他路径形如 beats/{id}、entities/{id}、chapters/{id}、folders/{id}。节点/实体返回出入链与 children；文件夹返回 name/parentId/子文件夹与夹内文章清单。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -197,7 +204,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'write',
     description:
-      '创建或全量覆盖。创建：type=beat|entity|chapter|folder。folder 只需 name（可选 parentId 建子夹），如 write({ type:"folder", name:"卷一" })。chapter 可带 folderId 进夹。覆盖：path=beats/{id}|folders/{id} 等。beat/entity content 可含双链；chapter content 必须纯正文。',
+      '创建或全量覆盖。项目名称/梗概：write({ path:"project", title?, summary? })，至少传一项。创建：type=beat|entity|chapter|folder。folder 只需 name（可选 parentId 建子夹），如 write({ type:"folder", name:"卷一" })。chapter 可带 folderId 进夹。覆盖：path=beats/{id}|folders/{id} 等。beat/entity content 可含双链；chapter content 必须纯正文。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -213,6 +220,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
           description: '实体名称，或文件夹名称（type=folder 时用 name 或 title）'
         },
         content: { type: 'string' },
+        summary: { type: 'string', description: 'path=project 时的项目梗概全文' },
         status: { type: 'string' },
         afterId: { type: 'string' },
         parentId: {
@@ -233,7 +241,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'edit',
     description:
-      '局部精确替换 content（及可选 status/title/name/parentId/folderId）。path 必填。edits 为 oldText→newText，每段须在原文中唯一。folders/{id} 可改 name / parentId。chapter 禁止双链语法。',
+      '局部精确替换 content 或项目梗概（及可选 status/title/name/parentId/folderId）。path 必填；path=project 时 title 修改项目名称，edits 作用于梗概，也可直接传 summary。edits 为 oldText→newText，每段须在原文中唯一。folders/{id} 可改 name / parentId。chapter 禁止双链语法。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -251,6 +259,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
         },
         title: { type: 'string' },
         name: { type: 'string' },
+        summary: { type: 'string', description: 'path=project 时直接替换项目梗概全文' },
         status: { type: 'string' },
         parentId: {
           type: 'string',

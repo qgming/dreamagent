@@ -77,7 +77,7 @@ const listParams = Type.Object({
 const readParams = Type.Object({
   path: Type.String({
     description:
-      'beats/{id} | entities/{id} | chapters/{id} | beat:{id} | entity:{id} | outline'
+      'project | beats/{id} | entities/{id} | chapters/{id} | folders/{id} | outline'
   })
 })
 
@@ -98,6 +98,7 @@ const writeParams = Type.Object({
         'beat/entity 可含 [@显示名](entity|beat:真实id)；chapter 必须纯正文无双链'
     })
   ),
+  summary: Type.Optional(Type.String({ description: 'path=project 时的项目梗概全文' })),
   status: Type.Optional(Type.String()),
   afterId: Type.Optional(Type.String()),
   sourceBeatIds: Type.Optional(Type.Array(Type.String())),
@@ -121,6 +122,7 @@ const editParams = Type.Object({
   name: Type.Optional(Type.String()),
   status: Type.Optional(Type.String()),
   content: Type.Optional(Type.String({ description: '也可直接给全文（少用）' })),
+  summary: Type.Optional(Type.String({ description: 'path=project 时直接替换项目梗概全文' })),
   sourceBeatIds: Type.Optional(Type.Array(Type.String())),
   entityRefs: Type.Optional(Type.Array(Type.String())),
   beatRefs: Type.Optional(Type.Array(Type.String()))
@@ -150,7 +152,7 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       name: 'read',
       label: 'read',
       description:
-        '读取对象全文与出入链。path=beats/{id}|entities/{id}|chapters/{id} 或 beat:{id}。',
+        '读取项目梗概或对象全文与出入链。path=project|beats/{id}|entities/{id}|chapters/{id}|folders/{id}。',
       parameters: readParams,
       executionMode: 'parallel',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
@@ -160,7 +162,7 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       name: 'write',
       label: 'write',
       description:
-        '创建或全量覆盖。创建：type+title/name+content；覆盖：path。beat/entity 双链自动同步 refs；chapter 禁止双链。返回含 id 的完整对象。',
+        '创建或全量覆盖。项目名称/梗概用 write({ path:"project", title?, summary? })；其他对象创建用 type+title/name+content，覆盖用 path。beat/entity 双链自动同步 refs；chapter 禁止双链。返回完整对象。',
       parameters: writeParams,
       executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
@@ -170,7 +172,7 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       name: 'edit',
       label: 'edit',
       description:
-        '局部精确替换 content（edits）或改 title/name/status。path 必填。chapter 禁止双链。',
+        '局部精确替换 content 或项目梗概（edits），也可改 title/name/status。项目名称与梗概用 path=project。chapter 禁止双链。',
       parameters: editParams,
       executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
@@ -189,20 +191,22 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
 }
 
 /** 默认系统提示 */
-export const DREAM_AGENT_BASE_PROMPT = `你是「造梦师」的创作助手，帮助用户基于项目中的节点与实体（设定）进行长文创作。
+export const DREAM_AGENT_BASE_PROMPT = `你是「造梦师」的创作助手，帮助用户基于项目梗概、节点与实体（设定）进行长文创作。
 
 ## 工作方式
-1. 先 list path=outline|beats|entities 了解项目；需要细节再 read path=beats/{id} 等。
+1. 系统上下文中的项目梗概是项目的主要介绍与全局创作方向，应先理解；需要核对时 read path=project。再 list path=outline|beats|entities 了解结构，细节用 read。
 2. 不要编造未读取的设定；顺着 read 返回的出入链继续深入。
 3. 创建：write({ type:"entity", name, content }) / write({ type:"beat", title, content }) / write({ type:"chapter", title, content, sourceBeatIds, entityRefs })。
-4. 覆盖：write({ path:"beats/{id}", content|title|status })；局部改用 edit({ path, edits:[{oldText,newText}] })。
-5. 删除：delete({ path:"entities/{id}" })。
-6. 用中文回复用户；工具按需调用。
-7. 回复可用 Markdown。
-8. 不熟悉工具/双链时，先 read_skill「dreamagent-guide」。
+4. 项目资料：read({ path:"project" })；write({ path:"project", title?, summary? }) 可改项目名称或梗概；局部修改梗概用 edit({ path:"project", edits:[{oldText,newText}] })。
+5. 对象覆盖：write({ path:"beats/{id}", content|title|status })；局部改用 edit({ path, edits:[{oldText,newText}] })。
+6. 删除：delete({ path:"entities/{id}" })。
+7. 用中文回复用户；工具按需调用。
+8. 回复可用 Markdown。
+9. 不熟悉工具/双链时，先 read_skill「dreamagent-guide」。
 
 ## 路径约定
 - 集合：beats / entities / chapters / outline
+- 项目：project（项目名称字段为 title，梗概字段为 summary）
 - 对象：beats/{id}、entities/{id}、chapters/{id}（也可用 beat:{id}）
 
 ## 双链（硬规则）

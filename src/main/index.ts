@@ -18,6 +18,7 @@ import { registerNetworkIpc } from './ipc/network-ipc'
 import { registerMcpIpc } from './ipc/mcp-ipc'
 import { registerUpdateIpc } from './ipc/update-ipc'
 import { UpdateService } from './services/update-service'
+import { ActivityLedgerService } from './services/activity-ledger'
 
 /** 是否为开发环境 */
 const isDev = !app.isPackaged
@@ -146,10 +147,11 @@ app.whenReady().then(async () => {
   // 项目库 / 节点 / 实体 / 章节 / pi 会话 / Agent / 设置 / 技能
   const libraryService = new LibraryService()
   await libraryService.init()
-  const projectService = new ProjectService(libraryService)
+  const activityLedger = new ActivityLedgerService()
+  const projectService = new ProjectService(libraryService, activityLedger)
   const llmSettings = new LlmSettingsService()
   const piModels = new PiModelsService(llmSettings)
-  const sessionService = new PiSessionService(projectService, piModels)
+  const sessionService = new PiSessionService(projectService, piModels, activityLedger)
   const skillService = new SkillService()
   await skillService.ensureReady()
   const todoService = new TodoService(sessionService)

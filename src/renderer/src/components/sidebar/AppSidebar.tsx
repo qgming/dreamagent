@@ -2,8 +2,10 @@ import {
   BookOpen,
   ChevronRight,
   CircleDot,
+  Download,
   Home,
   LayoutDashboard,
+  Loader2,
   MoreHorizontal,
   Pencil,
   Plug,
@@ -11,11 +13,11 @@ import {
   Settings,
   Sparkles,
   Trash2,
-  Users
+  Users,
+  RotateCcw
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { SidebarButton } from './SidebarButton'
-import { BrandLogo } from '@/components/BrandLogo'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,11 +30,20 @@ import { TooltipHint } from '@/components/ui/tooltip'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useProjectStore, type ProjectView } from '@/stores/project-store'
+import type { UpdateStatus } from '@shared/updates'
 
 /**
  * 左侧导航：上（通用） / 中（项目，展开带动画） / 下（设置）
  */
-export function AppSidebar(): React.JSX.Element {
+export function AppSidebar({
+  version,
+  updateStatus,
+  onUpdate
+}: {
+  version: string | null
+  updateStatus: UpdateStatus | null
+  onUpdate: () => void
+}): React.JSX.Element {
   const openSettings = useSettingsStore((s) => s.openSettings)
 
   const library = useProjectStore((s) => s.library)
@@ -78,11 +89,22 @@ export function AppSidebar(): React.JSX.Element {
   const isAppHome = appSurface === 'home'
   const isSkills = appSurface === 'skills'
   const isMcp = appSurface === 'mcp'
+  const showUpdate = Boolean(
+    updateStatus?.enabled &&
+      updateStatus.latestVersion &&
+      updateStatus.latestVersion !== updateStatus.currentVersion &&
+      ['available', 'downloading', 'downloaded', 'error'].includes(updateStatus.phase)
+  )
 
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
-      <div className="px-4 pb-2 pt-4">
-        <BrandLogo />
+      <div className="flex min-w-0 items-center gap-2 px-4 pb-3 pt-5">
+        <div className="truncate text-base font-semibold text-foreground">造梦师</div>
+        {version ? (
+          <span className="shrink-0 rounded-full border border-border bg-muted/70 px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-muted-foreground">
+            {version}
+          </span>
+        ) : null}
       </div>
 
       <div className="px-3 pt-2">
@@ -231,6 +253,26 @@ export function AppSidebar(): React.JSX.Element {
       </div>
 
       <div className="border-t border-border p-3">
+        <AnimatePresence initial={false}>
+          {showUpdate ? (
+            <motion.div
+              animate={{ height: 28, opacity: 1, y: 0 }}
+              className="mb-2 flex justify-end overflow-hidden"
+              exit={{ height: 0, marginBottom: 0, opacity: 0, y: 3 }}
+              initial={{ height: 0, opacity: 0, y: 3 }}
+            >
+              <button
+                aria-live="polite"
+                className="flex h-7 items-center gap-1.5 rounded-full border border-primary/25 bg-primary px-2.5 text-[11px] font-medium text-primary-foreground shadow-sm outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-wait disabled:opacity-90"
+                disabled={updateStatus?.phase === 'downloading'}
+                onClick={onUpdate}
+                type="button"
+              >
+                <UpdateButtonContent status={updateStatus} />
+              </button>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
         <nav className="space-y-1">
           <SidebarButton
             active={false}
@@ -241,6 +283,31 @@ export function AppSidebar(): React.JSX.Element {
         </nav>
       </div>
     </aside>
+  )
+}
+
+function UpdateButtonContent({ status }: { status: UpdateStatus | null }): React.JSX.Element {
+  if (status?.phase === 'downloading') {
+    return (
+      <>
+        <Loader2 className="size-3 animate-spin" />
+        下载 {Math.round(status.downloadPercent ?? 0)}%
+      </>
+    )
+  }
+  if (status?.phase === 'downloaded') {
+    return (
+      <>
+        <RotateCcw className="size-3" />
+        重启更新
+      </>
+    )
+  }
+  return (
+    <>
+      <Download className="size-3" />
+      {status?.phase === 'error' ? '重试更新' : '立即更新'}
+    </>
   )
 }
 

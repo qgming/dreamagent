@@ -68,6 +68,8 @@ import {
   removeDir,
   writeJsonAtomic
 } from './fs-utils'
+import type { WritingActivityDay } from '../../shared/activity'
+import type { ActivityLedgerService } from './activity-ledger'
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -101,7 +103,10 @@ export class ProjectService {
   /** 按项目目录串行化所有会改 index / 文件的写操作，避免并行 create 丢 id */
   private mutationQueues = new Map<string, Promise<unknown>>()
 
-  constructor(private readonly library: LibraryService) {}
+  constructor(
+    private readonly library: LibraryService,
+    private readonly activityLedger: ActivityLedgerService
+  ) {}
 
   /**
    * 同一项目目录内的写操作串行执行。
@@ -109,15 +114,28 @@ export class ProjectService {
    */
   private enqueueMutation<T>(dirPath: string, task: () => Promise<T>): Promise<T> {
     const prev = this.mutationQueues.get(dirPath) ?? Promise.resolve()
-    const next = prev.catch(() => undefined).then(task)
-    this.mutationQueues.set(
-      dirPath,
-      next.finally(() => {
-        if (this.mutationQueues.get(dirPath) === next) {
-          this.mutationQueues.delete(dirPath)
+    const next = prev
+      .catch(() => undefined)
+      .then(async () => {
+        // 跨日后的首次修改/删除发生前先冻结旧日字数。
+        await this.captureWritingActivityInDir(dirPath).catch((error) => {
+          console.warn('[project] 修改前持久化文字活动失败', error)
+        })
+        try {
+          return await task()
+        } finally {
+          // 今天的数据允许增减，每次落盘后都以现存内容覆盖。
+          await this.captureWritingActivityInDir(dirPath).catch((error) => {
+            console.warn('[project] 修改后持久化文字活动失败', error)
+          })
         }
       })
-    )
+    const queued = next.finally(() => {
+      if (this.mutationQueues.get(dirPath) === queued) {
+        this.mutationQueues.delete(dirPath)
+      }
+    })
+    this.mutationQueues.set(dirPath, queued)
     return next
   }
 
@@ -134,6 +152,55 @@ export class ProjectService {
       /** pi JsonlSessionRepo 根目录 */
       sessions: path.join(dirPath, 'sessions')
     }
+  }
+
+  private async collectWritingActivity(dirPath: string): Promise<WritingActivityDay[]> {
+    const totals = new Map<string, Omit<WritingActivityDay, 'date'>>()
+    const add = (
+      createdAt: string,
+      kind: keyof Omit<WritingActivityDay, 'date'>,
+      content: string
+    ): void => {
+      const date = new Date(createdAt)
+      if (Number.isNaN(date.getTime())) return
+      const key = [
+        date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, '0'),
+        String(date.getDate()).padStart(2, '0')
+      ].join('-')
+      const day = totals.get(key) ?? { beatWords: 0, entityWords: 0, articleWords: 0 }
+      day[kind] += content.replace(/\s/g, '').length
+      totals.set(key, day)
+    }
+
+    const p = this.paths(dirPath)
+    for (const file of await listFileNames(p.beats)) {
+      const beat = await readJsonFile<Beat>(path.join(p.beats, file))
+      if (beat?.createdAt) add(beat.createdAt, 'beatWords', beat.content ?? '')
+    }
+    for (const file of await listFileNames(p.entities)) {
+      const entity = await readJsonFile<Entity>(path.join(p.entities, file))
+      if (entity?.createdAt) add(entity.createdAt, 'entityWords', entity.content ?? '')
+    }
+    for (const file of await listFilesRecursive(p.chapters)) {
+      const chapter = await readJsonFile<Chapter>(file.absPath)
+      if (chapter?.createdAt) add(chapter.createdAt, 'articleWords', chapter.content ?? '')
+    }
+
+    return [...totals.entries()].map(([date, value]) => ({ date, ...value }))
+  }
+
+  private async captureWritingActivityInDir(
+    dirPath: string
+  ): Promise<WritingActivityDay[]> {
+    return this.activityLedger.captureWriting(
+      dirPath,
+      await this.collectWritingActivity(dirPath)
+    )
+  }
+
+  async writingActivity(projectId: string): Promise<WritingActivityDay[]> {
+    return this.captureWritingActivityInDir(await this.resolveDir(projectId))
   }
 
   private beatPath(dirPath: string, fileName: string): string {

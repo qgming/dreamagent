@@ -4,6 +4,7 @@ import type { UpdateStatus } from '@shared/updates'
 import { BrandLogo } from '@/components/BrandLogo'
 import { Button } from '@/components/ui/button'
 import { PageTitle } from './settings-shared'
+import { promptForUpdateRestart } from '@/lib/update-utils'
 
 /** 关于与软件更新面板。 */
 export function AboutPanel(): React.JSX.Element {
@@ -31,11 +32,13 @@ export function AboutPanel(): React.JSX.Element {
   const runPrimaryAction = async (): Promise<void> => {
     if (!status) return
     if (status.phase === 'available') {
-      setStatus(await window.api.updates.download())
+      const next = await window.api.updates.download()
+      setStatus(next)
+      await promptForUpdateRestart(next)
       return
     }
     if (status.phase === 'downloaded') {
-      await window.api.updates.quitAndInstall()
+      await promptForUpdateRestart(status)
       return
     }
     setStatus(await window.api.updates.check())

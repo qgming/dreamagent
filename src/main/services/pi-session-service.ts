@@ -30,6 +30,8 @@ import {
   type SessionContextUsage,
   type TokenUsageBreakdown
 } from '../../shared/context-usage'
+import type { ProjectActivityDay } from '../../shared/activity'
+import type { ActivityLedgerService } from './activity-ledger'
 import {
   countUserAssistant,
   parseSessionBranch,
@@ -53,7 +55,8 @@ export class PiSessionService {
 
   constructor(
     private readonly projects: ProjectService,
-    private readonly models: PiModelsService
+    private readonly models: PiModelsService,
+    private readonly activityLedger: ActivityLedgerService
   ) {}
 
   private async activeHistory(session: Session): Promise<SessionTreeEntry[]> {
@@ -300,7 +303,10 @@ export class PiSessionService {
     return summaries
   }
 
-  /** 全部会话的真实模型用量，按 entry 发生日期汇总。 */
+  /**
+   * 把尚未记账的模型用量 entry 追加到本地台账。台账只增不减，
+   * 因此后续删除会话不会影响已经产生的 Token 统计。
+   */
   async tokenActivity(projectId: string): Promise<SessionTokenUsageDay[]> {
     const rt = await this.runtimeFor(projectId)
     const metas = await rt.repo.list({ cwd: '.' }).catch((error) => {
@@ -315,12 +321,12 @@ export class PiSessionService {
       }
     }
 
-    const totals = new Map<string, number>()
+    const usageEntries: Array<{ id: string; date: string; tokens: number }> = []
     for (const meta of byId.values()) {
       try {
         const session = await rt.repo.open(meta)
-        const entries = await session.getEntries()
-        for (const entry of entries) {
+        const sessionEntries = await session.getEntries()
+        for (const entry of sessionEntries) {
           const usage = this.usageFromEntry(entry)
           if (!usage?.totalTokens) continue
           const date = new Date(entry.timestamp)
@@ -330,16 +336,28 @@ export class PiSessionService {
             String(date.getMonth() + 1).padStart(2, '0'),
             String(date.getDate()).padStart(2, '0')
           ].join('-')
-          totals.set(key, (totals.get(key) ?? 0) + usage.totalTokens)
+          usageEntries.push({
+            id: `${meta.id}:${entry.id}`,
+            date: key,
+            tokens: usage.totalTokens
+          })
         }
       } catch (error) {
         console.warn('[pi-session] tokenActivity 跳过损坏会话', meta.id, error)
       }
     }
 
-    return [...totals.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, tokens]) => ({ date, tokens }))
+    const projectDir = await this.projects.resolveDir(projectId)
+    return this.activityLedger.captureTokens(projectDir, usageEntries)
+  }
+
+  /** 同步并返回首页两张热力图的项目活动数据。 */
+  async activity(projectId: string): Promise<ProjectActivityDay[]> {
+    await Promise.all([
+      this.projects.writingActivity(projectId),
+      this.tokenActivity(projectId)
+    ])
+    return this.activityLedger.activity(await this.projects.resolveDir(projectId))
   }
 
   async create(projectId: string, input: CreateSessionInput = {}): Promise<SessionView> {
@@ -437,6 +455,8 @@ export class PiSessionService {
   }
 
   async delete(projectId: string, sessionId: string): Promise<void> {
+    // 删除源文件前先落盘其中所有尚未记账的用量。
+    await this.tokenActivity(projectId)
     const rt = await this.runtimeFor(projectId)
     const metas = await rt.repo.list({ cwd: '.' }).catch(() => [])
     const hits = metas.filter((m) => m.id === sessionId)

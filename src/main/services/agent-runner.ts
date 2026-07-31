@@ -782,6 +782,10 @@ export class AgentRunner {
         this.emit(sender, { type: 'error', projectId, sessionId, runId, message })
       }
     } finally {
+      // 无论正常结束、报错还是中止，已经产生的模型用量都立即进入只增台账。
+      await this.sessions.tokenActivity(projectId).catch((error) => {
+        console.warn('[agent-runner] 持久化 Token 活动失败', error)
+      })
       unsubscribe()
       if (this.active.get(key)?.runId === runId) {
         this.active.delete(key)

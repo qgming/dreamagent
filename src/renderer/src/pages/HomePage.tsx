@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Gauge, Loader2, PenLine } from 'lucide-react'
 import { motion } from 'motion/react'
-import type { ProjectSnapshot, ProjectSummary } from '@shared/project-types'
-import type { SessionSummary, SessionTokenUsageDay } from '@shared/ui-chat'
+import type { ProjectSummary } from '@shared/project-types'
+import type { ProjectActivityDay } from '@shared/activity'
+import type { SessionSummary } from '@shared/ui-chat'
 import { Button } from '@/components/ui/button'
 import { TooltipHint } from '@/components/ui/tooltip'
 import { formatUpdatedAt } from '@/lib/project-utils'
@@ -29,8 +30,7 @@ export function HomePage(): React.JSX.Element {
   const library = useProjectStore((s) => s.library)
   const libraryLoading = useProjectStore((s) => s.loading)
   const openProject = useProjectStore((s) => s.openProject)
-  const [snapshots, setSnapshots] = useState<ProjectSnapshot[]>([])
-  const [tokenUsage, setTokenUsage] = useState<SessionTokenUsageDay[]>([])
+  const [projectActivity, setProjectActivity] = useState<ProjectActivityDay[]>([])
   const [latestSessions, setLatestSessions] = useState<
     Record<string, SessionSummary | null>
   >({})
@@ -40,8 +40,7 @@ export function HomePage(): React.JSX.Element {
   useEffect(() => {
     let cancelled = false
     if (library.length === 0) {
-      setSnapshots([])
-      setTokenUsage([])
+      setProjectActivity([])
       setLatestSessions({})
       setActivityLoading(false)
       return () => {
@@ -52,11 +51,8 @@ export function HomePage(): React.JSX.Element {
     setActivityLoading(true)
     void Promise.all([
       Promise.all(
-        library.map((project) => window.api.project.open(project.id).catch(() => null))
-      ),
-      Promise.all(
         library.map((project) =>
-          window.api.session.tokenActivity(project.id).catch(() => [])
+          window.api.session.activity(project.id).catch(() => [])
         )
       ),
       Promise.all(
@@ -64,14 +60,9 @@ export function HomePage(): React.JSX.Element {
           window.api.session.list(project.id).then((sessions) => sessions[0] ?? null).catch(() => null)
         )
       )
-    ]).then(([snapshotResults, tokenResults, sessionResults]) => {
+    ]).then(([activityResults, sessionResults]) => {
       if (cancelled) return
-      setSnapshots(
-        snapshotResults.filter(
-          (snapshot): snapshot is ProjectSnapshot => Boolean(snapshot)
-        )
-      )
-      setTokenUsage(tokenResults.flat())
+      setProjectActivity(activityResults.flat())
       setLatestSessions(
         Object.fromEntries(
           library.map((project, index) => [project.id, sessionResults[index]])
@@ -86,8 +77,8 @@ export function HomePage(): React.JSX.Element {
   }, [library])
 
   const activityDays = useMemo(
-    () => buildActivityDays(snapshots, tokenUsage),
-    [snapshots, tokenUsage]
+    () => buildActivityDays(projectActivity),
+    [projectActivity]
   )
   const today = activityDays.find((day) => day.key === dateKey(new Date()))
 
@@ -366,10 +357,7 @@ function ProjectCard({
   )
 }
 
-function buildActivityDays(
-  snapshots: ProjectSnapshot[],
-  tokenUsage: SessionTokenUsageDay[]
-): ActivityDay[] {
+function buildActivityDays(projectActivity: ProjectActivityDay[]): ActivityDay[] {
   const today = startOfDay(new Date())
   const currentMonday = addDays(today, -((today.getDay() + 6) % 7))
   const start = addDays(currentMonday, -(HEATMAP_WEEKS - 1) * 7)
@@ -387,23 +375,13 @@ function buildActivityDays(
   })
   const byKey = new Map(days.map((day) => [day.key, day]))
 
-  for (const snapshot of snapshots) {
-    for (const beat of Object.values(snapshot.beats)) {
-      const day = byKey.get(dateKey(new Date(beat.createdAt)))
-      if (day) day.beatWords += countWords(beat.content)
-    }
-    for (const entity of Object.values(snapshot.entities)) {
-      const day = byKey.get(dateKey(new Date(entity.createdAt)))
-      if (day) day.entityWords += countWords(entity.content)
-    }
-    for (const chapter of Object.values(snapshot.chapters)) {
-      const day = byKey.get(dateKey(new Date(chapter.createdAt)))
-      if (day) day.articleWords += countWords(chapter.content)
-    }
-  }
-  for (const usage of tokenUsage) {
-    const day = byKey.get(usage.date)
-    if (day) day.tokens += usage.tokens
+  for (const activity of projectActivity) {
+    const day = byKey.get(activity.date)
+    if (!day) continue
+    day.beatWords += activity.beatWords
+    day.entityWords += activity.entityWords
+    day.articleWords += activity.articleWords
+    day.tokens += activity.tokens
   }
 
   return days
@@ -440,10 +418,6 @@ function heatClass(theme: HeatTheme, level: number): string {
           'bg-[#347e70] dark:bg-[#73bdaf]'
         ]
   return colors[level]
-}
-
-function countWords(content: string): number {
-  return content.replace(/\s/g, '').length
 }
 
 function startOfDay(date: Date): Date {

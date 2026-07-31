@@ -19,6 +19,7 @@ import type {
   SessionView,
   UpdateSessionInput
 } from '../shared/ui-chat'
+import type { ProjectActivityDay } from '../shared/activity'
 import type {
   Chapter,
   CreateBeatInput,
@@ -223,6 +224,8 @@ const sessionApi = {
     ipcRenderer.invoke('session:list', projectId),
   tokenActivity: (projectId: string): Promise<SessionTokenUsageDay[]> =>
     ipcRenderer.invoke('session:tokenActivity', projectId),
+  activity: (projectId: string): Promise<ProjectActivityDay[]> =>
+    ipcRenderer.invoke('session:activity', projectId),
   create: (projectId: string, input?: CreateSessionInput): Promise<SessionView> =>
     ipcRenderer.invoke('session:create', projectId, input),
   open: (projectId: string, sessionId: string): Promise<SessionView> =>

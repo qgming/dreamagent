@@ -45,6 +45,7 @@ import type {
   WriteSkillFileInput
 } from '../shared/skills'
 import type { UpdateStatus } from '../shared/updates'
+import type { ProjectActivityDay } from '../shared/activity'
 
 export interface AppApi {
   getVersion: () => Promise<string>
@@ -168,6 +169,7 @@ export interface ProjectApi {
 export interface SessionApi {
   list: (projectId: string) => Promise<SessionSummary[]>
   tokenActivity: (projectId: string) => Promise<SessionTokenUsageDay[]>
+  activity: (projectId: string) => Promise<ProjectActivityDay[]>
   create: (projectId: string, input?: CreateSessionInput) => Promise<SessionView>
   open: (projectId: string, sessionId: string) => Promise<SessionView>
   update: (

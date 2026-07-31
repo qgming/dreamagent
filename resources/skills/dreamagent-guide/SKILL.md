@@ -13,6 +13,15 @@ metadata:
 
 造梦师（Dream Agent）的**产品与工具手册**。写故事前先读本技能，避免把普通文本当成双链。
 
+## 项目梗概
+
+梗概是项目的主要介绍内容，会随每轮系统上下文一起提供给创作助手。
+
+- 读取：`read({ path: "project" })`，返回 `title` 与 `summary`
+- 修改名称或全量更新梗概：`write({ path: "project", title: "新项目名", summary: "新的项目梗概" })`（可只传一项）
+- 局部修改：`edit({ path: "project", edits: [{ oldText, newText }] })`
+- 梗概用于全局定位；详细情节、人物和设定仍分别存入节点与实体
+
 ## 三类对象
 
 | 对象 | 存什么 | 状态 | content 能否写双链 |
@@ -198,6 +207,7 @@ write({ type: "beat",
 
 | 目的 | 工具 |
 |------|------|
+| 读/改项目名称与梗概 | `read({ path: "project" })` / `write({ path: "project", title?, summary? })` / `edit({ path: "project", title?, edits? })` |
 | 看全局 | `list({ path: "outline" })` / `list({ path: "beats" })` / `list({ path: "entities" })` / `list({ path: "folders" })` |
 | 读详情 | `read({ path: "beats/{id}" })` / `read({ path: "folders/{id}" })`（夹内文章清单） |
 | 创建 | `write({ type: "beat"\|"entity"\|"chapter"\|"folder", title/name, content? })` |
