@@ -22,8 +22,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
@@ -349,9 +347,7 @@ function BeatEditor({
         />
         <DropdownMenu>
           <DropdownMenuTrigger
-            className={cn(
-              'inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs outline-none hover:bg-muted'
-            )}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs outline-none hover:bg-muted"
             type="button"
           >
             <span className={cn('size-2 shrink-0 rounded-full', BEAT_STATUS_DOT_CLASS[status])} />
@@ -359,17 +355,19 @@ function BeatEditor({
             <ChevronDown className="size-3.5 opacity-60" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuRadioGroup
-              onValueChange={(v) => setStatus(v as BeatStatus)}
-              value={status}
-            >
-              {BEAT_STATUSES.map((s) => (
-                <DropdownMenuRadioItem key={s} value={s}>
-                  <span className={cn('mr-1 size-2 rounded-full', BEAT_STATUS_DOT_CLASS[s])} />
-                  {BEAT_STATUS_LABELS[s]}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
+            {BEAT_STATUSES.map((s) => (
+              <DropdownMenuItem
+                className={cn(
+                  status === s &&
+                    'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
+                )}
+                key={s}
+                onSelect={() => setStatus(s)}
+              >
+                <span className={cn('size-2 rounded-full', BEAT_STATUS_DOT_CLASS[s])} />
+                {BEAT_STATUS_LABELS[s]}
+              </DropdownMenuItem>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

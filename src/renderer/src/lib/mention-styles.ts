@@ -1,7 +1,6 @@
 /**
  * 双链芯片样式（节点/实体正文 + 反链）
- * 与 directive 胶囊统一：无边框、深背景、同色浅字
- * 类型通过中性灰阶明度区分。
+ * 与 directive 胶囊统一：无边框、深背景、同色浅字。
  */
 import { chipClassName, chipToneClass } from '@/components/assistant-ui/directive-chip'
 
@@ -24,28 +23,28 @@ export const mentionChipStyles = `
   user-select: all;
 }
 .mention-chip--blue {
-  background: #404040;
-  color: #fafafa;
+  background: var(--mention-blue-surface);
+  color: var(--mention-blue-foreground);
 }
 .dark .mention-chip--blue {
-  background: #d4d4d4;
-  color: #171717;
+  background: var(--mention-blue-surface);
+  color: var(--mention-blue-foreground);
 }
 .mention-chip--red {
-  background: #525252;
-  color: #fafafa;
+  background: var(--link-red-surface);
+  color: var(--link-red-foreground);
 }
 .dark .mention-chip--red {
-  background: #a3a3a3;
-  color: #171717;
+  background: var(--link-red-surface);
+  color: var(--link-red-foreground);
 }
 .mention-chip--green {
-  background: #262626;
-  color: #fafafa;
+  background: var(--link-green-surface);
+  color: var(--link-green-foreground);
 }
 .dark .mention-chip--green {
-  background: #e5e5e5;
-  color: #171717;
+  background: var(--link-green-surface);
+  color: var(--link-green-foreground);
 }
 .mention-chip:hover {
   filter: brightness(1.06);

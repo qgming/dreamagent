@@ -3,7 +3,7 @@
  * - 无边框，纯背景
  * - 背景深、文字/图标同色更浅（非纯白）
  * - 高度对齐外侧正文字号与行高
- * - 内置：工具蓝 · 技能紫 · 节点绿 · 实体红 · 文章橙
+ * - 对话 @：所有类型统一蓝色
  * - 双链：节点↔节点蓝 · 实体↔实体红 · 跨类型绿
  */
 import { type FC } from 'react'
@@ -53,28 +53,23 @@ export function toneFromDirectiveType(type: string): ChipTone {
   }
 }
 
-/** 中性灰阶通过明度区分类型，保持全局黑灰白视觉。 */
+/** 对话 @ 统一蓝色；双链关系保留红蓝绿。 */
 function toneClasses(tone: ChipTone, _surface: DirectiveChipSurface): string {
   void _surface
   switch (tone) {
     case 'tool':
-      return 'bg-neutral-900 text-neutral-100 dark:bg-neutral-200 dark:text-neutral-900'
     case 'skill':
-      return 'bg-neutral-800 text-neutral-100 dark:bg-neutral-300 dark:text-neutral-900'
     case 'beat':
-      return 'bg-neutral-700 text-neutral-100 dark:bg-neutral-400 dark:text-neutral-950'
     case 'entity':
-      return 'bg-neutral-600 text-neutral-100 dark:bg-neutral-500 dark:text-white'
     case 'article':
-      return 'bg-neutral-500 text-white dark:bg-neutral-600 dark:text-white'
     case 'link-beat':
-      return 'bg-neutral-700 text-neutral-100 dark:bg-neutral-400 dark:text-neutral-950'
+      return 'bg-[var(--mention-blue-surface)] text-[var(--mention-blue-foreground)]'
     case 'link-entity':
-      return 'bg-neutral-600 text-neutral-100 dark:bg-neutral-500 dark:text-white'
+      return 'bg-[var(--link-red-surface)] text-[var(--link-red-foreground)]'
     case 'link-cross':
-      return 'bg-neutral-800 text-neutral-100 dark:bg-neutral-300 dark:text-neutral-900'
+      return 'bg-[var(--link-green-surface)] text-[var(--link-green-foreground)]'
     default:
-      return 'bg-neutral-600 text-neutral-200 dark:bg-neutral-500 dark:text-neutral-100'
+      return 'bg-[var(--mention-blue-surface)] text-[var(--mention-blue-foreground)]'
   }
 }
 

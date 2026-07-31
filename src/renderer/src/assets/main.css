@@ -96,6 +96,22 @@
   --sidebar-ring: oklch(0.708 0 0);
   --user-bubble: oklch(0.97 0 0);
   --user-bubble-foreground: oklch(0.145 0 0);
+
+  /* 对话 @ 与双链：深色背景 + 同色系浅文字 */
+  --mention-blue-surface: #1e4f91;
+  --mention-blue-foreground: #e7f1ff;
+  --link-red-surface: #8a3048;
+  --link-red-foreground: #ffe7ed;
+  --link-green-surface: #246647;
+  --link-green-foreground: #e1f7eb;
+
+  /* 业务状态：不同状态使用不同实色点 */
+  --status-idea: #f59e0b;
+  --status-outline: #0ea5e9;
+  --status-draft: #8b5cf6;
+  --status-final: #10b981;
+  --status-dormant: #f97316;
+  --status-archived: #6366f1;
   --scrollbar-thumb: rgb(23 23 23 / 0.18);
   --scrollbar-thumb-hover: rgb(23 23 23 / 0.32);
 }
@@ -129,6 +145,12 @@
   --sidebar-ring: oklch(0.439 0 0);
   --user-bubble: oklch(0.269 0 0);
   --user-bubble-foreground: oklch(0.985 0 0);
+  --mention-blue-surface: #255fa7;
+  --mention-blue-foreground: #edf5ff;
+  --link-red-surface: #a33b55;
+  --link-red-foreground: #ffedf1;
+  --link-green-surface: #2c7655;
+  --link-green-foreground: #e7faef;
   --scrollbar-thumb: rgb(250 250 250 / 0.16);
   --scrollbar-thumb-hover: rgb(250 250 250 / 0.28);
 }

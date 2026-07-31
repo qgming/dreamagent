@@ -38,23 +38,23 @@ export function formatUpdatedAt(iso: string): string {
 
 /** 节点状态 → 圆点颜色 */
 export const BEAT_STATUS_DOT_CLASS: Record<BeatStatus, string> = {
-  idea: 'bg-muted-foreground/35',
-  outline: 'bg-muted-foreground/55',
-  draft: 'bg-foreground/70',
-  final: 'bg-foreground'
+  idea: 'bg-[var(--status-idea)]',
+  outline: 'bg-[var(--status-outline)]',
+  draft: 'bg-[var(--status-draft)]',
+  final: 'bg-[var(--status-final)]'
 }
 
 /** 实体状态 → 圆点颜色 */
 export const ENTITY_STATUS_DOT_CLASS: Record<EntityStatus, string> = {
-  active: 'bg-foreground',
-  dormant: 'bg-muted-foreground/55',
-  archived: 'bg-muted-foreground/35'
+  active: 'bg-[var(--status-final)]',
+  dormant: 'bg-[var(--status-dormant)]',
+  archived: 'bg-[var(--status-archived)]'
 }
 
 /** 文章状态 → 圆点颜色 */
 export const CHAPTER_STATUS_DOT_CLASS: Record<ChapterStatus, string> = {
-  draft: 'bg-foreground/65',
-  final: 'bg-foreground'
+  draft: 'bg-[var(--status-idea)]',
+  final: 'bg-[var(--status-final)]'
 }
 
 /** 状态圆点 title */
