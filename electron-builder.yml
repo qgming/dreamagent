@@ -15,8 +15,11 @@ asarUnpack:
 extraResources:
   - from: resources/skills
     to: skills
+  - from: build/icon.png
+    to: icon.png
 win:
   executableName: dreamagent
+  icon: build/icon.png
   target:
     - target: nsis
       arch:
@@ -29,6 +32,7 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
 mac:
+  icon: build/icon.png
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
@@ -44,6 +48,7 @@ mac:
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
+  icon: build/icon.png
   target:
     - AppImage
     - deb

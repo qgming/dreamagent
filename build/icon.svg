@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">造梦师</title>
+  <desc id="desc">一本展开的书托起一颗灵感星芒</desc>
+  <rect width="512" height="512" rx="112" fill="#E4573D"/>
+  <path fill="#FFF8F3" d="M96 181c55 0 102 15 144 45v188c-39-27-86-41-144-41V181Zm320 0v192c-58 0-105 14-144 41V226c42-30 89-45 144-45Z"/>
+  <path fill="#FFF8F3" d="m256 82 13 34 34 13-34 13-13 34-13-34-34-13 34-13 13-34Z"/>
+</svg>

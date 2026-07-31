@@ -20,6 +20,11 @@ import { registerMcpIpc } from './ipc/mcp-ipc'
 /** 是否为开发环境 */
 const isDev = !app.isPackaged
 
+/** 开发态与打包态共用同一应用图标。 */
+const appIconPath = isDev
+  ? join(__dirname, '../../build/icon.png')
+  : join(process.resourcesPath, 'icon.png')
+
 /**
  * 创建无边框主窗口
  */
@@ -35,6 +40,7 @@ function createWindow(): BrowserWindow {
     titleBarStyle: 'hidden',
     autoHideMenuBar: true,
     title: '造梦师',
+    icon: appIconPath,
     backgroundColor: '#121212',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
