@@ -24,6 +24,8 @@ import type { HarnessManager, HarnessSelection } from './harness-manager'
 import type { AgentHarness } from '@earendil-works/pi-agent-core'
 import type { DreamToolContext } from './pi-agent-tools'
 import type { SessionContextUsage } from '../../shared/context-usage'
+import type { UiContextRef, UiActiveDocumentRef } from '../../shared/ui-chat'
+import { buildNarrativeCheckpointInstructions } from './context/narrative-compactor'
 
 type DreamHarness = AgentHarness<DreamToolContext>
 
@@ -38,6 +40,9 @@ interface ActiveRun {
   followUpPreview?: string
   followUpCount: number
   steerCount: number
+  /** 本轮结构化上下文引用（P2） */
+  contextRefs?: UiContextRef[]
+  activeDocument?: UiActiveDocumentRef
 }
 
 function chapterIdsFromDetails(details: unknown): string[] {
@@ -90,12 +95,17 @@ export class AgentRunner {
   private async compactIfNeeded(
     run: ActiveRun,
     harness: DreamHarness,
-    additionalTokens = 0
+    estimatedInputTokens: number
   ): Promise<SessionContextUsage> {
     const { projectId, sessionId, runId, sender } = run
-    const usage = await this.sessions.getUsage(projectId, sessionId, run.selection)
+    const usage = await this.sessions.getUsage(projectId, sessionId, run.selection, {
+      estimatedInputTokens
+    })
     const threshold = usage.model.contextWindow * usage.autoCompactThreshold
-    if (usage.contextTokens + additionalTokens < threshold) {
+    // 估算缺失时回退到 usage.providerPayloadTokens（trace 兜底）
+    const estimated =
+      estimatedInputTokens > 0 ? estimatedInputTokens : usage.providerPayloadTokens
+    if (estimated < threshold) {
       this.emit(sender, {
         type: 'context_update',
         projectId,
@@ -117,9 +127,36 @@ export class AgentRunner {
     })
 
     try {
-      await harness.compact(
-        '保留人物设定与关系、时间线、已确认文风与叙事决策、未兑现伏笔、未完成 todo、当前章目标与用户约束。丢弃重复工具 JSON 与过期探索性讨论。'
+      // P3：使用结构化叙事检查点压缩指令（替代通用一句话）
+      const compactResult = await harness.compact(
+        buildNarrativeCheckpointInstructions()
       )
+      // 解析模型返回的 JSON 检查点并作为派生 custom entry 落盘（原始 JSONL 不删除）。
+      // 解析失败不阻塞：保留 pi 通用 compaction entry，不写“空摘要”。
+      if (compactResult?.summary?.trim()) {
+        try {
+          const parsed = JSON.parse(compactResult.summary) as {
+            type?: string
+            narrative?: unknown
+            sourceRange?: unknown
+          }
+          if (parsed && typeof parsed === 'object' && (parsed.narrative || parsed.type)) {
+            const session = await this.sessions.openSessionObject(projectId, sessionId)
+            await session.appendCustomEntry('dreamagent.narrative_checkpoint.v1', {
+              ...parsed,
+              type: 'dreamagent.narrative_checkpoint.v1',
+              sessionId,
+              createdAt: new Date().toISOString(),
+              generator: {
+                model: harness.getModel().id,
+                promptVersion: 'dreamagent.compaction.v1'
+              }
+            })
+          }
+        } catch {
+          // 非 JSON 摘要：忽略，仍保留原始历史
+        }
+      }
       const compactedUsage = await this.sessions.getUsage(
         projectId,
         sessionId,
@@ -167,7 +204,14 @@ export class AgentRunner {
       modelId: input.modelId,
       thinkingLevel: input.thinkingLevel
     }
-    const run = this.beginRun(projectId, sessionId, sender, selection)
+    const run = this.beginRun(
+      projectId,
+      sessionId,
+      sender,
+      selection,
+      input.contextRefs,
+      input.activeDocument
+    )
 
     // 异步执行，立即返回 runId
     void this.executeTurn(run, userMessage).catch((error) => {
@@ -279,7 +323,9 @@ export class AgentRunner {
     projectId: string,
     sessionId: string,
     sender: WebContents,
-    selection?: HarnessSelection
+    selection?: HarnessSelection,
+    contextRefs?: UiContextRef[],
+    activeDocument?: UiActiveDocumentRef
   ): ActiveRun {
     const key = this.sessionKey(projectId, sessionId)
     const prev = this.active.get(key)
@@ -297,7 +343,9 @@ export class AgentRunner {
       aborted: false,
       selection,
       followUpCount: 0,
-      steerCount: 0
+      steerCount: 0,
+      contextRefs,
+      activeDocument
     }
     this.active.set(key, run)
     return run
@@ -449,8 +497,26 @@ export class AgentRunner {
         ? options.harness
         : await this.harnesses.getOrCreate(projectId, sessionId, run.selection)
 
-    // 将本次用户输入也纳入阈值预测，避免在 80% 边缘直接发出超长请求。
-    await this.compactIfNeeded(run, harness, Math.ceil(userText.length / 4))
+    // P0/P2：记录本轮请求上下文（runId + 显式引用），供每轮 systemPrompt 读取
+    this.harnesses.beginRequest(projectId, sessionId, {
+      runId,
+      userMessage: userText,
+      contextRefs: run.contextRefs ?? [],
+      activeDocument: run.activeDocument
+    })
+
+    // 使用最终编译上下文（system + tools + 动态块 + current user + 历史）做阈值预测
+    const estimate = await this.harnesses
+      .estimateNextRequestTokens(
+        projectId,
+        sessionId,
+        run.selection,
+        userText,
+        run.contextRefs,
+        run.activeDocument
+      )
+      .catch(() => undefined)
+    await this.compactIfNeeded(run, harness, estimate?.estimatedInputTokens ?? 0)
 
     const assistantMessageId = createId('msg')
     let assistantStarted = false
@@ -547,7 +613,11 @@ export class AgentRunner {
         case 'message_end': {
           flushAll(true)
           try {
-            const usage = await this.sessions.getUsage(projectId, sessionId, run.selection)
+            const usage = await this.sessions.getUsage(
+              projectId,
+              sessionId,
+              run.selection
+            )
             this.emit(sender, {
               type: 'context_update',
               projectId,
@@ -652,8 +722,9 @@ export class AgentRunner {
             todos: todosPayload
           })
 
-          // 图谱变更后推送 snapshot
+          // 图谱变更后：失效 ContextBuilder 快照缓存 + 推送 snapshot
           if (GRAPH_MUTATING_TOOLS.has(event.toolName as AgentToolName)) {
+            this.harnesses.invalidateProjectSnapshot(projectId)
             try {
               const snapshot = await this.projects.openProject(projectId)
               this.emit(sender, {
@@ -766,7 +837,12 @@ export class AgentRunner {
       })
 
       // turn_done 已让界面恢复可用；随后压缩，并用 per-session promise 串行化下一轮。
-      const compaction = this.compactIfNeeded(run, harness)
+      // 注意：此时 session.buildContext() 已包含刚完成的 user+assistant 回合，
+      // 不再把 userText 作为 current_user 追加，避免重复计入同一条用户消息。
+      const estimate = await this.harnesses
+        .estimateNextRequestTokens(projectId, sessionId, run.selection, '', run.contextRefs, run.activeDocument)
+        .catch(() => undefined)
+      const compaction = this.compactIfNeeded(run, harness, estimate?.estimatedInputTokens ?? 0)
       this.compactions.set(key, compaction)
       try {
         await compaction
@@ -782,6 +858,7 @@ export class AgentRunner {
         this.emit(sender, { type: 'error', projectId, sessionId, runId, message })
       }
     } finally {
+      this.harnesses.endRequest(projectId, sessionId)
       // 无论正常结束、报错还是中止，已经产生的模型用量都立即进入只增台账。
       await this.sessions.tokenActivity(projectId).catch((error) => {
         console.warn('[agent-runner] 持久化 Token 活动失败', error)

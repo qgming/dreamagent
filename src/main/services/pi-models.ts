@@ -1,5 +1,5 @@
 /**
- * pi-ai Models 适配：多供应商 OpenAI 兼容（及预留其它 api）
+ * pi-ai Models 适配：多供应商，按 api 类型映射真实 wire adapter
  */
 import {
   createModels,
@@ -15,21 +15,45 @@ import {
   stream as openaiCompletionsStream,
   streamSimple as openaiCompletionsStreamSimple
 } from '@earendil-works/pi-ai/api/openai-completions'
+import {
+  stream as openaiResponsesStream,
+  streamSimple as openaiResponsesStreamSimple
+} from '@earendil-works/pi-ai/api/openai-responses'
+import {
+  stream as anthropicMessagesStream,
+  streamSimple as anthropicMessagesStreamSimple
+} from '@earendil-works/pi-ai/api/anthropic-messages'
 import type { LlmSettingsService } from './llm-settings-service'
 import type { LlmRuntimeSelection, LlmThinkingLevel } from '../../shared/llm-settings'
 import type { ResolvedModelInfo } from '../../shared/context-usage'
 import { cacheModelLogo, resolveModelInfo } from './model-catalog'
 
-const openaiStreams: ProviderStreams = {
+const openaiCompletionsStreams: ProviderStreams = {
   stream: openaiCompletionsStream,
   streamSimple: openaiCompletionsStreamSimple
 }
 
-/** 按 api type 取 stream 实现；目前仅 openai-completions 实装 */
-function streamsForType(type: string): ProviderStreams {
-  // 预留 anthropic / responses：第一期统一走 completions 兼容端点
-  void type
-  return openaiStreams
+const openaiResponsesStreams: ProviderStreams = {
+  stream: openaiResponsesStream,
+  streamSimple: openaiResponsesStreamSimple
+}
+
+const anthropicMessagesStreams: ProviderStreams = {
+  stream: anthropicMessagesStream,
+  streamSimple: anthropicMessagesStreamSimple
+}
+
+/** 按 api type 取真实 stream 实现（P1：三种协议一一对应） */
+export function streamsForType(type: string): ProviderStreams {
+  switch (type) {
+    case 'openai-responses':
+      return openaiResponsesStreams
+    case 'anthropic-messages':
+      return anthropicMessagesStreams
+    case 'openai-completions':
+    default:
+      return openaiCompletionsStreams
+  }
 }
 
 function toPiApi(type: string): Api {

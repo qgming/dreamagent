@@ -64,8 +64,13 @@ export interface TokenUsageBreakdown {
 
 export interface SessionContextUsage {
   model: ResolvedModelInfo
-  /** 下一次请求预计会携带的上下文 token。 */
+  /** 下一次请求预计会携带的上下文 token（仅 Session 消息部分）。 */
   contextTokens: number
+  /**
+   * 最终 Provider payload 估算：system + tools + 动态块 + current user + 历史。
+   * 无 trace 时退化为 contextTokens + 基线 system/tool 估算。
+   */
+  providerPayloadTokens: number
   contextPercent: number
   autoCompactThreshold: number
   /** 当前上下文是否包含估算值（压缩后、下一次模型响应前会出现）。 */

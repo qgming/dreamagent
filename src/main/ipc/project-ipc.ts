@@ -1,5 +1,6 @@
 import { ipcMain, shell } from 'electron'
 import type { ProjectService } from '../services/project-service'
+import type { LegacyConversationMigrator } from '../services/legacy-migration'
 import type {
   CreateBeatInput,
   CreateChapterFolderInput,
@@ -32,7 +33,10 @@ function handle<T>(fn: () => Promise<T>): Promise<T> {
 /**
  * 注册项目/节点/实体/文章文件夹相关 IPC
  */
-export function registerProjectIpc(projectService: ProjectService): void {
+export function registerProjectIpc(
+  projectService: ProjectService,
+  legacyMigrator?: LegacyConversationMigrator
+): void {
   ipcMain.handle('library:getRoot', () => handle(() => projectService.getLibraryRoot()))
 
   ipcMain.handle('library:setRoot', (_e, root: string) =>
@@ -61,6 +65,19 @@ export function registerProjectIpc(projectService: ProjectService): void {
 
   ipcMain.handle('project:delete', (_e, projectId: string) =>
     handle(() => projectService.deleteProject(String(projectId)))
+  )
+
+  ipcMain.handle(
+    'project:migrateLegacyConversations',
+    (_e, projectId: string, options: { dryRun?: boolean } = {}) =>
+      handle(() => {
+        if (!legacyMigrator) {
+          throw new Error('legacy 迁移服务未初始化')
+        }
+        return legacyMigrator.migrateProject(String(projectId), {
+          dryRun: Boolean(options?.dryRun)
+        })
+      })
   )
 
   ipcMain.handle('project:revealInFolder', async (_e, projectId: string) => {

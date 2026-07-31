@@ -19,6 +19,7 @@ import { registerMcpIpc } from './ipc/mcp-ipc'
 import { registerUpdateIpc } from './ipc/update-ipc'
 import { UpdateService } from './services/update-service'
 import { ActivityLedgerService } from './services/activity-ledger'
+import { LegacyConversationMigrator } from './services/legacy-migration'
 
 /** 是否为开发环境 */
 const isDev = !app.isPackaged
@@ -169,10 +170,11 @@ app.whenReady().then(async () => {
     harnessManager
   )
 
-  registerProjectIpc(projectService)
+  const legacyMigrator = new LegacyConversationMigrator(projectService, sessionService)
+  registerProjectIpc(projectService, legacyMigrator)
   registerSessionIpc(sessionService)
   registerAgentIpc(agentRunner)
-  registerSettingsIpc(llmSettings)
+  registerSettingsIpc(llmSettings, () => harnessManager.invalidateCaches())
   registerSkillIpc(skillService)
   registerNetworkIpc()
   registerMcpIpc()

@@ -16,32 +16,66 @@ function handle<T>(fn: () => Promise<T>): Promise<T> {
 
 /**
  * 多供应商 LLM 设置 IPC（网络搜索在 network-ipc）
+ *
+ * P1：任何模型 / Provider / Key / 思考档变更后调用 onChanged，
+ * 使 HarnessManager / Models 缓存失效，避免旧 auth / model 继续使用。
  */
-export function registerSettingsIpc(llm: LlmSettingsService): void {
+export function registerSettingsIpc(
+  llm: LlmSettingsService,
+  onChanged?: () => void
+): void {
+  const notify = (): void => {
+    try {
+      onChanged?.()
+    } catch (error) {
+      console.warn('[settings-ipc] 设置变更回调失败', error)
+    }
+  }
+
   ipcMain.handle('settings:getLlm', () => handle(() => llm.getPublic()))
 
   ipcMain.handle('settings:addProvider', (_e, input: LlmAddProviderInput) =>
-    handle(() => llm.addProvider(input ?? { name: '', baseURL: '' }))
+    handle(async () => {
+      const result = await llm.addProvider(input ?? { name: '', baseURL: '' })
+      notify()
+      return result
+    })
   )
 
   ipcMain.handle(
     'settings:updateProvider',
     (_e, providerId: string, patch: LlmUpdateProviderInput) =>
-      handle(() => llm.updateProvider(providerId, patch ?? {}))
+      handle(async () => {
+        const result = await llm.updateProvider(providerId, patch ?? {})
+        notify()
+        return result
+      })
   )
 
   ipcMain.handle('settings:removeProvider', (_e, providerId: string) =>
-    handle(() => llm.removeProvider(providerId))
+    handle(async () => {
+      const result = await llm.removeProvider(providerId)
+      notify()
+      return result
+    })
   )
 
   ipcMain.handle(
     'settings:setDefaultModel',
     (_e, providerId: string, modelId: string) =>
-      handle(() => llm.setDefaultModel(providerId, modelId))
+      handle(async () => {
+        const result = await llm.setDefaultModel(providerId, modelId)
+        notify()
+        return result
+      })
   )
 
   ipcMain.handle('settings:setThinkingLevel', (_e, level: LlmThinkingLevel) =>
-    handle(() => llm.setThinkingLevel(level))
+    handle(async () => {
+      const result = await llm.setThinkingLevel(level)
+      notify()
+      return result
+    })
   )
 
   ipcMain.handle('settings:listSelectableModels', () =>

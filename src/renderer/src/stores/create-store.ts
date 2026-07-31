@@ -22,6 +22,7 @@ import {
   DEFAULT_THINKING_LEVEL
 } from '@shared/llm-settings'
 import { useProjectStore } from './project-store'
+import { extractContextRefsFromText } from '@shared/context-refs'
 
 /** 右侧详情目标 */
 export type DetailTarget = { type: 'beat' | 'entity' | 'chapter'; id: string }
@@ -882,13 +883,15 @@ export const useCreateStore = create<CreateState>((set, get) => ({
 
     const decoded = selectedModelKey ? decodeModelKey(selectedModelKey) : null
     try {
+      const contextRefs = extractContextRefsFromText(trimmed)
       const { runId } = await window.api.agent.startTurn({
         projectId,
         sessionId: activeSessionId,
         userMessage: trimmed,
         providerId: decoded?.providerId,
         modelId: decoded?.modelId,
-        thinkingLevel
+        thinkingLevel,
+        contextRefs
       })
       set({ runId })
     } catch (error) {

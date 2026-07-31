@@ -1,5 +1,10 @@
 /**
  * Pi Session 服务：每项目一个 JsonlSessionRepo
+ *
+ * P1 修复：
+ * - repo.list I/O 异常不得转成 [] 后建空会话；只有明确空目录才 create。
+ * - 同 ID 多文件按最新 entry 时间戳选择（而不是只按 path 字典序）。
+ * - contextPercent / providerPayloadTokens 基于最终编译上下文估算（含 system/tools）。
  */
 import path from 'path'
 import {
@@ -12,6 +17,7 @@ import {
   type SessionTreeEntry
 } from '@earendil-works/pi-agent-core'
 import type { Usage } from '@earendil-works/pi-ai'
+import type { JsonlSessionMetadata } from '@earendil-works/pi-agent-core'
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node'
 import { createId } from '../../shared/ids'
 import type {
@@ -46,6 +52,48 @@ interface ProjectSessionRuntime {
   /** sessionId → 打开中的 Session Promise，防并发双建 */
   sessions: Map<string, Promise<Session>>
 }
+
+function entryTimeMs(entry: { timestamp?: string | number }): number {
+  const ts = entry.timestamp
+  if (typeof ts === 'number' && Number.isFinite(ts)) return ts
+  if (typeof ts === 'string') {
+    const n = Date.parse(ts)
+    return Number.isNaN(n) ? 0 : n
+  }
+  return 0
+}
+
+/** 同 ID 多文件：取最新 entry 时间戳；打开失败时回退 createdAt */
+async function pickBestMeta(
+  rt: ProjectSessionRuntime,
+  hits: JsonlSessionMetadata[]
+): Promise<JsonlSessionMetadata> {
+  if (hits.length <= 1) return hits[0]!
+  let best = hits[0]!
+  let bestTs = -1
+  for (const meta of hits) {
+    try {
+      const session = await rt.repo.open(meta)
+      const entries = await session.getEntries()
+      const ts = entries.reduce((max, e) => Math.max(max, entryTimeMs(e)), 0)
+      if (ts > bestTs) {
+        bestTs = ts
+        best = meta
+      }
+    } catch {
+      const created = Date.parse(meta.createdAt)
+      if (!Number.isNaN(created) && created > bestTs) {
+        bestTs = created
+        best = meta
+      }
+    }
+  }
+  return best
+}
+
+/** 基线 system + tools 估算（无 trace 时兜底，避免 UI 低估 Provider payload） */
+const BASELINE_SYSTEM_TOKENS = 900
+const BASELINE_TOOL_TOKENS = 700
 
 /**
  * 项目级 pi 会话仓库
@@ -108,7 +156,8 @@ export class PiSessionService {
   async getUsage(
     projectId: string,
     sessionId: string,
-    modelOverride?: { providerId?: string; modelId?: string }
+    modelOverride?: { providerId?: string; modelId?: string },
+    providerEstimate?: { estimatedInputTokens: number }
   ): Promise<SessionContextUsage> {
     const session = await this.openSessionObject(projectId, sessionId)
     const [branch, context, entries, stats, model] = await Promise.all([
@@ -147,6 +196,15 @@ export class PiSessionService {
       estimated = estimate.lastUsageIndex === null
     }
 
+    // providerPayloadTokens = 调用方传入的最终编译上下文估算（system+tools+current user+历史）；
+    // 未提供时退化为 contextTokens + 基线 system/tool 估算。
+    let providerPayloadTokens = contextTokens
+    if (providerEstimate && providerEstimate.estimatedInputTokens > 0) {
+      providerPayloadTokens = providerEstimate.estimatedInputTokens
+    } else {
+      providerPayloadTokens = contextTokens + BASELINE_SYSTEM_TOKENS + BASELINE_TOOL_TOKENS
+    }
+
     const cumulative: TokenUsageBreakdown = {
       input: 0,
       output: 0,
@@ -166,9 +224,10 @@ export class PiSessionService {
     return {
       model,
       contextTokens,
+      providerPayloadTokens,
       contextPercent:
         model.contextWindow > 0
-          ? Math.min((contextTokens / model.contextWindow) * 100, 100)
+          ? Math.min((providerPayloadTokens / model.contextWindow) * 100, 100)
           : 0,
       autoCompactThreshold: AUTO_COMPACT_RATIO,
       estimated,
@@ -213,12 +272,12 @@ export class PiSessionService {
     if (cached) return cached
 
     const promise = (async () => {
-      // 与 list 一致：限定 cwd:'.'，避免扫错目录
-      const metas = await rt.repo.list({ cwd: '.' }).catch(() => [])
+      // P1：repo.list I/O 异常必须向上抛（不允许静默建空会话遮蔽旧历史）。
+      // 只有明确返回空列表（目录存在但无会话）才 create。
+      const metas = await rt.repo.list({ cwd: '.' })
       const hits = metas.filter((m) => m.id === sessionId)
       if (hits.length > 0) {
-        // 取 path 最新的一条
-        const best = hits.slice().sort((a, b) => (b.path || '').localeCompare(a.path || ''))[0]
+        const best = await pickBestMeta(rt, hits)
         return rt.repo.open(best)
       }
       return rt.repo.create({ cwd: '.', id: sessionId })
@@ -246,11 +305,16 @@ export class PiSessionService {
       console.warn('[pi-session] list 失败', error)
       return []
     })
-    // 同 id 可能多文件，按 id 分组取 path 字典序最大（最新文件）
-    const byId = new Map<string, (typeof metas)[number]>()
-    for (const m of metas) {
-      const prev = byId.get(m.id)
-      if (!prev || (m.path || '') > (prev.path || '')) byId.set(m.id, m)
+    // 同 id 可能多文件：按最新 entry 时间戳选，避免字典序误选旧文件
+    const byId = new Map<string, JsonlSessionMetadata>()
+    for (const meta of metas) {
+      const group = [...byId.values()].filter((m) => m.id === meta.id)
+      if (group.length === 0) {
+        byId.set(meta.id, meta)
+        continue
+      }
+      const best = await pickBestMeta(rt, [meta, ...group])
+      byId.set(meta.id, best)
     }
 
     const summaries: SessionSummary[] = []
@@ -271,17 +335,7 @@ export class PiSessionService {
         const updatedAt =
           branch.length > 0
             ? new Date(
-                Math.max(
-                  ...branch.map((e) => {
-                    const ts = e.timestamp
-                    if (typeof ts === 'number') return ts
-                    if (typeof ts === 'string') {
-                      const n = Date.parse(ts)
-                      return Number.isNaN(n) ? 0 : n
-                    }
-                    return 0
-                  })
-                )
+                Math.max(...branch.map((e) => entryTimeMs(e)))
               ).toISOString()
             : meta.createdAt
 
@@ -313,12 +367,15 @@ export class PiSessionService {
       console.warn('[pi-session] tokenActivity list 失败', error)
       return []
     })
-    const byId = new Map<string, (typeof metas)[number]>()
+    const byId = new Map<string, JsonlSessionMetadata>()
     for (const meta of metas) {
-      const previous = byId.get(meta.id)
-      if (!previous || (meta.path || '') > (previous.path || '')) {
+      const group = [...byId.values()].filter((m) => m.id === meta.id)
+      if (group.length === 0) {
         byId.set(meta.id, meta)
+        continue
       }
+      const best = await pickBestMeta(rt, [meta, ...group])
+      byId.set(meta.id, best)
     }
 
     const usageEntries: Array<{ id: string; date: string; tokens: number }> = []
@@ -403,19 +460,7 @@ export class PiSessionService {
       name || previewFromMessages(messages)?.slice(0, 30) || '新对话'
     const updatedAt =
       branch.length > 0
-        ? new Date(
-            Math.max(
-              ...branch.map((e) => {
-                const ts = e.timestamp
-                if (typeof ts === 'number') return ts
-                if (typeof ts === 'string') {
-                  const n = Date.parse(ts)
-                  return Number.isNaN(n) ? 0 : n
-                }
-                return 0
-              })
-            )
-          ).toISOString()
+        ? new Date(Math.max(...branch.map((e) => entryTimeMs(e)))).toISOString()
         : meta.createdAt
     const usage = await this.getUsage(projectId, sessionId)
 

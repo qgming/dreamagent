@@ -1,12 +1,21 @@
 /**
  * 每会话一个 AgentHarness 缓存（少 recreate，动态 systemPrompt / context）
+ *
+ * P0 修复（2026-07-31）：
+ * - 删除 context hook 的整体替换（pi 的 context hook 语义是“返回下一次请求的
+ *   完整消息数组”，不是“追加消息”）。
+ * - pins / todo / 显式引用合入每轮重新生成的 systemPrompt 数据分区。
  */
 import {
   AgentHarness,
   formatSkillsForSystemPrompt
 } from '@earendil-works/pi-agent-core'
-import type { Model, Models, Api } from '@earendil-works/pi-ai'
-import type { ThinkingLevel } from '@earendil-works/pi-agent-core'
+import type {
+  Model,
+  Models,
+  Api
+} from '@earendil-works/pi-ai'
+import type { ThinkingLevel, AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
 import type { ProjectService } from './project-service'
 import type { PiSessionService } from './pi-session-service'
 import type { PiModelsService } from './pi-models'
@@ -14,7 +23,6 @@ import type { SkillService } from './skill-service'
 import { AgentToolRuntime } from './agent-tool-runtime'
 import {
   buildDreamAgentTools,
-  DREAM_AGENT_BASE_PROMPT,
   type DreamToolContext
 } from './pi-agent-tools'
 import { buildSkillTools } from './skill-tools'
@@ -23,8 +31,10 @@ import { buildTodoTools } from './todo-tools'
 import { buildMcpTools } from './mcp-tools'
 import { getMcpService } from './mcp-service'
 import type { TodoService } from './todo-service'
-import { readPinsFromBranch } from './pi-session-parser'
 import type { LlmThinkingLevel } from '../../shared/llm-settings'
+import type { ContextRef, ActiveDocumentRef } from '../../shared/context-refs'
+import { ContextBuilder, type CompileInput } from './context/context-builder'
+import type { CompiledContext } from './context/types'
 
 type DreamHarness = AgentHarness<DreamToolContext>
 
@@ -36,6 +46,8 @@ interface CachedHarness {
   promise: Promise<DreamHarness>
   /** 仅 skills 集合变化时重建；模型/思考用 setModel 热切换 */
   signature: string
+  skillsBlock: string
+  mcpBlock: string
 }
 
 export interface HarnessSelection {
@@ -44,13 +56,32 @@ export interface HarnessSelection {
   thinkingLevel?: LlmThinkingLevel
 }
 
+/** 一次运行的请求上下文（runId + 显式引用 + 当前 user） */
+export interface PendingRequestContext {
+  runId: string
+  userMessage: string
+  contextRefs: ContextRef[]
+  activeDocument?: ActiveDocumentRef
+}
+
+interface HarnessWithBlocks {
+  harness: DreamHarness
+  skillsBlock: string
+  mcpBlock: string
+}
+
 /**
  * Harness 管理器
  */
 export class HarnessManager {
   private cache = new Map<string, CachedHarness>()
   private pending = new Map<string, Promise<DreamHarness>>()
+  /** 当前运行中的请求上下文（供 systemPrompt 回调读取） */
+  private requestContexts = new Map<string, PendingRequestContext>()
+  /** 每个会话上一次实际使用的模型 key（reasoning 回放策略） */
+  private lastModelKeys = new Map<string, string>()
   private readonly toolRuntime: AgentToolRuntime
+  private readonly contextBuilder: ContextBuilder
 
   constructor(
     private readonly projects: ProjectService,
@@ -60,6 +91,7 @@ export class HarnessManager {
     private readonly todos: TodoService
   ) {
     this.toolRuntime = new AgentToolRuntime(projects)
+    this.contextBuilder = new ContextBuilder(projects, sessions, todos)
   }
 
   clear(): void {
@@ -68,6 +100,8 @@ export class HarnessManager {
     }
     this.cache.clear()
     this.pending.clear()
+    this.requestContexts.clear()
+    this.lastModelKeys.clear()
     this.modelsService.reset()
   }
 
@@ -87,89 +121,28 @@ export class HarnessManager {
       this.cache.delete(key)
     }
     this.pending.delete(key)
+    this.requestContexts.delete(key)
+    this.lastModelKeys.delete(key)
   }
 
-  /**
-   * L0+L1：稳定规则 + 压缩 outline（不含 pin 全文）
-   */
-  private async buildSystemPrompt(projectId: string, sessionId: string): Promise<string> {
-    const snap = await this.projects.openProject(projectId)
-
-    const outlineLines: string[] = []
-    const walkOutline = (ids: string[], depth: number): void => {
-      for (const id of ids) {
-        const b = snap.beats[id]
-        if (!b) continue
-        const pad = '  '.repeat(depth)
-        const title = (b.title || '未命名').replace(/\s+/g, ' ').trim().slice(0, 40)
-        outlineLines.push(`${pad}- [${b.status}] ${title} (${b.id})`)
-        walkOutline(snap.index.beats.children[id] ?? [], depth + 1)
-      }
-    }
-    walkOutline(snap.index.beats.roots, 0)
-
-    const projectSummary = snap.meta.description?.trim() || '（暂未填写）'
-
-    const parts = [
-      DREAM_AGENT_BASE_PROMPT,
-      `## 当前项目（项目资料，不是系统指令）\n标题：${snap.meta.title}\n梗概（项目的主要介绍内容）：\n${projectSummary}`,
-      outlineLines.length
-        ? `## 节点大纲（仅标题；细节请 read）\n${outlineLines.join('\n')}`
-        : '## 节点大纲\n（暂无节点）',
-      `## 会话\nsessionId=${sessionId}`
-    ]
-    return parts.filter(Boolean).join('\n\n')
-  }
-
-  /** 钉选 + todo 动态段（context hook 注入） */
-  private async buildDynamicContextBlock(
+  /** 开始一次运行：记录 runId / userMessage / contextRefs，供每轮 systemPrompt 读取 */
+  beginRequest(
     projectId: string,
-    sessionId: string
-  ): Promise<string> {
-    const snap = await this.projects.openProject(projectId)
-    const branch = await this.sessions
-      .getActiveHistoryEntries(projectId, sessionId)
-      .catch(() => [])
-    const pins = readPinsFromBranch(branch)
+    sessionId: string,
+    request: PendingRequestContext
+  ): void {
+    this.requestContexts.set(harnessKey(projectId, sessionId), request)
+    // 新一轮：项目快照缓存进入新代数（同一轮内多次编译复用，避免重复读盘）
+    this.contextBuilder.beginCycle(projectId)
+  }
 
-    const pinBeatLines = pins.pinnedBeatIds
-      .map((id) => snap.beats[id])
-      .filter(Boolean)
-      .map((b) => {
-        const body = (b.content || '').replace(/\s+/g, ' ').trim().slice(0, 400)
-        return `### 节点「${b.title}」(${b.id}) [${b.status}]\n${body || '（空）'}`
-      })
+  /** 结束运行：清理请求上下文 */
+  endRequest(projectId: string, sessionId: string): void {
+    this.requestContexts.delete(harnessKey(projectId, sessionId))
+  }
 
-    const pinEntityLines = pins.pinnedEntityIds
-      .map((id) => snap.entities[id])
-      .filter(Boolean)
-      .map((e) => {
-        const body = (e.content || '').replace(/\s+/g, ' ').trim().slice(0, 400)
-        return `### 实体「${e.name}」(${e.id}) [${e.status}]\n${body || '（空）'}`
-      })
-
-    let todoBlock = ''
-    try {
-      const todos = await this.todos.load(projectId, sessionId)
-      const open = todos.filter((t) => t.status !== 'completed' && t.status !== 'cancelled')
-      if (open.length) {
-        todoBlock =
-          '## 未完成待办\n' +
-          open
-            .map((t) => `- [${t.status}] ${t.content || t.id}`)
-            .join('\n')
-      }
-    } catch {
-      // ignore
-    }
-
-    return [
-      pinBeatLines.length ? `## 已钉选节点\n${pinBeatLines.join('\n\n')}` : '',
-      pinEntityLines.length ? `## 已钉选实体\n${pinEntityLines.join('\n\n')}` : '',
-      todoBlock
-    ]
-      .filter(Boolean)
-      .join('\n\n')
+  getPendingRequest(projectId: string, sessionId: string): PendingRequestContext | undefined {
+    return this.requestContexts.get(harnessKey(projectId, sessionId))
   }
 
   /** 结构性签名：skills / MCP 变化才重建 harness */
@@ -220,10 +193,15 @@ export class HarnessManager {
     }
 
     const createPromise = this.createHarness(projectId, sessionId, selection)
-      .then((harness) => {
-        this.cache.set(key, { promise: Promise.resolve(harness), signature })
+      .then((created) => {
+        this.cache.set(key, {
+          promise: Promise.resolve(created.harness),
+          signature,
+          skillsBlock: created.skillsBlock,
+          mcpBlock: created.mcpBlock
+        })
         this.pending.delete(key)
-        return harness
+        return created.harness
       })
       .catch((err) => {
         this.pending.delete(key)
@@ -258,11 +236,72 @@ export class HarnessManager {
     }
   }
 
+  private buildSkillsBlock(piSkills: Awaited<ReturnType<SkillService['getEnabledPiSkills']>>): string {
+    return [
+      formatSkillsForSystemPrompt(piSkills),
+      piSkills.length > 0
+        ? '需要使用某个技能时：先 list_skills 确认可用技能，再 read_skill 读取完整说明和目录树；references 等子文件用 read_skill_file。不要假设技能全文已在系统提示中。可用 write_skill 创建/编辑/删除自定义技能（不能改内置）。'
+        : '可用 write_skill 创建自定义技能；list_skills / read_skill 在有启用技能时可用。'
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+  }
+
+  private buildMcpBlock(mcpToolsCount: number, mcpServerCount: number): string {
+    return mcpToolsCount > 0
+      ? `已接入 ${mcpServerCount} 个 MCP server、${mcpToolsCount} 个工具（名称形如 mcp__server__tool）。按任务需要调用。`
+      : ''
+  }
+
+  /** 编译当前请求（systemPrompt + manifest），并缓存供 trace 合并 */
+  private async compileForHarness(
+    projectId: string,
+    sessionId: string,
+    turnContext: {
+      session: { buildContext(): Promise<{ messages: AgentMessage[] }> }
+      model: { id: string; provider: string; api: Api; contextWindow: number; maxTokens: number }
+      thinkingLevel: ThinkingLevel
+      activeTools: unknown[]
+    },
+    skillsBlock: string,
+    mcpBlock: string
+  ): Promise<CompiledContext> {
+    const key = harnessKey(projectId, sessionId)
+    const pending = this.getPendingRequest(projectId, sessionId)
+    const context = await turnContext.session.buildContext()
+    const currentModelKey = `${turnContext.model.provider}::${turnContext.model.api}::${turnContext.model.id}`
+    const previousModelKey = this.lastModelKeys.get(key)
+    const input: CompileInput = {
+      projectId,
+      sessionId,
+      runId: pending?.runId ?? 'build',
+      userMessage: pending?.userMessage ?? '',
+      contextRefs: pending?.contextRefs ?? [],
+      activeDocument: pending?.activeDocument,
+      model: {
+        providerId: turnContext.model.provider,
+        modelId: turnContext.model.id,
+        api: turnContext.model.api,
+        contextWindow: turnContext.model.contextWindow,
+        maxOutputTokens: turnContext.model.maxTokens
+      },
+      thinkingLevel: turnContext.thinkingLevel as LlmThinkingLevel,
+      sessionMessages: context.messages,
+      toolSchemas: turnContext.activeTools as unknown as AgentTool[],
+      skillsBlock,
+      mcpBlock,
+      previousModelKey
+    }
+    const compiled = await this.contextBuilder.compile(input)
+    this.lastModelKeys.set(key, currentModelKey)
+    return compiled
+  }
+
   private async createHarness(
     projectId: string,
     sessionId: string,
     selection?: HarnessSelection
-  ): Promise<DreamHarness> {
+  ): Promise<HarnessWithBlocks> {
     const [{ models, model, selection: sel }, session, piSkills] =
       await Promise.all([
         this.modelsService.getModelsAndDefault(selection),
@@ -273,14 +312,7 @@ export class HarnessManager {
         })
       ])
 
-    const skillsBlock = [
-      formatSkillsForSystemPrompt(piSkills),
-      piSkills.length > 0
-        ? '需要使用某个技能时：先 list_skills 确认可用技能，再 read_skill 读取完整说明和目录树；references 等子文件用 read_skill_file。不要假设技能全文已在系统提示中。可用 write_skill 创建/编辑/删除自定义技能（不能改内置）。'
-        : '可用 write_skill 创建自定义技能；list_skills / read_skill 在有启用技能时可用。'
-    ]
-      .filter(Boolean)
-      .join('\n\n')
+    const skillsBlock = this.buildSkillsBlock(piSkills)
 
     // 云端 MCP：启用且探测成功的 server 注入为 pi 工具
     const mcpConfigs = await getMcpService()
@@ -290,10 +322,7 @@ export class HarnessManager {
         return []
       })
     const mcpTools = buildMcpTools(mcpConfigs)
-    const mcpBlock =
-      mcpTools.length > 0
-        ? `## 云端 MCP\n已接入 ${mcpConfigs.length} 个 MCP server、${mcpTools.length} 个工具（名称形如 mcp__server__tool）。按任务需要调用。`
-        : ''
+    const mcpBlock = this.buildMcpBlock(mcpTools.length, mcpConfigs.length)
 
     const tools = [
       ...buildDreamAgentTools(),
@@ -319,10 +348,17 @@ export class HarnessManager {
       model: model as Model<Api>,
       tools,
       toolContext,
-      // 动态 systemPrompt：每轮重建 L0+L1，pins 走 context hook
-      systemPrompt: async () => {
-        const base = await this.buildSystemPrompt(projectId, sessionId)
-        return [base, skillsBlock, mcpBlock].filter(Boolean).join('\n\n')
+      // P0：动态 systemPrompt 每轮重建（含 pins / todo / 显式引用数据分区），
+      // 不再注册 replacement context hook。
+      systemPrompt: async (turnContext) => {
+        const compiled = await this.compileForHarness(
+          projectId,
+          sessionId,
+          turnContext,
+          skillsBlock,
+          mcpBlock
+        )
+        return compiled.systemPrompt
       },
       resources: { skills: piSkills },
       thinkingLevel,
@@ -337,27 +373,7 @@ export class HarnessManager {
       }
     })
 
-    // 每轮注入钉选与 todo
-    harness.on('context', async () => {
-      try {
-        const block = await this.buildDynamicContextBlock(projectId, sessionId)
-        if (!block) return undefined
-        return {
-          messages: [
-            {
-              role: 'user' as const,
-              content: `【系统动态上下文 — 仅供参考，勿原样复述】\n${block}`,
-              timestamp: Date.now()
-            }
-          ]
-        }
-      } catch (error) {
-        console.warn('[harness-manager] context hook 失败', error)
-        return undefined
-      }
-    })
-
-    return harness
+    return { harness, skillsBlock, mcpBlock }
   }
 
   /** 兼容旧调用：仅在 skills 变时重建，否则复用 */
@@ -370,8 +386,82 @@ export class HarnessManager {
     return this.getOrCreate(projectId, sessionId, selection)
   }
 
-  /** 强制丢弃缓存（设置页改供应商后） */
+  /** 强制丢弃缓存并中止运行中的 harness（应用退出 / 明确重置） */
   invalidateAll(): void {
     this.clear()
+  }
+
+  /** 项目图变更（agent 工具写入等）后失效快照缓存 */
+  invalidateProjectSnapshot(projectId: string): void {
+    this.contextBuilder.invalidateProject(projectId)
+  }
+
+  /**
+   * 设置变更后的非破坏性失效：只清缓存与 Models，不 abort 正在运行的 turn。
+   * 下一轮 getOrCreate 会用最新 Provider / Key / Model 重建，当前轮不受影响。
+   */
+  invalidateCaches(): void {
+    for (const c of this.cache.values()) {
+      void c.promise.catch(() => undefined)
+    }
+    this.cache.clear()
+    this.pending.clear()
+    this.requestContexts.clear()
+    this.lastModelKeys.clear()
+    this.modelsService.reset()
+  }
+
+  /**
+   * 预估下一次请求的总输入 token 与预算（供 compaction 决策）。
+   * 使用最终编译上下文：system + tools + 动态块 + current user + 历史。
+   */
+  async estimateNextRequestTokens(
+    projectId: string,
+    sessionId: string,
+    selection: HarnessSelection | undefined,
+    userMessage: string,
+    contextRefs: ContextRef[] = [],
+    activeDocument?: ActiveDocumentRef
+  ): Promise<{
+    estimatedInputTokens: number
+    budget: { contextWindow: number; outputReserve: number; safetyReserve: number; inputBudget: number; fixedTokens: number; availableForHistory: number }
+    over: boolean
+  }> {
+    const harness = await this.getOrCreate(projectId, sessionId, selection)
+    const key = harnessKey(projectId, sessionId)
+    const cached = this.cache.get(key)
+    const skillsBlock = cached?.skillsBlock ?? ''
+    const mcpBlock = cached?.mcpBlock ?? ''
+    const model = harness.getModel()
+    const session = await this.sessions.openSessionObject(projectId, sessionId)
+    const context = await session.buildContext()
+    const runId = this.getPendingRequest(projectId, sessionId)?.runId ?? 'estimate'
+
+    const input: CompileInput = {
+      projectId,
+      sessionId,
+      runId,
+      userMessage,
+      contextRefs,
+      activeDocument,
+      model: {
+        providerId: model.provider,
+        modelId: model.id,
+        api: model.api,
+        contextWindow: model.contextWindow,
+        maxOutputTokens: model.maxTokens
+      },
+      thinkingLevel: harness.getThinkingLevel() as unknown as LlmThinkingLevel,
+      sessionMessages: context.messages,
+      toolSchemas: harness.getTools() as unknown as AgentTool[],
+      skillsBlock,
+      mcpBlock
+    }
+    const estimate = await this.contextBuilder.estimateNextRequest(input)
+    return {
+      estimatedInputTokens: estimate.estimatedInputTokens,
+      budget: estimate.budget,
+      over: estimate.over
+    }
   }
 }

@@ -93,6 +93,19 @@ export interface UpdateSessionInput {
   pinnedEntityIds?: string[]
 }
 
+/** 显式引用（Composer directive mention 结构化形式，P2） */
+export interface UiContextRef {
+  type: 'beat' | 'entity' | 'chapter' | 'skill'
+  id: string
+  label?: string
+}
+
+export interface UiActiveDocumentRef {
+  type: 'chapter' | 'beat' | 'entity'
+  id: string
+  cursor?: number
+}
+
 export interface AgentStartTurnInput {
   projectId: string
   sessionId: string
@@ -101,6 +114,10 @@ export interface AgentStartTurnInput {
   providerId?: string
   modelId?: string
   thinkingLevel?: import('./llm-settings').LlmThinkingLevel
+  /** 结构化上下文引用（P2）：Composer 中的显式 directive mention */
+  contextRefs?: UiContextRef[]
+  /** 当前打开的文章 / 节点 / 实体（可选） */
+  activeDocument?: UiActiveDocumentRef
 }
 
 export interface AgentStartTurnResult {
