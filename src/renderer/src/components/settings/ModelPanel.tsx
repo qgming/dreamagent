@@ -18,8 +18,27 @@ import {
   Check
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Modal, ModalContent, ModalTitle } from '@/components/ui/modal'
+import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog'
 import { PageTitle, SettingDropdown, SettingRow } from './settings-shared'
 import { cn } from '@/lib/utils'
 import type {
@@ -241,7 +260,7 @@ export function ModelPanel(): React.JSX.Element {
         <p className="mt-4 text-sm text-destructive">{error}</p>
       ) : null}
 
-      <div className="mt-8 divide-y divide-border rounded-xl border border-border bg-card">
+      <div className="mt-6 divide-y divide-border rounded-lg border border-border bg-card">
         <SettingRow
           title="默认模型"
           description="创作对话默认使用的模型。"
@@ -330,7 +349,7 @@ export function ModelPanel(): React.JSX.Element {
           ))}
         </div>
       ) : (
-        <div className="mt-4 rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
+        <div className="mt-4 rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
           还没有模型服务。点击「添加服务」配置 Base URL 与 API Key。
         </div>
       )}
@@ -380,6 +399,7 @@ function ProviderCard({
   const [name, setName] = useState(provider.name)
   const [type, setType] = useState<LlmProviderApiType>(provider.type)
   const [newModel, setNewModel] = useState('')
+  const [newModelOpen, setNewModelOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -436,6 +456,7 @@ function ProviderCard({
     if (!id || provider.models.some((m) => m.id === id)) return
     void persistModels([...provider.models, { id, name: id }])
     setNewModel('')
+    setNewModelOpen(false)
   }
 
   const removeModel = (modelId: string): void => {
@@ -532,7 +553,7 @@ function ProviderCard({
   }, [remoteModels, remoteFilter])
 
   return (
-    <div className="rounded-xl border border-border bg-card">
+    <div className="rounded-lg border border-border bg-card">
       <button
         type="button"
         className="flex w-full items-center gap-3 px-4 py-3 text-left"
@@ -543,7 +564,7 @@ function ProviderCard({
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-medium">{provider.name}</span>
             {!provider.hasApiKey ? (
-              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-400">
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                 无 Key
               </span>
             ) : null}
@@ -650,7 +671,7 @@ function ProviderCard({
               删除服务
             </Button>
             {saveMsg ? (
-              <span className="flex items-center gap-1 text-xs text-emerald-600">
+              <span className="flex items-center gap-1 text-xs text-foreground">
                 <Check className="size-3" />
                 {saveMsg}
               </span>
@@ -724,45 +745,70 @@ function ProviderCard({
                 ))
               )}
             </div>
-            <div className="mt-2 flex gap-2">
-              <Input
-                value={newModel}
-                onChange={(e) => setNewModel(e.target.value)}
-                placeholder="模型 ID，如 gpt-4o / claude-sonnet-4"
-                className="h-8"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    addModel()
-                  }
-                }}
-              />
+            <div className="mt-2 flex justify-end">
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={addModel}
-                disabled={!newModel.trim()}
+                onClick={() => setNewModelOpen(true)}
               >
                 <Plus className="size-3.5" />
-                添加
+                添加模型
               </Button>
             </div>
           </div>
         </div>
       ) : null}
 
-      {remoteOpen ? (
-        <Modal open onOpenChange={(o) => !o && setRemoteOpen(false)}>
-          <ModalContent size="lg" showCloseButton className="max-w-[520px]">
-            <ModalTitle className="text-base font-semibold">
-              选择要保存的模型
-            </ModalTitle>
-            <p className="mt-1 text-xs text-muted-foreground">
-              来自 {baseURL.replace(/\/+$/, '')}/models · 勾选后写入本地
-            </p>
+      <Dialog
+        open={newModelOpen}
+        onOpenChange={(open) => {
+          setNewModelOpen(open)
+          if (!open) setNewModel('')
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>添加模型</DialogTitle>
+            <DialogDescription>输入服务端使用的模型 ID。</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="new-model-id">模型 ID</Label>
             <Input
-              className="mt-3 h-8"
+              id="new-model-id"
+              autoFocus
+              value={newModel}
+              onChange={(e) => setNewModel(e.target.value)}
+              placeholder="gpt-4o / claude-sonnet-4"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  addModel()
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setNewModelOpen(false)}>
+              取消
+            </Button>
+            <Button type="button" onClick={addModel} disabled={!newModel.trim()}>
+              添加
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {remoteOpen ? (
+        <Dialog open onOpenChange={(o) => !o && setRemoteOpen(false)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>选择要保存的模型</DialogTitle>
+              <DialogDescription>
+                来自 {baseURL.replace(/\/+$/, '')}/models，勾选后写入本地。
+              </DialogDescription>
+            </DialogHeader>
+            <Input
               value={remoteFilter}
               onChange={(e) => setRemoteFilter(e.target.value)}
               placeholder="筛选模型…"
@@ -779,11 +825,10 @@ function ProviderCard({
                       checked && 'bg-muted/60'
                     )}
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       className="mt-1"
                       checked={checked}
-                      onChange={() => {
+                      onCheckedChange={() => {
                         setRemoteSelected((prev) => {
                           const next = new Set(prev)
                           if (next.has(m.id)) next.delete(m.id)
@@ -803,7 +848,7 @@ function ProviderCard({
                           </span>
                         ) : null}
                         {m.matched === false ? (
-                          <span className="shrink-0 text-[10px] text-amber-600">
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
                             未识别
                           </span>
                         ) : null}
@@ -830,7 +875,7 @@ function ProviderCard({
                 </p>
               ) : null}
             </div>
-            <div className="mt-3 flex items-center justify-between gap-2">
+            <DialogFooter className="items-center justify-between sm:justify-between">
               <div className="flex gap-2">
                 <Button
                   type="button"
@@ -870,9 +915,9 @@ function ProviderCard({
                   保存 {remoteSelected.size} 个
                 </Button>
               </div>
-            </div>
-          </ModalContent>
-        </Modal>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       ) : null}
     </div>
   )
@@ -913,58 +958,58 @@ function AddProviderDialog({
   }
 
   return (
-    <Modal
+    <Dialog
       open
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
     >
-      <ModalContent size="md" showCloseButton className="max-w-[460px]">
-        <ModalTitle className="text-base font-semibold">添加模型服务</ModalTitle>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>添加模型服务</DialogTitle>
+          <DialogDescription>配置兼容接口，创建后再选择可用模型。</DialogDescription>
+        </DialogHeader>
         <div className="mt-4 space-y-3">
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">名称</span>
+          <div className="grid gap-2">
+            <Label htmlFor="provider-name">名称</Label>
             <Input
+              id="provider-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="如 OpenRouter / DeepSeek"
             />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              接口格式
-            </span>
+          </div>
+          <div className="grid gap-2">
+            <Label>接口格式</Label>
             <SettingDropdown
               value={type}
               options={API_TYPE_OPTIONS}
               onChange={(v) => setType(v as LlmProviderApiType)}
               className="w-full justify-between"
             />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              Base URL
-            </span>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="provider-base-url">Base URL</Label>
             <Input
+              id="provider-base-url"
               value={baseURL}
               onChange={(e) => setBaseURL(e.target.value)}
               placeholder="https://api.deepseek.com"
             />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              API Key（可选，稍后可填）
-            </span>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="provider-api-key">API Key（可选，稍后可填）</Label>
             <Input
+              id="provider-api-key"
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="sk-…"
               autoComplete="off"
             />
-          </label>
+          </div>
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
-          <div className="flex justify-end gap-2 pt-2">
+          <DialogFooter className="pt-2">
             <Button type="button" variant="ghost" onClick={onClose}>
               取消
             </Button>
@@ -977,10 +1022,10 @@ function AddProviderDialog({
               <Settings2 className="size-3.5" />
               创建
             </Button>
-          </div>
+          </DialogFooter>
         </div>
-      </ModalContent>
-    </Modal>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -993,18 +1038,19 @@ function ConfirmRemoveDialog({
 }): React.JSX.Element {
   const [busy, setBusy] = useState(false)
   return (
-    <Modal open onOpenChange={(o) => !o && onCancel()}>
-      <ModalContent size="sm" showCloseButton>
-        <ModalTitle className="text-base font-semibold">删除模型服务</ModalTitle>
-        <p className="mt-2 text-sm text-muted-foreground">
-          确定删除该服务及其全部模型配置？此操作不可撤销。
-        </p>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onCancel}>
+    <AlertDialog open onOpenChange={(o) => !o && onCancel()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除模型服务</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除该服务及其全部模型配置？此操作不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={onCancel}>
             取消
-          </Button>
-          <Button
-            type="button"
+          </AlertDialogCancel>
+          <AlertDialogAction
             variant="destructive"
             disabled={busy}
             onClick={() => {
@@ -1014,9 +1060,9 @@ function ConfirmRemoveDialog({
           >
             {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
             删除
-          </Button>
-        </div>
-      </ModalContent>
-    </Modal>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

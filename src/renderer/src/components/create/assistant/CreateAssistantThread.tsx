@@ -70,7 +70,7 @@ function UserBubble(): React.JSX.Element {
     <MessagePrimitive.Root className="flex flex-col items-end gap-1">
       <UserMessageAttachments />
       <div
-        className="max-w-[85%] rounded-2xl bg-user-bubble px-3.5 py-2 text-sm text-user-bubble-foreground select-text"
+        className="max-w-[85%] rounded-lg bg-user-bubble px-3.5 py-2 text-sm text-user-bubble-foreground select-text"
         data-message-selectable
       >
         <MessagePrimitive.Parts
@@ -252,7 +252,7 @@ export function CreateAssistantThread(): React.JSX.Element {
     () =>
       ({
         ['--thread-max-width' as string]: '42rem',
-        ['--composer-radius' as string]: '1.25rem',
+        ['--composer-radius' as string]: '0.625rem',
         ['--composer-padding' as string]: '8px'
       }) as React.CSSProperties,
     []

@@ -79,7 +79,7 @@ export function OverviewPage(): React.JSX.Element {
 
   return (
     <div className="h-full overflow-y-auto app-scrollbar">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-8 py-8">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-8 py-8">
         {/* 项目头：标题 + 简介可编辑 */}
         <ProjectHeader
           beatCount={beats.length}
@@ -95,16 +95,16 @@ export function OverviewPage(): React.JSX.Element {
 
         {/* 进度 + 实体状况 */}
         <div className="grid gap-4 sm:grid-cols-2">
-          <section className="rounded-xl border border-border bg-card p-4">
+          <section className="rounded-lg border border-border bg-card p-5">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="text-sm font-medium">写作进度</h2>
               <span className="text-xs text-muted-foreground">
                 {beats.length === 0 ? '暂无节点' : `${progressPct}% 成文+定稿`}
               </span>
             </div>
-            <div className="mb-3 h-2 overflow-hidden rounded-full bg-muted">
+            <div className="mb-3 h-2 overflow-hidden rounded-sm bg-muted">
               <div
-                className="h-full rounded-full bg-emerald-500/80 transition-[width]"
+                className="h-full bg-foreground transition-[width]"
                 style={{ width: `${progressPct}%` }}
               />
             </div>
@@ -120,7 +120,7 @@ export function OverviewPage(): React.JSX.Element {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-card p-4">
+          <section className="rounded-lg border border-border bg-card p-5">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="text-sm font-medium">实体状况</h2>
               <span className="text-xs text-muted-foreground">
@@ -143,7 +143,7 @@ export function OverviewPage(): React.JSX.Element {
 
         {/* 空项目引导 / 最近更新 */}
         {beats.length === 0 && entities.length === 0 ? (
-          <section className="rounded-xl border border-dashed border-border px-6 py-10 text-center">
+          <section className="rounded-lg border border-dashed border-border px-6 py-10 text-center">
             <LayoutDashboard className="mx-auto mb-3 size-8 text-muted-foreground/50" />
             <p className="mb-1 text-sm font-medium">还没有内容</p>
             <p className="mb-4 text-xs text-muted-foreground">
@@ -242,7 +242,7 @@ function ProjectHeader({
   }, [localTitle, localDesc, title, description])
 
   return (
-    <header className="rounded-xl border border-border bg-card p-5">
+    <header className="border-b border-border pb-6">
       <input
         className="w-full bg-transparent text-2xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/50"
         onChange={(e) => setLocalTitle(e.target.value)}
@@ -315,7 +315,7 @@ function RecentColumn({
   }>
 }): React.JSX.Element {
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="rounded-lg border border-border bg-card p-4">
       <h2 className="mb-3 text-sm font-medium">{title}</h2>
       {items.length === 0 ? (
         <p className="py-4 text-center text-xs text-muted-foreground">{emptyHint}</p>

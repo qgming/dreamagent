@@ -1,4 +1,4 @@
-import { NamePromptModal } from '@/components/ui/name-prompt-modal'
+import { NamePromptDialog } from '@/components/ui/name-prompt-modal'
 import { useProjectStore } from '@/stores/project-store'
 
 /**
@@ -27,7 +27,7 @@ export function NameFormModals(): React.JSX.Element {
 
   return (
     <>
-      <NamePromptModal
+      <NamePromptDialog
         confirmLabel={projectIsEdit ? '保存' : '创建'}
         initialValue={projectIsEdit && projectForm.mode === 'edit' ? projectForm.title : ''}
         label="项目名称"
@@ -49,7 +49,7 @@ export function NameFormModals(): React.JSX.Element {
         title={projectIsEdit ? '编辑项目' : '新建项目'}
       />
 
-      <NamePromptModal
+      <NamePromptDialog
         confirmLabel={beatIsEdit ? '保存' : '创建'}
         initialValue={beatIsEdit && beatForm.mode === 'edit' ? beatForm.title : ''}
         label="节点名称"
@@ -76,7 +76,7 @@ export function NameFormModals(): React.JSX.Element {
         }
       />
 
-      <NamePromptModal
+      <NamePromptDialog
         confirmLabel={entityIsEdit ? '保存' : '创建'}
         initialValue={entityIsEdit && entityForm.mode === 'edit' ? entityForm.name : ''}
         label="实体名称"

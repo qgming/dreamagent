@@ -5,6 +5,9 @@ import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { PageTitle, SettingDropdown, SettingRow } from './settings-shared'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import type {
   WebSearchProvider,
   WebSearchPublicSettings
@@ -88,7 +91,7 @@ export function WebSearchPanel(): React.JSX.Element {
         description="配置 Agent 的 web_search / web_fetch。密钥仅保存在本机主进程。"
       />
 
-      <div className="mt-8 divide-y divide-border rounded-xl border border-border bg-card">
+      <div className="mt-6 divide-y divide-border rounded-lg border border-border bg-card">
         <SettingRow
           title="服务商"
           description="默认 SearXNG（内置数十个公共实例，免 Key）；也可换 Tavily/Exa 等。"
@@ -102,29 +105,30 @@ export function WebSearchPanel(): React.JSX.Element {
         />
       </div>
 
-      <div className="mt-6 space-y-3 rounded-xl border border-border bg-card p-4">
+      <div className="mt-6 space-y-3 rounded-lg border border-border bg-card p-4">
         {provider === 'searxng' ? (
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">
+          <div className="grid gap-2">
+            <Label htmlFor="searxng-instances">
               SearXNG 实例（换行或逗号分隔；留空则使用内置 80+ 公共实例，自动 format=json 回退）
-            </label>
-            <textarea
-              className="min-h-[88px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
+            </Label>
+            <Textarea
+              id="searxng-instances"
+              className="min-h-[88px]"
               value={instances}
               onChange={(e) => setInstances(e.target.value)}
               placeholder={'https://etsi.me\nhttps://searx.party\nhttps://search.mdosch.de'}
             />
           </div>
         ) : (
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">
+          <div className="grid gap-2">
+            <Label htmlFor="web-search-api-key">
               API Key
               {cfg?.[provider]?.hasApiKey
                 ? `（已保存 ${cfg[provider].apiKeyHint ?? '••••'}，留空则保留）`
                 : '（未配置）'}
-            </label>
-            <input
-              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
+            </Label>
+            <Input
+              id="web-search-api-key"
               type="password"
               autoComplete="off"
               value={apiKey}
@@ -140,7 +144,7 @@ export function WebSearchPanel(): React.JSX.Element {
             保存
           </Button>
           {message ? (
-            <span className="text-xs text-emerald-600 dark:text-emerald-400">{message}</span>
+            <span className="text-xs text-foreground">{message}</span>
           ) : null}
           {error ? <span className="text-xs text-destructive">{error}</span> : null}
         </div>

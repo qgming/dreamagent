@@ -1,7 +1,7 @@
 /**
  * 双链芯片样式（节点/实体正文 + 反链）
  * 与 directive 胶囊统一：无边框、深背景、同色浅字
- * 蓝=节点↔节点 · 红=实体↔实体 · 绿=跨类型
+ * 类型通过中性灰阶明度区分。
  */
 import { chipClassName, chipToneClass } from '@/components/assistant-ui/directive-chip'
 
@@ -23,32 +23,29 @@ export const mentionChipStyles = `
   cursor: pointer;
   user-select: all;
 }
-/* 节点↔节点 · 蓝：深蓝底 + 浅蓝字 */
 .mention-chip--blue {
-  background: #2563eb;
-  color: #bfdbfe;
+  background: #404040;
+  color: #fafafa;
 }
 .dark .mention-chip--blue {
-  background: #3b82f6;
-  color: #dbeafe;
+  background: #d4d4d4;
+  color: #171717;
 }
-/* 实体↔实体 · 红 */
 .mention-chip--red {
-  background: #e11d48;
-  color: #fecdd3;
+  background: #525252;
+  color: #fafafa;
 }
 .dark .mention-chip--red {
-  background: #f43f5e;
-  color: #ffe4e6;
+  background: #a3a3a3;
+  color: #171717;
 }
-/* 跨类型 · 绿 */
 .mention-chip--green {
-  background: #059669;
-  color: #a7f3d0;
+  background: #262626;
+  color: #fafafa;
 }
 .dark .mention-chip--green {
-  background: #10b981;
-  color: #d1fae5;
+  background: #e5e5e5;
+  color: #171717;
 }
 .mention-chip:hover {
   filter: brightness(1.06);

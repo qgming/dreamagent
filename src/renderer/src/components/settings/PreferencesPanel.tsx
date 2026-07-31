@@ -15,7 +15,7 @@ export function PreferencesPanel(): React.JSX.Element {
     <section>
       <PageTitle title="偏好设置" description="管理外观与基础体验。" />
 
-      <div className="mt-8 divide-y divide-border rounded-xl border border-border bg-card">
+      <div className="mt-6 divide-y divide-border rounded-lg border border-border bg-card">
         <SettingRow
           title="主题亮暗"
           description="选择浅色、深色或跟随系统。"

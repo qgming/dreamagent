@@ -175,7 +175,6 @@ export function ContextDisplay({
       <TooltipContent
         align="end"
         className="w-72 rounded-md border border-border bg-popover p-3 text-left text-popover-foreground shadow-lg shadow-black/5 dark:shadow-black/30"
-        hideArrow
         side="bottom"
         sideOffset={7}
       >

@@ -21,14 +21,24 @@ import {
   CardTitle
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import {
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalFooter,
-  ModalTitle
-} from '@/components/ui/modal'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
 import { cn } from '@/lib/utils'
 import { useMcpStore } from '@/stores/mcp-store'
@@ -194,7 +204,7 @@ export function McpPage(): React.JSX.Element {
         ) : null}
 
         {status === 'ready' && sorted.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
+          <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border py-16 text-center">
             <Plug className="size-8 text-muted-foreground" />
             <div>
               <p className="text-sm font-medium">还没有云端 MCP</p>
@@ -334,10 +344,15 @@ export function McpPage(): React.JSX.Element {
         </div>
       </div>
 
-      <Modal onOpenChange={setEditorOpen} open={editorOpen}>
-        <ModalContent className="max-w-2xl" size="2xl">
-          <ModalTitle>添加云端 MCP</ModalTitle>
-          <ModalBody className="space-y-4">
+      <Dialog onOpenChange={setEditorOpen} open={editorOpen}>
+        <DialogContent className="max-h-[calc(100vh-3rem)] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>添加云端 MCP</DialogTitle>
+            <DialogDescription>
+              导入兼容配置，或手动填写远程服务地址。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
             <div className="flex gap-2">
               <Button
                 onClick={() => setEditorMode('json')}
@@ -360,8 +375,8 @@ export function McpPage(): React.JSX.Element {
                 <p className="mb-2 text-xs text-muted-foreground">
                   兼容 Claude Desktop / Cursor 的 mcpServers 结构（仅 http / sse）。
                 </p>
-                <textarea
-                  className="min-h-[280px] w-full resize-y rounded-lg border border-border bg-background px-3 py-3 font-mono text-xs leading-5 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
+                <Textarea
+                  className="min-h-[280px] resize-y font-mono text-xs leading-5"
                   onChange={(e) => {
                     setJsonText(e.target.value)
                     if (formError) setFormError(null)
@@ -380,14 +395,18 @@ export function McpPage(): React.JSX.Element {
                   />
                 </Field>
                 <Field label="传输">
-                  <select
-                    className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm outline-none"
-                    onChange={(e) => setFormTransport(e.target.value as McpTransport)}
+                  <Select
+                    onValueChange={(value) => setFormTransport(value as McpTransport)}
                     value={formTransport}
                   >
-                    <option value="streamable-http">Streamable HTTP</option>
-                    <option value="sse">SSE</option>
-                  </select>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="streamable-http">Streamable HTTP</SelectItem>
+                      <SelectItem value="sse">SSE</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="URL">
                   <Input
@@ -397,8 +416,8 @@ export function McpPage(): React.JSX.Element {
                   />
                 </Field>
                 <Field label="Headers（可选，JSON 对象）">
-                  <textarea
-                    className="min-h-[88px] w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
+                  <Textarea
+                    className="min-h-[88px] font-mono text-xs"
                     onChange={(e) => setFormHeaders(e.target.value)}
                     placeholder='{"Authorization":"Bearer ..."}'
                     spellCheck={false}
@@ -413,8 +432,8 @@ export function McpPage(): React.JSX.Element {
                 {formError}
               </p>
             ) : null}
-          </ModalBody>
-          <ModalFooter>
+          </div>
+          <DialogFooter>
             <Button disabled={saving} onClick={() => setEditorOpen(false)} variant="outline">
               取消
             </Button>
@@ -422,9 +441,9 @@ export function McpPage(): React.JSX.Element {
               {saving ? <Loader2 className="size-4 animate-spin" /> : null}
               保存并探测
             </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -443,8 +462,8 @@ function Badge({
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
-        tone === 'ok' && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+        'inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-medium',
+        tone === 'ok' && 'bg-foreground text-background',
         tone === 'bad' && 'bg-destructive/15 text-destructive',
         tone === 'muted' && 'bg-muted text-muted-foreground'
       )}
@@ -462,9 +481,9 @@ function Field({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <label className="block space-y-1">
-      <span className="text-xs text-muted-foreground">{label}</span>
+    <div className="grid gap-2">
+      <Label>{label}</Label>
       {children}
-    </label>
+    </div>
   )
 }

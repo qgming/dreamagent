@@ -32,7 +32,7 @@ import { CreateRuntimeProvider } from './assistant/CreateRuntimeProvider'
 import { CreateAssistantThread } from './assistant/CreateAssistantThread'
 import { Button } from '@/components/ui/button'
 import { DetailMarkdown } from '@/components/create/DetailMarkdown'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/animated-tabs'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   SortableHandle,
   SortableItem,
@@ -73,7 +73,7 @@ import {
   useProjectStore
 } from '@/stores/project-store'
 import type { ChapterFolderMeta } from '@shared/project-types'
-import { NamePromptModal } from '@/components/ui/name-prompt-modal'
+import { NamePromptDialog } from '@/components/ui/name-prompt-modal'
 import {
   isDetailTargetAvailable,
   useCreateStore,
@@ -473,7 +473,7 @@ function CreateLeftSidebar(): React.JSX.Element {
                     新建文件夹
                   </button>
                 </div>
-                <NamePromptModal
+                <NamePromptDialog
                   confirmLabel="创建"
                   initialValue=""
                   label="文件夹名称"
@@ -726,7 +726,7 @@ function ArticlesTree({
   return (
     <>
       {renderFolderBranch(null, 0)}
-      <NamePromptModal
+      <NamePromptDialog
         confirmLabel="创建"
         initialValue=""
         label="文件夹名称"
@@ -743,7 +743,7 @@ function ArticlesTree({
         submittingLabel="创建中…"
         title="新建子文件夹"
       />
-      <NamePromptModal
+      <NamePromptDialog
         confirmLabel="保存"
         initialValue={renameFolder?.name ?? ''}
         label="文件夹名称"
@@ -1080,8 +1080,8 @@ function PinnedChips(): React.JSX.Element {
           className={cn(
             'inline-flex max-w-[140px] items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium',
             p.type === 'beat'
-              ? 'bg-[color-mix(in_oklab,#3b82f6_18%,transparent)] text-[#1d4ed8] dark:text-[#93c5fd]'
-              : 'bg-[color-mix(in_oklab,#ef4444_16%,transparent)] text-[#b91c1c] dark:text-[#fca5a5]'
+              ? 'bg-muted text-foreground'
+              : 'bg-foreground text-background'
           )}
           key={`${p.type}-${p.id}`}
         >

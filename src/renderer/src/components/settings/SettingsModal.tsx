@@ -1,6 +1,13 @@
 import { Bot, Globe, Info, Settings2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { Modal, ModalContent, ModalTitle } from '@/components/ui/modal'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog'
 import { PreferencesPanel } from './PreferencesPanel'
 import { ModelPanel } from './ModelPanel'
 import { WebSearchPanel } from './WebSearchPanel'
@@ -36,30 +43,25 @@ export function SettingsModal(): React.JSX.Element {
   const setActiveSection = useSettingsStore((s) => s.setActiveSection)
 
   return (
-    <Modal open={open} onOpenChange={setOpen}>
-      <ModalContent
-        size="2xl"
-        showCloseButton
-        className="h-[620px] max-h-[min(620px,85vh)] p-0"
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent
+        className="max-h-[calc(100vh-3rem)] overflow-y-auto"
         aria-describedby={undefined}
       >
-        {/* 无障碍标题（视觉隐藏，左侧已有可见标题） */}
-        <ModalTitle className="sr-only">设置</ModalTitle>
+        <DialogHeader>
+          <DialogTitle>设置</DialogTitle>
+          <DialogDescription>管理应用偏好、模型与网络服务。</DialogDescription>
+        </DialogHeader>
 
-        <div className="flex h-full min-h-0">
-          {/* 左侧导航 */}
-          <aside className="flex w-[220px] shrink-0 flex-col border-r border-border bg-background/60 px-3 py-5">
-            <h2 className="mb-6 px-3 text-2xl font-semibold tracking-tight text-foreground">
-              设置
-            </h2>
-
-            <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="grid gap-6">
+          <aside>
+            <div>
               {navGroups.map((group, index) => (
-                <div key={group.title} className={index > 0 ? 'mt-6' : undefined}>
-                  <p className="mb-2 px-3 text-xs font-medium text-muted-foreground">
+                <div key={group.title} className={index > 0 ? 'mt-4' : undefined}>
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">
                     {group.title}
                   </p>
-                  <nav className="space-y-1">
+                  <nav className="grid grid-cols-2 gap-2">
                     {group.items.map((itemId) => {
                       const item = navItems.find((n) => n.id === itemId)
                       if (!item) return null
@@ -79,9 +81,8 @@ export function SettingsModal(): React.JSX.Element {
             </div>
           </aside>
 
-          {/* 右侧内容 */}
-          <main className="app-scrollbar min-w-0 flex-1 overflow-y-auto">
-            <div className="mx-auto w-full max-w-[980px] px-8 py-10">
+          <main className="min-w-0 border-t border-border pt-6">
+            <div>
               {activeSection === 'preferences' ? <PreferencesPanel /> : null}
               {activeSection === 'models' ? <ModelPanel /> : null}
               {activeSection === 'web-search' ? <WebSearchPanel /> : null}
@@ -89,8 +90,8 @@ export function SettingsModal(): React.JSX.Element {
             </div>
           </main>
         </div>
-      </ModalContent>
-    </Modal>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -109,18 +110,18 @@ function SettingsNavButton({
   onClick: () => void
 }): React.JSX.Element {
   return (
-    <button
+    <Button
       type="button"
       onClick={onClick}
+      size="default"
+      variant={active ? 'secondary' : 'ghost'}
       className={cn(
-        'flex h-9 w-full items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors',
-        active
-          ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+        'w-full justify-start',
+        !active && 'text-muted-foreground'
       )}
     >
       <Icon className="size-[18px] shrink-0" />
       <span className="truncate">{label}</span>
-    </button>
+    </Button>
   )
 }

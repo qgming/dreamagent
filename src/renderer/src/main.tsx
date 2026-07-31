@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import '@fontsource-variable/geist'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import App from './App'
 import './assets/main.css'

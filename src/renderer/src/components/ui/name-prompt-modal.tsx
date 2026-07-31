@@ -1,16 +1,17 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle
-} from '@/components/ui/modal'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog'
 
-export interface NamePromptModalProps {
+export interface NamePromptDialogProps {
   /** 是否打开 */
   open: boolean
   /** 关闭 / 开关 */
@@ -35,7 +36,7 @@ export interface NamePromptModalProps {
  * 通用单行名称输入模态
  * 用于新建/编辑项目、节点等只需填一个名称的场景
  */
-export function NamePromptModal({
+export function NamePromptDialog({
   open,
   onOpenChange,
   title,
@@ -45,7 +46,7 @@ export function NamePromptModal({
   confirmLabel,
   submittingLabel = '保存中…',
   onSubmit
-}: NamePromptModalProps): React.JSX.Element {
+}: NamePromptDialogProps): React.JSX.Element {
   const [value, setValue] = useState(initialValue)
   const [submitting, setSubmitting] = useState(false)
 
@@ -76,41 +77,43 @@ export function NamePromptModal({
   }
 
   return (
-    <Modal onOpenChange={onOpenChange} open={open}>
-      <ModalContent showCloseButton size="sm">
-        <form onSubmit={(e) => void handleSubmit(e)}>
-          <ModalHeader>
-            <ModalTitle>{title}</ModalTitle>
-          </ModalHeader>
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <form className="grid gap-5" onSubmit={(e) => void handleSubmit(e)}>
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>填写名称后继续。</DialogDescription>
+          </DialogHeader>
 
-          <ModalBody>
-            <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-              {label}
+          <div>
+            <div className="grid gap-2">
+              <Label htmlFor="name-prompt-input">{label}</Label>
               <Input
+                id="name-prompt-input"
                 autoFocus
                 disabled={submitting}
                 onChange={(e) => setValue(e.target.value)}
                 placeholder={placeholder}
                 value={value}
               />
-            </label>
-          </ModalBody>
+            </div>
+          </div>
 
-          <ModalFooter>
+          <DialogFooter>
             <Button
               disabled={submitting}
               onClick={() => onOpenChange(false)}
               type="button"
-              variant="ghost"
+              variant="outline"
             >
               取消
             </Button>
             <Button disabled={submitting || !value.trim()} type="submit">
               {submitting ? submittingLabel : resolvedConfirm}
             </Button>
-          </ModalFooter>
+          </DialogFooter>
         </form>
-      </ModalContent>
-    </Modal>
+      </DialogContent>
+    </Dialog>
   )
 }

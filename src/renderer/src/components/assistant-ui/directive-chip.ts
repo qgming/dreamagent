@@ -53,34 +53,26 @@ export function toneFromDirectiveType(type: string): ChipTone {
   }
 }
 
-/**
- * 色板：深背景 + 同色浅字/图标（非纯白）
- * 例：蓝底 blue-600 + 字 blue-200
- */
+/** 中性灰阶通过明度区分类型，保持全局黑灰白视觉。 */
 function toneClasses(tone: ChipTone, _surface: DirectiveChipSurface): string {
   void _surface
   switch (tone) {
     case 'tool':
-      // 工具 · 蓝
-      return 'bg-blue-600 text-blue-200 dark:bg-blue-500 dark:text-blue-100'
+      return 'bg-neutral-900 text-neutral-100 dark:bg-neutral-200 dark:text-neutral-900'
     case 'skill':
-      // 技能 · 紫
-      return 'bg-violet-600 text-violet-200 dark:bg-violet-500 dark:text-violet-100'
+      return 'bg-neutral-800 text-neutral-100 dark:bg-neutral-300 dark:text-neutral-900'
     case 'beat':
-      // 节点 · 绿
-      return 'bg-emerald-600 text-emerald-200 dark:bg-emerald-500 dark:text-emerald-100'
+      return 'bg-neutral-700 text-neutral-100 dark:bg-neutral-400 dark:text-neutral-950'
     case 'entity':
-      // 实体 · 红
-      return 'bg-rose-600 text-rose-200 dark:bg-rose-500 dark:text-rose-100'
+      return 'bg-neutral-600 text-neutral-100 dark:bg-neutral-500 dark:text-white'
     case 'article':
-      // 文章 · 橙
-      return 'bg-orange-600 text-orange-200 dark:bg-orange-500 dark:text-orange-100'
+      return 'bg-neutral-500 text-white dark:bg-neutral-600 dark:text-white'
     case 'link-beat':
-      return 'bg-blue-600 text-blue-200 dark:bg-blue-500 dark:text-blue-100'
+      return 'bg-neutral-700 text-neutral-100 dark:bg-neutral-400 dark:text-neutral-950'
     case 'link-entity':
-      return 'bg-rose-600 text-rose-200 dark:bg-rose-500 dark:text-rose-100'
+      return 'bg-neutral-600 text-neutral-100 dark:bg-neutral-500 dark:text-white'
     case 'link-cross':
-      return 'bg-emerald-600 text-emerald-200 dark:bg-emerald-500 dark:text-emerald-100'
+      return 'bg-neutral-800 text-neutral-100 dark:bg-neutral-300 dark:text-neutral-900'
     default:
       return 'bg-neutral-600 text-neutral-200 dark:bg-neutral-500 dark:text-neutral-100'
   }

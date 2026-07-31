@@ -1,13 +1,14 @@
 import { create } from 'zustand'
-import { Button } from '@/components/ui/button'
 import {
-  Modal,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle
-} from '@/components/ui/modal'
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog'
 
 interface ConfirmOptions {
   /** 标题，默认「确认删除」 */
@@ -79,7 +80,7 @@ export function confirmDelete(options: ConfirmOptions | string): Promise<boolean
 }
 
 /**
- * 确认删除模态（挂载一次即可）
+ * 全局删除确认（使用 shadcn AlertDialog，挂载一次即可）
  */
 export function ConfirmDialog(): React.JSX.Element {
   const open = useConfirmStore((s) => s.open)
@@ -91,30 +92,31 @@ export function ConfirmDialog(): React.JSX.Element {
   const close = useConfirmStore((s) => s.close)
 
   return (
-    <Modal
+    <AlertDialog
       onOpenChange={(next) => {
         if (!next) close(false)
       }}
       open={open}
     >
-      <ModalContent showCloseButton size="sm">
-        <ModalHeader>
-          <ModalTitle>{title}</ModalTitle>
-          <ModalDescription className="whitespace-pre-wrap">{description}</ModalDescription>
-        </ModalHeader>
-        <ModalFooter>
-          <Button onClick={() => close(false)} type="button" variant="ghost">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription className="whitespace-pre-wrap">
+            {description}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => close(false)}>
             {cancelLabel}
-          </Button>
-          <Button
+          </AlertDialogCancel>
+          <AlertDialogAction
             onClick={() => close(true)}
-            type="button"
             variant={destructive ? 'destructive' : 'default'}
           >
             {confirmLabel}
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

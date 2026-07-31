@@ -20,15 +20,18 @@ import {
   CardTitle
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import {
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalFooter,
-  ModalTitle
-} from '@/components/ui/modal'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/animated-tabs'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
 import { cn } from '@/lib/utils'
 import { skillLabel, useSkillsStore } from '@/stores/skills-store'
@@ -252,13 +255,13 @@ export function SkillsPage(): React.JSX.Element {
           <TabsList className="h-9 bg-transparent p-0">
             <TabsTrigger value="builtin">
               内置
-              <span className="ml-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px]">
+              <span className="ml-1.5 rounded-md bg-muted px-2 py-0.5 text-[11px]">
                 {builtin.length}
               </span>
             </TabsTrigger>
             <TabsTrigger value="custom">
               已安装
-              <span className="ml-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px]">
+              <span className="ml-1.5 rounded-md bg-muted px-2 py-0.5 text-[11px]">
                 {custom.length}
               </span>
             </TabsTrigger>
@@ -277,7 +280,7 @@ export function SkillsPage(): React.JSX.Element {
             正在加载技能…
           </div>
         ) : visible.length === 0 ? (
-          <div className="mt-10 rounded-xl border border-dashed border-border px-6 py-12 text-center">
+          <div className="mt-10 rounded-lg border border-dashed border-border px-6 py-12 text-center">
             <h2 className="text-base font-medium text-foreground">
               {tab === 'builtin' ? '暂无内置技能' : '暂无已安装技能'}
             </h2>
@@ -325,12 +328,12 @@ export function SkillsPage(): React.JSX.Element {
       </div>
 
       {/* 详情（只读） */}
-      <Modal
+      <Dialog
         open={detail !== null || detailLoading}
         onOpenChange={(open) => !open && closeDetail()}
       >
-        <ModalContent className="max-h-[85vh]" size="lg" showCloseButton>
-          <ModalTitle className="sr-only">技能详情</ModalTitle>
+        <DialogContent className="max-h-[85vh] overflow-hidden">
+          <DialogTitle className="sr-only">技能详情</DialogTitle>
           <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
             <Zap className="size-4 text-muted-foreground" />
             <span className="truncate text-sm font-medium">
@@ -355,7 +358,7 @@ export function SkillsPage(): React.JSX.Element {
               </Button>
             ) : null}
           </header>
-          <ModalBody className="app-scrollbar max-h-[calc(85vh-3rem)] space-y-4 overflow-y-auto">
+          <div className="app-scrollbar max-h-[calc(85vh-4rem)] space-y-4 overflow-y-auto">
             {detailLoading && !detail ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
@@ -406,47 +409,48 @@ export function SkillsPage(): React.JSX.Element {
                 </div>
               </>
             ) : null}
-          </ModalBody>
-        </ModalContent>
-      </Modal>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* 新建 */}
-      <Modal open={createOpen} onOpenChange={setCreateOpen}>
-        <ModalContent size="md" showCloseButton>
-          <ModalTitle className="sr-only">新建技能</ModalTitle>
-          <header className="flex h-11 items-center border-b border-border px-4 text-sm font-medium">
-            新建自定义技能
-          </header>
-          <ModalBody className="space-y-3">
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">
-                id（kebab-case）*
-              </label>
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新建自定义技能</DialogTitle>
+            <DialogDescription>填写技能标识和触发说明。</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="skill-id">ID（kebab-case）</Label>
               <Input
+                id="skill-id"
                 placeholder="my-writing-flow"
                 value={createName}
                 onChange={(e) => setCreateName(e.target.value)}
               />
             </div>
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">中文名</label>
+            <div className="grid gap-2">
+              <Label htmlFor="skill-display-name">中文名</Label>
               <Input
+                id="skill-display-name"
                 placeholder="我的写作流程"
                 value={createDisplayName}
                 onChange={(e) => setCreateDisplayName(e.target.value)}
               />
             </div>
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">描述 *</label>
-              <textarea
-                className="min-h-[100px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
+            <div className="grid gap-2">
+              <Label htmlFor="skill-description">描述</Label>
+              <Textarea
+                id="skill-description"
+                className="min-h-[100px]"
                 placeholder="做什么、何时用…"
                 value={createDescription}
                 onChange={(e) => setCreateDescription(e.target.value)}
               />
             </div>
-          </ModalBody>
-          <ModalFooter>
+          </div>
+          <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               取消
             </Button>
@@ -457,12 +461,12 @@ export function SkillsPage(): React.JSX.Element {
               {creating ? <Loader2 className="size-4 animate-spin" /> : null}
               创建
             </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 编辑 SKILL.md */}
-      <Modal
+      <Dialog
         open={editOpen}
         onOpenChange={(open) => {
           if (!open) {
@@ -471,23 +475,20 @@ export function SkillsPage(): React.JSX.Element {
           }
         }}
       >
-        <ModalContent className="max-h-[90vh]" size="xl" showCloseButton>
-          <ModalTitle className="sr-only">编辑技能</ModalTitle>
-          <header className="flex h-11 items-center gap-2 border-b border-border px-4 text-sm font-medium">
-            编辑 SKILL.md
-            {editId ? (
-              <span className="font-mono text-xs text-muted-foreground">{editId}</span>
-            ) : null}
-          </header>
-          <ModalBody className="flex min-h-0 flex-1 flex-col">
+        <DialogContent className="max-h-[90vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>编辑 SKILL.md</DialogTitle>
+            <DialogDescription className="font-mono">{editId}</DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-1 flex-col">
             {editLoading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 加载…
               </div>
             ) : (
-              <textarea
-                className="app-scrollbar min-h-[50vh] w-full flex-1 resize-y rounded-md border border-border bg-muted/20 px-3 py-2 font-mono text-xs leading-5 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
+              <Textarea
+                className="app-scrollbar min-h-[50vh] flex-1 resize-y font-mono text-xs leading-5"
                 spellCheck={false}
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
@@ -496,8 +497,8 @@ export function SkillsPage(): React.JSX.Element {
             <p className="mt-2 text-[11px] text-muted-foreground">
               frontmatter 的 name 必须等于技能 id；保存前会自动备份旧版 SKILL.md。
             </p>
-          </ModalBody>
-          <ModalFooter>
+          </div>
+          <DialogFooter>
             <Button
               variant="outline"
               onClick={() => {
@@ -514,9 +515,9 @@ export function SkillsPage(): React.JSX.Element {
               {editSaving ? <Loader2 className="size-4 animate-spin" /> : null}
               保存
             </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -620,7 +621,7 @@ function SkillCard({
         <Switch
           checked={skill.enabled}
           disabled={busy || !skill.isValid}
-          label={`启用 ${label}`}
+          aria-label={`启用 ${label}`}
           onCheckedChange={onToggle}
         />
       </CardFooter>

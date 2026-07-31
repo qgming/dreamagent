@@ -32,19 +32,19 @@ function relationType(type: RelatedLinkItem['type']): {
       return {
         icon: CircleDot,
         label: '节点',
-        iconClassName: 'text-blue-600 dark:text-blue-400'
+        iconClassName: 'text-foreground'
       }
     case 'entity':
       return {
         icon: Users,
         label: '实体',
-        iconClassName: 'text-rose-600 dark:text-rose-400'
+        iconClassName: 'text-muted-foreground'
       }
     case 'chapter':
       return {
         icon: FileText,
         label: '文章',
-        iconClassName: 'text-amber-600 dark:text-amber-400'
+        iconClassName: 'text-foreground/70'
       }
   }
 }

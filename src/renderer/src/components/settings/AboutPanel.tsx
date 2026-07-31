@@ -8,7 +8,7 @@ export function AboutPanel(): React.JSX.Element {
     <section>
       <PageTitle title="关于" description="造梦师应用信息。" />
 
-      <div className="mt-8 divide-y divide-border rounded-xl border border-border bg-card">
+      <div className="mt-6 divide-y divide-border rounded-lg border border-border bg-card">
         <div className="flex items-center justify-between gap-4 px-5 py-3.5">
           <div className="min-w-0">
             <h3 className="text-sm font-medium">应用名称</h3>

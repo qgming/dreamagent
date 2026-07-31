@@ -20,8 +20,9 @@ import {
   mentionColorClass,
   type MentionTargetType
 } from '@shared/mentions'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/animated-tabs'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
+import { NamePromptDialog } from '@/components/ui/name-prompt-modal'
 import { editorDomToContent } from '@/lib/mention-dom'
 import { mentionChipStyles } from '@/lib/mention-styles'
 import { cn } from '@/lib/utils'
@@ -87,6 +88,10 @@ export function MentionEditor({
   const [tab, setTab] = useState<'entity' | 'beat'>('entity')
   const [highlight, setHighlight] = useState(0)
   const [creating, setCreating] = useState(false)
+  const [pendingCreate, setPendingCreate] = useState<{
+    name: string
+    target: 'entity' | 'beat'
+  } | null>(null)
   const [empty, setEmpty] = useState(!value)
 
   useEffect(() => {
@@ -292,7 +297,7 @@ export function MentionEditor({
         if (!item) return
         if (item.type === 'entity') insertChip(item.entity.name, 'entity', item.entity.id)
         else if (item.type === 'beat') insertChip(item.beat.title, 'beat', item.beat.id)
-        else void handleCreate(item.name, item.target)
+        else setPendingCreate({ name: item.name, target: item.target })
         return
       }
     }
@@ -376,7 +381,7 @@ export function MentionEditor({
           highlight={highlight}
           items={items}
           onClose={closeMention}
-          onCreate={(n, t) => void handleCreate(n, t)}
+          onCreate={(name, target) => setPendingCreate({ name, target })}
           onHighlight={setHighlight}
           onSelectBeat={(b) => insertChip(b.title, 'beat', b.id)}
           onSelectEntity={(ent) => insertChip(ent.name, 'entity', ent.id)}
@@ -387,6 +392,24 @@ export function MentionEditor({
           tab={tab}
         />
       ) : null}
+
+      <NamePromptDialog
+        confirmLabel="创建"
+        initialValue={pendingCreate?.name ?? ''}
+        label={pendingCreate?.target === 'beat' ? '节点名称' : '实体名称'}
+        onOpenChange={(open) => {
+          if (!open) setPendingCreate(null)
+        }}
+        onSubmit={async (name) => {
+          if (!pendingCreate) return
+          await handleCreate(name, pendingCreate.target)
+          setPendingCreate(null)
+        }}
+        open={pendingCreate !== null}
+        placeholder={pendingCreate?.target === 'beat' ? '输入节点名称' : '输入实体名称'}
+        submittingLabel="创建中…"
+        title={pendingCreate?.target === 'beat' ? '新建节点' : '新建实体'}
+      />
 
       <style>{mentionChipStyles}</style>
     </div>
