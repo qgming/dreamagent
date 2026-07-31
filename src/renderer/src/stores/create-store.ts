@@ -58,6 +58,7 @@ interface CreateState {
   detailTarget: DetailTarget | null
   leftBeatsOpen: boolean
   leftEntitiesOpen: boolean
+  leftTodosOpen: boolean
   leftListTab: LeftListTab
   sending: boolean
   runId: string | null
@@ -100,6 +101,7 @@ interface CreateState {
   toggleRightPanel: () => void
   setLeftBeatsOpen: (open: boolean) => void
   setLeftEntitiesOpen: (open: boolean) => void
+  setLeftTodosOpen: (open: boolean) => void
   setLeftListTab: (tab: LeftListTab) => void
   setTodos: (todos: TodoItem[]) => void
   /** 供 ExternalStore 直接改消息（一般不调用） */
@@ -117,6 +119,7 @@ const initialState = {
   detailTarget: null as DetailTarget | null,
   leftBeatsOpen: false,
   leftEntitiesOpen: false,
+  leftTodosOpen: false,
   leftListTab: 'conversations' as LeftListTab,
   sending: false,
   runId: null as string | null,
@@ -1115,6 +1118,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
   },
   setLeftBeatsOpen: (open) => set({ leftBeatsOpen: open }),
   setLeftEntitiesOpen: (open) => set({ leftEntitiesOpen: open }),
+  setLeftTodosOpen: (open) => set({ leftTodosOpen: open }),
   setLeftListTab: (tab) => set({ leftListTab: tab }),
   setTodos: (todos) => set({ todos }),
 

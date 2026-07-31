@@ -2,6 +2,9 @@
 @import 'tw-animate-css';
 @import 'tw-shimmer';
 
+/* 深色模式跟随应用内 .dark 类（useTheme 在 <html> 上切换），而非操作系统偏好 */
+@custom-variant dark (&:is(.dark *));
+
 /* Streamdown 控件 / caret 需要扫描 node_modules 中的 Tailwind class */
 @source '../../../../node_modules/streamdown/dist/*.js';
 @source '../../../../node_modules/@assistant-ui/react-streamdown/dist/*.js';

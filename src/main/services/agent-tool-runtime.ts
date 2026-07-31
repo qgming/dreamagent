@@ -269,6 +269,8 @@ export class AgentToolRuntime {
               ? null
               : String(input.parentId)
         }
+        if (Array.isArray(input.entityRefs)) patch.entityRefs = input.entityRefs as string[]
+        if (Array.isArray(input.beatRefs)) patch.beatRefs = input.beatRefs as string[]
         return this.updateBeatTool(projectId, parsed.id, patch)
       }
       if (parsed.type === 'entity') {
@@ -283,6 +285,8 @@ export class AgentToolRuntime {
               ? null
               : String(input.parentId)
         }
+        if (Array.isArray(input.entityRefs)) patch.entityRefs = input.entityRefs as string[]
+        if (Array.isArray(input.beatRefs)) patch.beatRefs = input.beatRefs as string[]
         return this.updateEntityTool(projectId, parsed.id, patch)
       }
       if (parsed.type === 'folder') {
@@ -427,6 +431,15 @@ export class AgentToolRuntime {
       const patch: UpdateBeatInput = {}
       if (typeof input.title === 'string') patch.title = input.title
       if (typeof input.status === 'string') patch.status = input.status as BeatStatus
+      if (input.parentId !== undefined) {
+        patch.parentId =
+          input.parentId === null || input.parentId === ''
+            ? null
+            : String(input.parentId)
+      }
+      // refs 可直接写入 JSON 属性（无需正文双链）
+      if (Array.isArray(input.entityRefs)) patch.entityRefs = input.entityRefs as string[]
+      if (Array.isArray(input.beatRefs)) patch.beatRefs = input.beatRefs as string[]
       if (edits.length) {
         patch.content = applyExactEdits(beat.content || '', edits)
       } else if (typeof input.content === 'string') {
@@ -435,8 +448,8 @@ export class AgentToolRuntime {
       if (Object.keys(patch).length === 0) {
         return { ok: false, summary: '没有可更新的字段', error: 'empty_patch' }
       }
-      // 仅改 status 时走状态摘要
-      if (patch.status && !patch.content && !patch.title) {
+      // 仅改 status 时走状态摘要；同时改 parentId 时走完整更新（reparent 语义）
+      if (patch.status && !patch.content && !patch.title && patch.parentId === undefined) {
         return this.updateBeatStatus(projectId, parsed.id, patch.status)
       }
       return this.updateBeatTool(projectId, parsed.id, patch)
@@ -456,6 +469,9 @@ export class AgentToolRuntime {
             ? null
             : String(input.parentId)
       }
+      // refs 可直接写入 JSON 属性（无需正文双链）
+      if (Array.isArray(input.entityRefs)) patch.entityRefs = input.entityRefs as string[]
+      if (Array.isArray(input.beatRefs)) patch.beatRefs = input.beatRefs as string[]
       if (edits.length) {
         patch.content = applyExactEdits(entity.content || '', edits)
       } else if (typeof input.content === 'string') {
@@ -765,6 +781,8 @@ export class AgentToolRuntime {
     if (typeof patch.content === 'string') clean.content = patch.content
     if (patch.status) clean.status = patch.status
     if (patch.parentId !== undefined) clean.parentId = patch.parentId
+    if (Array.isArray(patch.entityRefs)) clean.entityRefs = patch.entityRefs
+    if (Array.isArray(patch.beatRefs)) clean.beatRefs = patch.beatRefs
     if (Object.keys(clean).length === 0) {
       return { ok: false, summary: '没有可更新的字段', error: 'empty_patch' }
     }
@@ -826,6 +844,8 @@ export class AgentToolRuntime {
     if (typeof patch.content === 'string') clean.content = patch.content
     if (patch.status) clean.status = patch.status
     if (patch.parentId !== undefined) clean.parentId = patch.parentId
+    if (Array.isArray(patch.entityRefs)) clean.entityRefs = patch.entityRefs
+    if (Array.isArray(patch.beatRefs)) clean.beatRefs = patch.beatRefs
     if (Object.keys(clean).length === 0) {
       return { ok: false, summary: '没有可更新的字段', error: 'empty_patch' }
     }

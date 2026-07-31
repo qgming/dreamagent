@@ -762,6 +762,9 @@ export class ProjectService {
         beat.entityRefs = refs.entityRefs
         beat.beatRefs = refs.beatRefs
       }
+      // 显式传入的 refs 直接写入 JSON 属性（无需正文双链），覆盖内容派生的引用
+      if (patch.entityRefs !== undefined) beat.entityRefs = patch.entityRefs
+      if (patch.beatRefs !== undefined) beat.beatRefs = patch.beatRefs
       if (patch.status !== undefined) beat.status = patch.status
 
       // parentId 变更走 reparent 语义
@@ -1005,6 +1008,9 @@ export class ProjectService {
         entity.entityRefs = refs.entityRefs
         entity.beatRefs = refs.beatRefs
       }
+      // 显式传入的 refs 直接写入 JSON 属性（无需正文双链），覆盖内容派生的引用
+      if (patch.entityRefs !== undefined) entity.entityRefs = patch.entityRefs
+      if (patch.beatRefs !== undefined) entity.beatRefs = patch.beatRefs
       if (patch.status !== undefined) entity.status = patch.status
 
       if (patch.parentId !== undefined) {

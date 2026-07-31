@@ -188,6 +188,8 @@ function CreateLeftSidebar(): React.JSX.Element {
   const leftEntitiesOpen = useCreateStore((s) => s.leftEntitiesOpen)
   const setLeftBeatsOpen = useCreateStore((s) => s.setLeftBeatsOpen)
   const setLeftEntitiesOpen = useCreateStore((s) => s.setLeftEntitiesOpen)
+  const leftTodosOpen = useCreateStore((s) => s.leftTodosOpen)
+  const setLeftTodosOpen = useCreateStore((s) => s.setLeftTodosOpen)
   const leftListTab = useCreateStore((s) => s.leftListTab)
   const setLeftListTab = useCreateStore((s) => s.setLeftListTab)
   const openDetail = useCreateStore((s) => s.openDetail)
@@ -353,16 +355,23 @@ function CreateLeftSidebar(): React.JSX.Element {
             ))
           )}
         </CollapsibleSection>
+
+        {todos.length > 0 ? (
+          <CollapsibleSection
+            count={todos.length}
+            countLabel={`${todos.filter((t) => t.status === 'completed').length}/${todos.length}`}
+            icon={ListTodo}
+            label="待办"
+            onToggle={() => setLeftTodosOpen(!leftTodosOpen)}
+            open={leftTodosOpen}
+          >
+            <SessionTodoList todos={todos} />
+          </CollapsibleSection>
+        ) : null}
       </div>
 
-      {todos.length > 0 ? (
-        <div className="shrink-0 border-t border-border px-3 pt-2">
-          <SessionTodoPanel todos={todos} />
-        </div>
-      ) : null}
-
-      {/* 下：对话 | 文章（指示条 + 内容左右滑） */}
-      <div className="mt-2 flex min-h-0 flex-1 flex-col border-t border-border px-3 pt-3">
+      {/* 下：对话 | 文章（指示条 + 内容左右滑；与资料区之间缩小间距） */}
+      <div className="mt-1 flex min-h-0 flex-1 flex-col px-3 pt-2">
         <Tabs className="mb-2 shrink-0" onValueChange={handleListTabChange} value={leftListTab}>
           <TabsList className="w-full">
             <TabsTrigger value="conversations">
@@ -402,7 +411,7 @@ function CreateLeftSidebar(): React.JSX.Element {
                     ))
                   )}
                 </div>
-                <div className="shrink-0 border-t border-border py-3">
+                <div className="shrink-0 pb-3">
                   <button
                     className="flex h-9 w-full items-center justify-center gap-2 rounded-md border border-dashed border-border text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
                     disabled={sending}
@@ -464,9 +473,9 @@ function CreateLeftSidebar(): React.JSX.Element {
                     />
                   )}
                 </div>
-                <div className="shrink-0 border-t border-border py-2">
+                <div className="shrink-0 pb-2">
                   <button
-                    className="flex h-8 w-full items-center justify-center gap-2 rounded-md text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                    className="flex h-9 w-full items-center justify-center gap-2 rounded-md border border-dashed border-border text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
                     onClick={() => setFolderPrompt({ open: true, parentId: null })}
                     type="button"
                   >
@@ -867,35 +876,26 @@ function sessionTodoIcon(status: TodoStatus): React.JSX.Element {
   }
 }
 
-/** 左栏：当前会话 Agent 待办（只读展示；清理/改写仅 AI todo 工具） */
-function SessionTodoPanel({ todos }: { todos: TodoItem[] }): React.JSX.Element {
-  const done = todos.filter((t) => t.status === 'completed').length
+/** 左栏：当前会话 Agent 待办列表（只读展示；清理/改写仅 AI todo 工具）。
+ * 由 CollapsibleSection 提供标题/折叠，这里只渲染列表，样式与节点/实体行一致。 */
+function SessionTodoList({ todos }: { todos: TodoItem[] }): React.JSX.Element {
   return (
-    <div className="pb-1">
-      <div className="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
-        <ListTodo className="size-3" />
-        待办
-        <span className="ml-auto normal-case tracking-normal text-muted-foreground">
-          {done}/{todos.length}
-        </span>
-      </div>
-      <ul className="max-h-36 space-y-0.5 overflow-y-auto app-scrollbar">
-        {todos.map((t) => (
-          <TooltipHint key={t.id} label={`${t.id} · ${t.status}`} side="right">
-            <li
-              className={cn(
-                'flex items-start gap-1.5 rounded-md px-2 py-1 text-[11px] leading-snug',
-                t.status === 'completed' && 'opacity-60',
-                t.status === 'cancelled' && 'opacity-40 line-through'
-              )}
-            >
-              {sessionTodoIcon(t.status)}
-              <span className="min-w-0 flex-1 truncate">{t.content}</span>
-            </li>
-          </TooltipHint>
-        ))}
-      </ul>
-    </div>
+    <ul className="space-y-0.5">
+      {todos.map((t) => (
+        <TooltipHint key={t.id} label={`${t.id} · ${t.status}`} side="right">
+          <li
+            className={cn(
+              'flex items-start gap-1.5 rounded-md py-1 pr-1 text-sm leading-snug',
+              t.status === 'completed' && 'opacity-60',
+              t.status === 'cancelled' && 'opacity-40 line-through'
+            )}
+          >
+            {sessionTodoIcon(t.status)}
+            <span className="min-w-0 flex-1 truncate">{t.content}</span>
+          </li>
+        </TooltipHint>
+      ))}
+    </ul>
   )
 }
 
@@ -905,6 +905,7 @@ function CollapsibleSection({
   open,
   onToggle,
   count,
+  countLabel,
   children
 }: {
   label: string
@@ -912,6 +913,8 @@ function CollapsibleSection({
   open: boolean
   onToggle: () => void
   count: number
+  /** 自定义计数文本（如 2/5），缺省显示 count */
+  countLabel?: string
   children: React.ReactNode
 }): React.JSX.Element {
   return (
@@ -932,7 +935,7 @@ function CollapsibleSection({
               open && 'opacity-0'
             )}
           >
-            {count}
+            {countLabel ?? count}
           </span>
           <motion.span
             animate={{ rotate: open ? 90 : 0 }}

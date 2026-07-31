@@ -101,6 +101,16 @@ const writeParams = Type.Object({
   summary: Type.Optional(Type.String({ description: 'path=project 时的项目梗概全文' })),
   status: Type.Optional(Type.String()),
   afterId: Type.Optional(Type.String()),
+  parentId: Type.Optional(
+    Type.Union([Type.String(), Type.Null()], {
+      description: '父节点/父实体 id（创建到该父下）；null 或空字符串表示根'
+    })
+  ),
+  folderId: Type.Optional(
+    Type.Union([Type.String(), Type.Null()], {
+      description: '文章所在文件夹 id；null 或空字符串表示根目录'
+    })
+  ),
   sourceBeatIds: Type.Optional(Type.Array(Type.String())),
   entityRefs: Type.Optional(Type.Array(Type.String())),
   beatRefs: Type.Optional(Type.Array(Type.String())),
@@ -121,6 +131,16 @@ const editParams = Type.Object({
   title: Type.Optional(Type.String()),
   name: Type.Optional(Type.String()),
   status: Type.Optional(Type.String()),
+  parentId: Type.Optional(
+    Type.Union([Type.String(), Type.Null()], {
+      description: '改父节点/父实体 id；null 或空字符串表示移到根'
+    })
+  ),
+  folderId: Type.Optional(
+    Type.Union([Type.String(), Type.Null()], {
+      description: '文章移动到指定文件夹；null 或空字符串表示根目录'
+    })
+  ),
   content: Type.Optional(Type.String({ description: '也可直接给全文（少用）' })),
   summary: Type.Optional(Type.String({ description: 'path=project 时直接替换项目梗概全文' })),
   sourceBeatIds: Type.Optional(Type.Array(Type.String())),
@@ -172,7 +192,7 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       name: 'edit',
       label: 'edit',
       description:
-        '局部精确替换 content 或项目梗概（edits），也可改 title/name/status。项目名称与梗概用 path=project。chapter 禁止双链。',
+        '局部精确替换 content 或项目梗概（edits），也可改 title/name/status/parentId（节点与实体可改父级，null 或空字符串表示移到根）。项目名称与梗概用 path=project。chapter 禁止双链。',
       parameters: editParams,
       executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
