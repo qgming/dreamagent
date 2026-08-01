@@ -26,6 +26,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { BrandStar } from '@/components/BrandLogo'
 import { TooltipHint } from '@/components/ui/tooltip'
 import { confirmDelete } from '@/components/ui/confirm-dialog'
 import { useSettingsStore } from '@/stores/settings-store'
@@ -98,7 +99,8 @@ export function AppSidebar({
 
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
-      <div className="flex min-w-0 items-center gap-2 px-4 pb-3 pt-5">
+      <div className="flex min-w-0 items-center gap-1.5 px-4 pb-3 pt-5">
+        <BrandStar className="size-4" decorative />
         <div className="truncate text-base font-semibold text-foreground">造梦师</div>
         {version ? (
           <span className="shrink-0 rounded-full border border-border bg-muted/70 px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-muted-foreground">

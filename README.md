@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="build/icon.svg" alt="DreamAgent Logo" width="112" height="112" />
+  <img src="build/icon.png" alt="DreamAgent Logo" width="112" height="112" />
 
 # 造梦师 DreamAgent
 
