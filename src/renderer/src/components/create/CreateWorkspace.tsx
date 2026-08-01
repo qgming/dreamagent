@@ -807,7 +807,6 @@ function ArticleListRow({
 
   return (
     <TreeRowShell active={active} depth={depth} id={article.id}>
-      <span className="size-5 shrink-0" />
       <button
         className="min-w-0 flex-1 truncate text-left"
         onClick={onOpen}
