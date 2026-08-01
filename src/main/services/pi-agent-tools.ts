@@ -78,7 +78,32 @@ const readParams = Type.Object({
   path: Type.String({
     description:
       'project | beats/{id} | entities/{id} | chapters/{id} | folders/{id} | outline'
-  })
+  }),
+  startLine: Type.Optional(Type.Number({ description: '文章正文起始行，从 1 开始' })),
+  endLine: Type.Optional(Type.Number({ description: '文章正文结束行，从 1 开始' }))
+})
+
+const textStatsParams = Type.Object({
+  path: Type.Optional(Type.String({ description: '文章路径，如 chapters/{id}' })),
+  content: Type.Optional(Type.String({ description: '直接分析的纯文本，与 path 二选一' })),
+  terms: Type.Optional(Type.Array(Type.String({ description: '要查询的字词或短语' }))),
+  profile: Type.Optional(
+    Type.Union([Type.Literal('basic'), Type.Literal('story-humanizer')])
+  ),
+  dialogueExpectation: Type.Optional(
+    Type.Union([
+      Type.Literal('none'),
+      Type.Literal('some'),
+      Type.Literal('driving')
+    ], {
+      description: 'none=不要求对话；some=只要求出现对话；driving=低于 10% 时提示复核'
+    })
+  ),
+  includeContext: Type.Optional(Type.Boolean()),
+  includeParagraphTermCounts: Type.Optional(Type.Boolean()),
+  maxMatches: Type.Optional(Type.Number()),
+  contextChars: Type.Optional(Type.Number()),
+  segmentCount: Type.Optional(Type.Number())
 })
 
 const writeParams = Type.Object({
@@ -145,7 +170,29 @@ const editParams = Type.Object({
   summary: Type.Optional(Type.String({ description: 'path=project 时直接替换项目梗概全文' })),
   sourceBeatIds: Type.Optional(Type.Array(Type.String())),
   entityRefs: Type.Optional(Type.Array(Type.String())),
-  beatRefs: Type.Optional(Type.Array(Type.String()))
+  beatRefs: Type.Optional(Type.Array(Type.String())),
+  expectedSourceHash: Type.Optional(Type.String()),
+  lineEdits: Type.Optional(
+    Type.Array(
+      Type.Object({
+        startLine: Type.Number(),
+        endLine: Type.Optional(Type.Number()),
+        expectedText: Type.String(),
+        newText: Type.String()
+      }),
+      { description: '按逻辑行替换；行号从 1 开始，expectedText 必须匹配当前正文' }
+    )
+  ),
+  paragraphEdits: Type.Optional(
+    Type.Array(
+      Type.Object({
+        paragraph: Type.Number(),
+        expectedText: Type.String(),
+        newText: Type.String()
+      }),
+      { description: '按空行分隔的段落替换；段号从 1 开始' }
+    )
+  )
 })
 
 const deleteParams = Type.Object({
@@ -179,6 +226,16 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
         runRuntime(ctx, 'read', { ...(params as Static<typeof readParams>) })
     },
     {
+      name: 'text_stats',
+      label: 'text_stats',
+      description:
+        '统计文章或传入文本。支持查询字词/短语的次数、行号、段号、上下文、每段字数，以及 story-humanizer 规则指标。path 与 content 二选一。',
+      parameters: textStatsParams,
+      executionMode: 'parallel',
+      execute: async (_id, params, _signal, _onUpdate, ctx) =>
+        runRuntime(ctx, 'text_stats', { ...(params as Static<typeof textStatsParams>) })
+    },
+    {
       name: 'write',
       label: 'write',
       description:
@@ -192,7 +249,7 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       name: 'edit',
       label: 'edit',
       description:
-        '局部精确替换 content 或项目梗概（edits），也可改 title/name/status/parentId（节点与实体可改父级，null 或空字符串表示移到根）。项目名称与梗概用 path=project。chapter 禁止双链。',
+        '局部精确替换 content 或项目梗概（edits），也支持 lineEdits/paragraphEdits 按行或段落安全替换；expectedSourceHash 可防止基于旧版本误改。',
       parameters: editParams,
       executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
@@ -218,7 +275,7 @@ export const DREAM_AGENT_BASE_PROMPT = `你是「造梦师」的创作助手，�
 2. 不要编造未读取的设定；顺着 read 返回的出入链继续深入。
 3. 创建：write({ type:"entity", name, content }) / write({ type:"beat", title, content }) / write({ type:"chapter", title, content, sourceBeatIds, entityRefs })。
 4. 项目资料：read({ path:"project" })；write({ path:"project", title?, summary? }) 可改项目名称或梗概；局部修改梗概用 edit({ path:"project", edits:[{oldText,newText}] })。
-5. 对象覆盖：write({ path:"beats/{id}", content|title|status })；局部改用 edit({ path, edits:[{oldText,newText}] })。
+5. 对象覆盖：write({ path:"beats/{id}", content|title|status })；局部改用 edit({ path, edits:[{oldText,newText}] })。统计后的文章优先使用 text_stats + edit.lineEdits/paragraphEdits，并提供 expectedText 与 expectedSourceHash。
 6. 删除：delete({ path:"entities/{id}" })。
 7. 用中文回复用户；工具按需调用。
 8. 回复可用 Markdown。

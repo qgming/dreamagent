@@ -33,9 +33,20 @@ import type {
 import type { ProjectService } from './project-service'
 import {
   applyExactEdits,
+  applyLineEdits,
+  applyParagraphEdits,
   assertNoChapterDualLinks,
-  parseGraphPath
+  parseGraphPath,
+  type LineEdit,
+  type ParagraphEdit
 } from './graph-path'
+import {
+  analyzeText,
+  hashText,
+  type DialogueExpectation,
+  type TextStatsOptions,
+  type TextStatsProfile
+} from '../../shared/text-statistics'
 
 function plainSummary(content: string, max = 80): string {
   const text = content
@@ -67,6 +78,67 @@ function refsSummary(item: {
   const b = item.beatRefs?.length ?? 0
   if (e === 0 && b === 0) return '无双链'
   return `实体链 ${e} · 节点链 ${b}`
+}
+
+function parseLineEdits(input: Record<string, unknown>): LineEdit[] {
+  if (!Array.isArray(input.lineEdits)) return []
+  return input.lineEdits.map((raw, index) => {
+    if (!raw || typeof raw !== 'object') throw new Error(`lineEdits[${index}] 格式无效`)
+    const item = raw as Record<string, unknown>
+    if (
+      typeof item.startLine !== 'number' ||
+      typeof item.expectedText !== 'string' ||
+      typeof item.newText !== 'string'
+    ) {
+      throw new Error(`lineEdits[${index}] 缺少 startLine、expectedText 或 newText`)
+    }
+    return {
+      startLine: item.startLine,
+      endLine: typeof item.endLine === 'number' ? item.endLine : undefined,
+      expectedText: item.expectedText,
+      newText: item.newText
+    }
+  })
+}
+
+function parseParagraphEdits(input: Record<string, unknown>): ParagraphEdit[] {
+  if (!Array.isArray(input.paragraphEdits)) return []
+  return input.paragraphEdits.map((raw, index) => {
+    if (!raw || typeof raw !== 'object') throw new Error(`paragraphEdits[${index}] 格式无效`)
+    const item = raw as Record<string, unknown>
+    if (
+      typeof item.paragraph !== 'number' ||
+      typeof item.expectedText !== 'string' ||
+      typeof item.newText !== 'string'
+    ) {
+      throw new Error(`paragraphEdits[${index}] 缺少 paragraph、expectedText 或 newText`)
+    }
+    return {
+      paragraph: item.paragraph,
+      expectedText: item.expectedText,
+      newText: item.newText
+    }
+  })
+}
+
+function buildContentPatch(
+  current: string,
+  input: Record<string, unknown>,
+  edits: Array<{ oldText: string; newText: string }>,
+  lineEdits: LineEdit[],
+  paragraphEdits: ParagraphEdit[]
+): string | undefined {
+  const modes = [edits.length > 0, lineEdits.length > 0, paragraphEdits.length > 0].filter(Boolean).length
+  if (modes > 1) throw new Error('edits、lineEdits、paragraphEdits 只能选择一种')
+  const expectedSourceHash = typeof input.expectedSourceHash === 'string' ? input.expectedSourceHash : ''
+  if (expectedSourceHash && hashText(current) !== expectedSourceHash) {
+    throw new Error('正文版本已变化，expectedSourceHash 校验失败，请重新统计后再编辑')
+  }
+  if (lineEdits.length) return applyLineEdits(current, lineEdits)
+  if (paragraphEdits.length) return applyParagraphEdits(current, paragraphEdits)
+  if (edits.length) return applyExactEdits(current, edits)
+  if (typeof input.content === 'string') return input.content
+  return undefined
 }
 
 /**
@@ -121,7 +193,12 @@ export class AgentToolRuntime {
         case 'list':
           return await this.listPath(projectId, input)
         case 'read':
-          return await this.readPath(projectId, String(input.path ?? ''))
+          return await this.readPath(projectId, String(input.path ?? ''), {
+            startLine: typeof input.startLine === 'number' ? input.startLine : undefined,
+            endLine: typeof input.endLine === 'number' ? input.endLine : undefined
+          })
+        case 'text_stats':
+          return await this.textStats(projectId, input)
         case 'write':
           return await this.writePath(projectId, input)
         case 'edit':
@@ -218,7 +295,11 @@ export class AgentToolRuntime {
     })
   }
 
-  private async readPath(projectId: string, pathRaw: string): Promise<AgentToolResult> {
+  private async readPath(
+    projectId: string,
+    pathRaw: string,
+    range: { startLine?: number; endLine?: number } = {}
+  ): Promise<AgentToolResult> {
     const parsed = parseGraphPath(pathRaw)
     if (parsed.kind === 'outline') return this.getOutline(projectId)
     if (parsed.kind === 'project') return this.readProject(projectId)
@@ -228,7 +309,84 @@ export class AgentToolRuntime {
     if (parsed.type === 'beat') return this.readBeat(projectId, parsed.id)
     if (parsed.type === 'entity') return this.readEntity(projectId, parsed.id)
     if (parsed.type === 'folder') return this.readFolder(projectId, parsed.id)
+    if (range.startLine !== undefined || range.endLine !== undefined) {
+      return this.readChapterRange(projectId, parsed.id, range)
+    }
     return this.readChapter(projectId, parsed.id)
+  }
+
+  private async textStats(
+    projectId: string,
+    input: Record<string, unknown>
+  ): Promise<AgentToolResult> {
+    const pathRaw = typeof input.path === 'string' ? input.path.trim() : ''
+    const hasContent = typeof input.content === 'string'
+    if (Boolean(pathRaw) === hasContent) {
+      return {
+        ok: false,
+        summary: 'text_stats 需要在 path 与 content 中二选一',
+        error: 'invalid_source'
+      }
+    }
+
+    let content: string
+    let source: Record<string, unknown>
+    if (pathRaw) {
+      const parsed = parseGraphPath(pathRaw)
+      if (parsed.kind !== 'item' || parsed.type !== 'chapter') {
+        return {
+          ok: false,
+          summary: 'text_stats 的 path 必须是 chapters/{id}',
+          error: 'invalid_path'
+        }
+      }
+      const chapter = await this.projects.getChapter(projectId, parsed.id)
+      content = chapter.content || ''
+      source = {
+        type: 'chapter',
+        path: `chapters/${chapter.id}`,
+        title: chapter.title,
+        status: chapter.status,
+        updatedAt: chapter.updatedAt
+      }
+    } else {
+      content = input.content as string
+      source = { type: 'content' }
+    }
+
+    const profile =
+      input.profile === 'basic' || input.profile === 'story-humanizer'
+        ? (input.profile as TextStatsProfile)
+        : undefined
+    const dialogueExpectation =
+      input.dialogueExpectation === 'some' || input.dialogueExpectation === 'driving'
+        ? (input.dialogueExpectation as DialogueExpectation)
+        : 'none'
+    const options: TextStatsOptions = {
+      terms: Array.isArray(input.terms)
+        ? input.terms.filter((term): term is string => typeof term === 'string')
+        : undefined,
+      includeContext: typeof input.includeContext === 'boolean' ? input.includeContext : undefined,
+      includeParagraphTermCounts:
+        typeof input.includeParagraphTermCounts === 'boolean'
+          ? input.includeParagraphTermCounts
+          : undefined,
+      maxMatches: typeof input.maxMatches === 'number' ? input.maxMatches : undefined,
+      contextChars: typeof input.contextChars === 'number' ? input.contextChars : undefined,
+      segmentCount: typeof input.segmentCount === 'number' ? input.segmentCount : undefined,
+      profile,
+      dialogueExpectation
+    }
+    const report = analyzeText(content, options)
+    const sourceWithHash = { ...source, sourceHash: report.sourceHash }
+    return {
+      ok: true,
+      summary: `已统计${pathRaw ? `文章「${String(source.title || '未命名文章')}」` : '传入文本'} · ${report.summary.visibleCharCount} 字 · ${report.summary.paragraphCount} 段`,
+      data: {
+        source: sourceWithHash,
+        ...report
+      }
+    }
   }
 
   private async writePath(
@@ -403,16 +561,24 @@ export class AgentToolRuntime {
         )
       })
       .map((e) => ({ oldText: e.oldText, newText: e.newText }))
+    const lineEdits = parseLineEdits(input)
+    const paragraphEdits = parseParagraphEdits(input)
 
     if (parsed.kind === 'project') {
       const snap = await this.projects.openProject(projectId)
       const current = snap.meta.description ?? ''
-      const nextSummary = edits.length
-        ? applyExactEdits(current, edits)
-        : typeof input.summary === 'string'
-          ? input.summary
-          : typeof input.content === 'string'
-            ? input.content
+      const nextSummary =
+        edits.length || lineEdits.length || paragraphEdits.length || typeof input.content === 'string'
+          ? buildContentPatch(current, input, edits, lineEdits, paragraphEdits)
+          : typeof input.summary === 'string'
+            ? (() => {
+                const expectedSourceHash =
+                  typeof input.expectedSourceHash === 'string' ? input.expectedSourceHash : ''
+                if (expectedSourceHash && hashText(current) !== expectedSourceHash) {
+                  throw new Error('正文版本已变化，expectedSourceHash 校验失败，请重新统计后再编辑')
+                }
+                return input.summary
+              })()
             : undefined
       const title = typeof input.title === 'string' ? input.title : undefined
       if (title === undefined && nextSummary === undefined) {
@@ -440,11 +606,8 @@ export class AgentToolRuntime {
       // refs 可直接写入 JSON 属性（无需正文双链）
       if (Array.isArray(input.entityRefs)) patch.entityRefs = input.entityRefs as string[]
       if (Array.isArray(input.beatRefs)) patch.beatRefs = input.beatRefs as string[]
-      if (edits.length) {
-        patch.content = applyExactEdits(beat.content || '', edits)
-      } else if (typeof input.content === 'string') {
-        patch.content = input.content
-      }
+      const nextContent = buildContentPatch(beat.content || '', input, edits, lineEdits, paragraphEdits)
+      if (nextContent !== undefined) patch.content = nextContent
       if (Object.keys(patch).length === 0) {
         return { ok: false, summary: '没有可更新的字段', error: 'empty_patch' }
       }
@@ -472,11 +635,8 @@ export class AgentToolRuntime {
       // refs 可直接写入 JSON 属性（无需正文双链）
       if (Array.isArray(input.entityRefs)) patch.entityRefs = input.entityRefs as string[]
       if (Array.isArray(input.beatRefs)) patch.beatRefs = input.beatRefs as string[]
-      if (edits.length) {
-        patch.content = applyExactEdits(entity.content || '', edits)
-      } else if (typeof input.content === 'string') {
-        patch.content = input.content
-      }
+      const nextContent = buildContentPatch(entity.content || '', input, edits, lineEdits, paragraphEdits)
+      if (nextContent !== undefined) patch.content = nextContent
       return this.updateEntityTool(projectId, parsed.id, patch)
     }
 
@@ -503,11 +663,8 @@ export class AgentToolRuntime {
     if (typeof input.status === 'string') {
       patch.status = input.status as 'draft' | 'final'
     }
-    if (edits.length) {
-      patch.content = applyExactEdits(chapter.content || '', edits)
-    } else if (typeof input.content === 'string') {
-      patch.content = input.content
-    }
+    const nextContent = buildContentPatch(chapter.content || '', input, edits, lineEdits, paragraphEdits)
+    if (nextContent !== undefined) patch.content = nextContent
     if (patch.content !== undefined) assertNoChapterDualLinks(patch.content)
     if (Array.isArray(input.sourceBeatIds)) {
       patch.sourceBeatIds = input.sourceBeatIds as string[]
@@ -1112,6 +1269,42 @@ export class AgentToolRuntime {
       ok: true,
       summary: `已读文章「${chapter.title}」· ${chapter.content.length} 字`,
       data: chapter
+    }
+  }
+
+  private async readChapterRange(
+    projectId: string,
+    chapterId: string,
+    range: { startLine?: number; endLine?: number }
+  ): Promise<AgentToolResult> {
+    if (!chapterId) return { ok: false, summary: '缺少 chapterId', error: 'missing_chapterId' }
+    const chapter = await this.projects.getChapter(projectId, chapterId)
+    const normalized = chapter.content.replace(/\r\n?/gu, '\n')
+    const lines = normalized ? normalized.split('\n') : ['']
+    const startLine = range.startLine ?? 1
+    const endLine = range.endLine ?? startLine
+    if (
+      !Number.isInteger(startLine) ||
+      !Number.isInteger(endLine) ||
+      startLine < 1 ||
+      endLine < startLine ||
+      endLine > lines.length
+    ) {
+      return {
+        ok: false,
+        summary: `无效行范围：${startLine}-${endLine}，正文共 ${lines.length} 行`,
+        error: 'invalid_line_range'
+      }
+    }
+    const selected = lines.slice(startLine - 1, endLine).join('\n')
+    return {
+      ok: true,
+      summary: `已读取文章「${chapter.title}」第 ${startLine}-${endLine} 行`,
+      data: {
+        ...chapter,
+        content: selected,
+        range: { startLine, endLine, totalLines: lines.length }
+      }
     }
   }
 

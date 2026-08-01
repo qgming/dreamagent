@@ -11,6 +11,7 @@ export type AgentToolName =
   | 'write'
   | 'edit'
   | 'delete'
+  | 'text_stats'
   | 'web_search'
   | 'web_fetch'
   | 'todo'
@@ -196,9 +197,35 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '资源路径' }
+        path: { type: 'string', description: '资源路径' },
+        startLine: { type: 'number', description: '可选：文章正文起始行（从 1 开始）' },
+        endLine: { type: 'number', description: '可选：文章正文结束行（从 1 开始）' }
       },
       required: ['path']
+    }
+  },
+  {
+    name: 'text_stats',
+    description:
+      '统计文章或直接传入的文本。支持字词/短语计数、行号、段号、列号、上下文、每段字数，以及 story-humanizer 规则指标和自动结构分。path 与 content 二选一。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文章路径，如 chapters/{id}' },
+        content: { type: 'string', description: '直接分析的纯文本，与 path 二选一' },
+        terms: { type: 'array', items: { type: 'string' }, description: '要查询的字词或短语' },
+        profile: { type: 'string', enum: ['basic', 'story-humanizer'] },
+        dialogueExpectation: {
+          type: 'string',
+          enum: ['none', 'some', 'driving'],
+          description: 'none=不要求；some=只要求出现对话；driving=低于 10% 时软提示'
+        },
+        includeContext: { type: 'boolean' },
+        includeParagraphTermCounts: { type: 'boolean' },
+        maxMatches: { type: 'number' },
+        contextChars: { type: 'number' },
+        segmentCount: { type: 'number' }
+      }
     }
   },
   {
@@ -271,7 +298,33 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
         },
         sourceBeatIds: { type: 'array', items: { type: 'string' } },
         entityRefs: { type: 'array', items: { type: 'string' } },
-        beatRefs: { type: 'array', items: { type: 'string' } }
+        beatRefs: { type: 'array', items: { type: 'string' } },
+        expectedSourceHash: { type: 'string' },
+        lineEdits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              startLine: { type: 'number' },
+              endLine: { type: 'number' },
+              expectedText: { type: 'string' },
+              newText: { type: 'string' }
+            },
+            required: ['startLine', 'expectedText', 'newText']
+          }
+        },
+        paragraphEdits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              paragraph: { type: 'number' },
+              expectedText: { type: 'string' },
+              newText: { type: 'string' }
+            },
+            required: ['paragraph', 'expectedText', 'newText']
+          }
+        }
       },
       required: ['path']
     }

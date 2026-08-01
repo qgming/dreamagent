@@ -123,6 +123,120 @@ export function applyExactEdits(
   return result
 }
 
+export interface LineEdit {
+  startLine: number
+  endLine?: number
+  expectedText: string
+  newText: string
+}
+
+export interface ParagraphEdit {
+  paragraph: number
+  expectedText: string
+  newText: string
+}
+
+interface PreservedLine {
+  text: string
+  ending: string
+}
+
+function normalizeLineEndings(text: string): string {
+  return text.replace(/\r\n?/gu, '\n')
+}
+
+function splitPreservingLineEndings(content: string): PreservedLine[] {
+  const parts = content.split(/\r\n|\r|\n/gu)
+  const endings = content.match(/\r\n|\r|\n/gu) ?? []
+  return parts.map((text, index) => ({ text, ending: endings[index] ?? '' }))
+}
+
+function dominantLineEnding(lines: PreservedLine[]): string {
+  const counts = new Map<string, number>()
+  for (const line of lines) {
+    if (!line.ending) continue
+    counts.set(line.ending, (counts.get(line.ending) ?? 0) + 1)
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '\n'
+}
+
+function paragraphLineRanges(content: string): Array<{ startLine: number; endLine: number }> {
+  const lines = normalizeLineEndings(content).split('\n')
+  const ranges: Array<{ startLine: number; endLine: number }> = []
+  let startLine = -1
+  const flush = (endLine: number): void => {
+    if (startLine < 0) return
+    ranges.push({ startLine, endLine })
+    startLine = -1
+  }
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index]!.trim() === '') flush(index - 1)
+    else if (startLine < 0) startLine = index
+  }
+  flush(lines.length - 1)
+  return ranges
+}
+
+/** 按逻辑行替换，行号从 1 开始；expectedText 不含行边界换行符。 */
+export function applyLineEdits(content: string, edits: LineEdit[]): string {
+  if (!edits.length) return content
+  const lines = splitPreservingLineEndings(content)
+  const ending = dominantLineEnding(lines)
+  const ranges = edits.map((edit) => {
+    const startLine = edit.startLine
+    const endLine = edit.endLine ?? startLine
+    if (!Number.isInteger(startLine) || !Number.isInteger(endLine) || startLine < 1 || endLine < startLine) {
+      throw new Error(`无效行范围：${startLine}-${endLine}`)
+    }
+    if (endLine > lines.length) {
+      throw new Error(`行号超出范围：${startLine}-${endLine}，正文共 ${lines.length} 行`)
+    }
+    const start = startLine - 1
+    const end = endLine - 1
+    const actual = lines.slice(start, end + 1).map((line) => line.text).join('\n')
+    if (normalizeLineEndings(edit.expectedText) !== actual) {
+      throw new Error(`第 ${startLine}-${endLine} 行内容已变化，expectedText 校验失败`)
+    }
+    const replacementLines = normalizeLineEndings(edit.newText).split('\n')
+    const boundaryEnding = lines[end]!.ending
+    const replacement = replacementLines.map((text, index) => ({
+      text,
+      ending: index === replacementLines.length - 1 ? boundaryEnding : ending
+    }))
+    return { start, end, replacement }
+  })
+
+  const ordered = [...ranges].sort((a, b) => a.start - b.start)
+  for (let index = 1; index < ordered.length; index += 1) {
+    if (ordered[index]!.start <= ordered[index - 1]!.end) {
+      throw new Error('lineEdits 存在重叠区间')
+    }
+  }
+  for (const range of [...ranges].sort((a, b) => b.start - a.start)) {
+    lines.splice(range.start, range.end - range.start + 1, ...range.replacement)
+  }
+  return lines.map((line) => `${line.text}${line.ending}`).join('')
+}
+
+/** 按空行分隔的段落替换，段号从 1 开始。 */
+export function applyParagraphEdits(content: string, edits: ParagraphEdit[]): string {
+  if (!edits.length) return content
+  const ranges = paragraphLineRanges(content)
+  const lineEdits = edits.map((edit) => {
+    if (!Number.isInteger(edit.paragraph) || edit.paragraph < 1 || edit.paragraph > ranges.length) {
+      throw new Error(`无效段号：${edit.paragraph}，正文共 ${ranges.length} 段`)
+    }
+    const range = ranges[edit.paragraph - 1]!
+    return {
+      startLine: range.startLine + 1,
+      endLine: range.endLine + 1,
+      expectedText: edit.expectedText,
+      newText: edit.newText
+    }
+  })
+  return applyLineEdits(content, lineEdits)
+}
+
 const CHAPTER_DUAL_LINK_RE = /\[@[^\]]+\]\((?:entity|beat):[^)]+\)/
 
 export function assertNoChapterDualLinks(content: string): void {
