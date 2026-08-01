@@ -238,7 +238,7 @@ write({ type: "beat",
 
 - **本技能**：产品模型、双链、工具顺序。
 - `long-write` / `short-write`：叙事流程与质量。
-- `deslop` / `prose-craft`：句面。
+- `story-humanizer` / `prose-craft`：句面。
 - `continuity-audit`：设定一致性。
 - `title-blurb`：书名简介。
 

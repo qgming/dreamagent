@@ -20,9 +20,9 @@
 
 ### 高频AI用词
 
-> 完整禁用词表见 [banned-words.md](../../deslop/references/banned-words.md)
+> 完整禁用词表见 [05-禁词与句式表.md](../../story-humanizer/references/05-禁词与句式表.md)
 
-**补充类目**（banned-words.md 未覆盖的高阶替换）：
+**补充类目**（05-禁词与句式表.md 未覆盖的高阶替换）：
 
 | 类别 | 替代原则 |
 |------|---------|
@@ -166,7 +166,7 @@
 
 ## 禁用词与句式速查
 
-> 完整禁用词表和句式模板见 [banned-words.md](../../deslop/references/banned-words.md)
+> 完整禁用词表和句式模板见 [05-禁词与句式表.md](../../story-humanizer/references/05-禁词与句式表.md)
 
 ### 正确替代示例
 - '他感到一丝紧张' → '他的手在抖'

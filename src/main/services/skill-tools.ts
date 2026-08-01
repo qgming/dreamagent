@@ -18,13 +18,13 @@ type AnySkillTool = AgentHarnessTool<DreamToolContext, TSchema, unknown>
 const listSkillsParams = Type.Object({})
 
 const readSkillParams = Type.Object({
-  name: Type.String({ description: '要读取的技能名称，例如 deslop' })
+  name: Type.String({ description: '要读取的技能名称，例如 story-humanizer' })
 })
 
 const readSkillFileParams = Type.Object({
-  name: Type.String({ description: '技能名称，例如 deslop' }),
+  name: Type.String({ description: '技能名称，例如 story-humanizer' }),
   path: Type.String({
-    description: '技能目录内的相对路径，例如 references/banned-words.md'
+    description: '技能目录内的相对路径，例如 references/05-禁词与句式表.md'
   })
 })
 
