@@ -15,6 +15,10 @@ export interface TextStatsOptions {
   segmentCount?: number
   profile?: TextStatsProfile
   dialogueExpectation?: DialogueExpectation
+  /** 可选：用于比较作者自身风格的参考正文，不会参与当前正文的计数。 */
+  referenceTexts?: string[]
+  /** 与 referenceTexts 同顺序的来源标签，便于解释基线结果。 */
+  referenceLabels?: string[]
 }
 
 export interface TextStatsFinding {
@@ -79,6 +83,15 @@ export interface TextStatsSegment {
   excerpt?: string
 }
 
+export interface TextStatsDistribution {
+  average: number
+  median: number
+  p10: number
+  p90: number
+  standardDeviation: number
+  coefficientOfVariation: number
+}
+
 export interface TextStatsSummary {
   rawLength: number
   visibleCharCount: number
@@ -88,6 +101,9 @@ export interface TextStatsSummary {
   sentenceEndCount: number
   sentenceCount: number
   sentenceEndDensityPerThousand: number
+  paragraphsPerThousand: number
+  sentenceLength: TextStatsDistribution
+  paragraphLength: TextStatsDistribution
   deCount: number
   deDensityPerThousand: number
   dialogueCharCount: number
@@ -103,12 +119,40 @@ export interface TextStatsSummary {
   averageSentenceVisibleCharCount: number
   maxSentenceVisibleCharCount: number
   longSentenceRatio: number
+  commaCount: number
+  commaDensityPerHundred: number
+  sentenceStartRepeatRatio: number
+  exactRepeatedSentenceCount: number
+  repeatedPhraseCount: number
+  dialogueTurnCount: number
+  averageDialogueTurnVisibleCharCount: number
+}
+
+export interface TextStatsBaselineMetric {
+  name: string
+  current: number
+  median: number
+  min: number
+  max: number
+  delta: number
+  normalizedDelta: number
+  withinReferenceRange: boolean
+}
+
+export interface TextStatsBaselineResult {
+  sampleCount: number
+  labels: string[]
+  distance: number
+  metrics: TextStatsBaselineMetric[]
+  findings: TextStatsFinding[]
 }
 
 export interface TextStatsProfileResult {
   name: TextStatsProfile
   ruleVersion: string
   dialogueExpectation: DialogueExpectation
+  structureScore: number
+  /** @deprecated 使用 structureScore；保留 score 兼容已有调用方。 */
   score: number
   findings: TextStatsFinding[]
   segments: TextStatsSegment[]
@@ -119,7 +163,27 @@ export interface TextStatsData {
   terms: TextStatsTermResult[]
   paragraphs: TextStatsParagraph[]
   profile?: TextStatsProfileResult
+  baseline?: TextStatsBaselineResult
   sourceHash: string
+}
+
+export interface TextComparisonTokenDelta {
+  token: string
+  before: number
+  after: number
+}
+
+export interface TextComparisonResult {
+  preserved: boolean
+  before: TextStatsSummary
+  after: TextStatsSummary
+  visibleCharDelta: number
+  sentenceCountDelta: number
+  removedNumbers: string[]
+  addedNumbers: string[]
+  protectedTerms: TextComparisonTokenDelta[]
+  removedDialogueCount: number
+  findings: TextStatsFinding[]
 }
 
 interface LineInfo {
@@ -313,9 +377,102 @@ function sentenceUnits(text: string, ranges: Range[]): SentenceUnit[] {
   return units
 }
 
+function sentenceTexts(text: string, units: SentenceUnit[]): string[] {
+  return units
+    .map((unit) => text.slice(unit.start, unit.end).trim())
+    .filter(Boolean)
+}
+
+function sentenceStartKey(text: string): string {
+  const clean = text
+    .trim()
+    .replace(/^[\s"'“”‘’「」『』（）()【】《》、，。！？!?：:；;…—-]+/gu, '')
+  return Array.from(clean).slice(0, 4).join('')
+}
+
+function repeatAfterFirst(values: string[]): number {
+  const counts = new Map<string, number>()
+  for (const value of values) {
+    if (value) counts.set(value, (counts.get(value) ?? 0) + 1)
+  }
+  return [...counts.values()].reduce((total, count) => total + Math.max(0, count - 1), 0)
+}
+
+function normalizeSentenceForRepeat(text: string): string {
+  return text.replace(/[\s\u3000]+/gu, '').replace(/[。！？!?]+$/gu, '')
+}
+
+function repeatedPhraseCount(text: string): number {
+  const counts = new Map<string, number>()
+  const runs = text
+    .split(/[\s\u3000，。！？!?；;：:“”‘’「」『』（）()【】《》、…—-]/gu)
+    .map((run) => Array.from(run).join(''))
+    .filter((run) => run.length >= 8)
+  for (const run of runs) {
+    for (let index = 0; index <= run.length - 8; index += 1) {
+      const phrase = Array.from(run).slice(index, index + 8).join('')
+      counts.set(phrase, (counts.get(phrase) ?? 0) + 1)
+    }
+  }
+  return [...counts.values()].reduce((total, count) => total + Math.max(0, count - 1), 0)
+}
+
+function countTokens(text: string, pattern: RegExp): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const match of text.matchAll(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`))) {
+    const token = match[0]
+    counts.set(token, (counts.get(token) ?? 0) + 1)
+  }
+  return counts
+}
+
+function mapTokenDelta(before: Map<string, number>, after: Map<string, number>): TextComparisonTokenDelta[] {
+  const tokens = new Set([...before.keys(), ...after.keys()])
+  return [...tokens]
+    .map((token) => ({ token, before: before.get(token) ?? 0, after: after.get(token) ?? 0 }))
+    .filter((item) => item.before !== item.after)
+    .sort((a, b) => a.token.localeCompare(b.token))
+}
+
 function average(values: number[]): number {
   if (!values.length) return 0
   return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10
+}
+
+function percentile(values: number[], fraction: number): number {
+  if (!values.length) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const position = (sorted.length - 1) * fraction
+  const lower = Math.floor(position)
+  const upper = Math.ceil(position)
+  if (lower === upper) return sorted[lower]!
+  const value = sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (position - lower)
+  return Math.round(value * 10) / 10
+}
+
+function distribution(values: number[]): TextStatsDistribution {
+  if (!values.length) {
+    return {
+      average: 0,
+      median: 0,
+      p10: 0,
+      p90: 0,
+      standardDeviation: 0,
+      coefficientOfVariation: 0
+    }
+  }
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length
+  const standardDeviation = Math.sqrt(
+    values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length
+  )
+  return {
+    average: average(values),
+    median: percentile(values, 0.5),
+    p10: percentile(values, 0.1),
+    p90: percentile(values, 0.9),
+    standardDeviation: Math.round(standardDeviation * 10) / 10,
+    coefficientOfVariation: mean > 0 ? Math.round((standardDeviation / mean) * 1000) / 1000 : 0
+  }
 }
 
 function ratio(value: number, total: number): number {
@@ -324,6 +481,15 @@ function ratio(value: number, total: number): number {
 
 function perThousand(value: number, total: number): number {
   return total > 0 ? Math.round((value / total) * 1000 * 10) / 10 : 0
+}
+
+function perHundred(value: number, total: number): number {
+  return total > 0 ? Math.round((value / total) * 100 * 10) / 10 : 0
+}
+
+function round(value: number, digits = 3): number {
+  const factor = 10 ** digits
+  return Math.round(value * factor) / factor
 }
 
 function contextAround(text: string, start: number, end: number, radius: number): string {
@@ -410,7 +576,7 @@ function buildFindings(
   dialogueExpectation: DialogueExpectation
 ): TextStatsFinding[] {
   const findings: TextStatsFinding[] = []
-  if (summary.sentenceEndDensityPerThousand < 15 || summary.sentenceEndDensityPerThousand > 65) {
+  if (summary.visibleCharCount >= 1000 && (summary.sentenceEndDensityPerThousand < 15 || summary.sentenceEndDensityPerThousand > 65)) {
     findings.push({
       code: 'sentence-density-extreme',
       severity: 'error',
@@ -418,7 +584,7 @@ function buildFindings(
       value: summary.sentenceEndDensityPerThousand,
       threshold: summary.sentenceEndDensityPerThousand < 15 ? 15 : 65
     })
-  } else if (summary.sentenceEndDensityPerThousand < 20 || summary.sentenceEndDensityPerThousand > 55) {
+  } else if (summary.visibleCharCount >= 1000 && (summary.sentenceEndDensityPerThousand < 20 || summary.sentenceEndDensityPerThousand > 55)) {
     findings.push({
       code: 'sentence-density-outside-sample-range',
       severity: 'warning',
@@ -427,18 +593,14 @@ function buildFindings(
       threshold: summary.sentenceEndDensityPerThousand < 20 ? 20 : 55
     })
   }
-  if (summary.deDensityPerThousand < 12) {
-    findings.push({ code: 'de-density-low', severity: 'error', message: '“的”密度低于 12/千字', value: summary.deDensityPerThousand, threshold: 12 })
-  } else if (summary.deDensityPerThousand < 18) {
-    findings.push({ code: 'de-density-low', severity: 'warning', message: '“的”密度低于 18/千字', value: summary.deDensityPerThousand, threshold: 18 })
+  if (summary.deDensityPerThousand < 12 && summary.visibleCharCount >= 1000) {
+    findings.push({ code: 'de-density-low', severity: 'info', message: '“的”密度偏低，仅提示检查修饰是否过少，不自动判定文风问题', value: summary.deDensityPerThousand, threshold: 12 })
   }
-  if (summary.paragraphCount < 70) {
-    findings.push({ code: 'paragraphs-low', severity: 'error', message: '段落数低于 70', value: summary.paragraphCount, threshold: 70 })
-  } else if (summary.paragraphCount < 80) {
-    findings.push({ code: 'paragraphs-low', severity: 'warning', message: '段落数低于 80', value: summary.paragraphCount, threshold: 80 })
+  if (summary.paragraphsPerThousand < 15 && summary.visibleCharCount >= 1000) {
+    findings.push({ code: 'paragraph-density-low', severity: 'info', message: '每千字段落数偏低，建议定位是否存在信息堆叠的大段，而不是追求固定段数', value: summary.paragraphsPerThousand, threshold: 15 })
   }
-  if (summary.shortParagraphRatio < 0.15 && summary.paragraphCount > 0) {
-    findings.push({ code: 'short-paragraph-ratio-low', severity: 'warning', message: '短段占比低于样文观察下限 15%', value: summary.shortParagraphRatio, threshold: 0.15 })
+  if (summary.visibleCharCount >= 1000 && summary.shortParagraphRatio < 0.15 && summary.paragraphCount > 0) {
+    findings.push({ code: 'short-paragraph-ratio-low', severity: 'info', message: '短段占比低于样文观察下限 15%，建议结合阅读节奏人工复核', value: summary.shortParagraphRatio, threshold: 0.15 })
   }
   if (summary.longParagraphCount >= 25 && summary.longParagraphRatio >= 0.25) {
     findings.push({ code: 'long-paragraphs-extreme', severity: 'error', message: '超长段数量和占比都明显高于 5 篇人类样文', value: summary.longParagraphCount, threshold: 25 })
@@ -448,13 +610,22 @@ function buildFindings(
   if (dialogueExpectation === 'some' && summary.dialogueCharCount === 0 && summary.visibleCharCount > 0) {
     findings.push({ code: 'dialogue-absent', severity: 'warning', message: '本章节标记为需要对话，但未检测到引号内对话', value: 0, threshold: 1 })
   } else if (dialogueExpectation === 'driving' && summary.dialogueRatio < 0.1 && summary.visibleCharCount > 0) {
-    findings.push({ code: 'dialogue-ratio-low-soft', severity: 'warning', message: '对话驱动章节的对话占比低于 10%，建议复核但不直接判定不合格', value: summary.dialogueRatio, threshold: 0.1 })
+    findings.push({ code: 'dialogue-ratio-low-soft', severity: 'info', message: '对话驱动章节的对话占比低于 10%，建议复核但不直接判定不合格', value: summary.dialogueRatio, threshold: 0.1 })
   }
   if (summary.dashCount > 0) {
     findings.push({ code: 'dash-present', severity: 'info', message: '正文包含破折号，仅作为可选风格复核项，不自动扣分', value: summary.dashCount, threshold: 0 })
   }
   if (summary.modalWordCount === 0) {
     findings.push({ code: 'modal-words-none', severity: 'info', message: '未检测到常用语气词', value: 0, threshold: 1 })
+  }
+  if (summary.exactRepeatedSentenceCount > 0) {
+    findings.push({ code: 'repeated-sentences', severity: 'info', message: '发现完全重复的句子，建议检查是否是有意复现或误重复', value: summary.exactRepeatedSentenceCount, threshold: 1 })
+  }
+  if (summary.repeatedPhraseCount >= 2) {
+    findings.push({ code: 'repeated-phrases', severity: 'info', message: '发现重复的八字短语，建议结合上下文确认是口头禅、术语还是机械复用', value: summary.repeatedPhraseCount, threshold: 2 })
+  }
+  if (summary.sentenceStartRepeatRatio >= 0.25) {
+    findings.push({ code: 'sentence-start-repetition', severity: 'info', message: '句子开头重复率偏高，建议检查是否形成机械节奏', value: summary.sentenceStartRepeatRatio, threshold: 0.25 })
   }
   if (dialogueExpectation === 'driving' && noDialogueRuns > 0) {
     findings.push({ code: 'long-narration-runs', severity: 'info', message: '存在连续 3 句以上无对话的叙述区间，仅定位复核，不自动扣分', value: noDialogueRuns, threshold: 3 })
@@ -469,6 +640,63 @@ function profileScore(findings: TextStatsFinding[]): number {
     return total
   }, 0)
   return Math.max(0, 100 - penalty)
+}
+
+const BASELINE_METRICS: Array<{ name: string; get: (summary: TextStatsSummary) => number }> = [
+  { name: 'sentenceEndDensityPerThousand', get: (summary) => summary.sentenceEndDensityPerThousand },
+  { name: 'paragraphsPerThousand', get: (summary) => summary.paragraphsPerThousand },
+  { name: 'averageSentenceVisibleCharCount', get: (summary) => summary.averageSentenceVisibleCharCount },
+  { name: 'sentenceLengthCoefficientOfVariation', get: (summary) => summary.sentenceLength.coefficientOfVariation },
+  { name: 'commaDensityPerHundred', get: (summary) => summary.commaDensityPerHundred },
+  { name: 'shortParagraphRatio', get: (summary) => summary.shortParagraphRatio },
+  { name: 'longParagraphRatio', get: (summary) => summary.longParagraphRatio },
+  { name: 'dialogueRatio', get: (summary) => summary.dialogueRatio },
+  { name: 'sentenceStartRepeatRatio', get: (summary) => summary.sentenceStartRepeatRatio }
+]
+
+function buildBaselineComparison(
+  current: TextStatsSummary,
+  referenceTexts: string[],
+  dialogueExpectation: DialogueExpectation,
+  referenceLabels: string[] = []
+): TextStatsBaselineResult | undefined {
+  const references = referenceTexts
+    .map((text, index) => ({ text, index }))
+    .filter(({ text }) => typeof text === 'string' && text.trim())
+  if (!references.length) return undefined
+  const referenceSummaries = references.map(({ text }) => analyzeText(text, { dialogueExpectation }).summary)
+  const metrics = BASELINE_METRICS.map(({ name, get }) => {
+    const values = referenceSummaries.map(get)
+    const median = percentile(values, 0.5)
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    const currentValue = get(current)
+    const scale = Math.max(max - min, Math.abs(median) * 0.2, 1)
+    return {
+      name,
+      current: round(currentValue),
+      median: round(median),
+      min: round(min),
+      max: round(max),
+      delta: round(currentValue - median),
+      normalizedDelta: round(Math.abs(currentValue - median) / scale),
+      withinReferenceRange: currentValue >= min && currentValue <= max
+    }
+  })
+  const distance = round(metrics.reduce((sum, metric) => sum + metric.normalizedDelta, 0) / metrics.length)
+  const findings: TextStatsFinding[] = []
+  if (distance >= 2) {
+    findings.push({ code: 'author-style-distance-high', severity: 'warning', message: '当前文章与参考作者样本的多项结构分布差异较大，建议人工确认题材或场景是否不同', value: distance, threshold: 2 })
+  } else if (distance >= 1) {
+    findings.push({ code: 'author-style-distance-review', severity: 'info', message: '当前文章与参考作者样本存在可复核的结构差异，不代表质量或来源问题', value: distance, threshold: 1 })
+  }
+  return {
+    sampleCount: references.length,
+    labels: references.map(({ index }) => referenceLabels[index] || `参考样本 ${index + 1}`),
+    distance,
+    metrics,
+    findings
+  }
 }
 
 function buildSegments(
@@ -548,6 +776,12 @@ export function analyzeText(text: string, options: TextStatsOptions = {}): TextS
   const visibleCharCount = countVisibleChars(normalized)
   const sentenceEndCount = countMatches(normalized, SENTENCE_END_RE)
   const sentenceLengths = units.map((unit) => countVisibleChars(normalized.slice(unit.start, unit.end)))
+  const sentenceTextValues = sentenceTexts(normalized, units)
+  const sentenceStartKeys = sentenceTextValues.map(sentenceStartKey).filter(Boolean)
+  const repeatedSentenceValues = sentenceTextValues
+    .map(normalizeSentenceForRepeat)
+    .filter(Boolean)
+  const dialogueTurnLengths = ranges.map((range) => countVisibleChars(normalized.slice(range.start, range.end)))
   const paragraphResults: TextStatsParagraph[] = paragraphs.map((paragraph) => {
     const paragraphRanges = quoteRanges(paragraph.text)
     const paragraphVisibleCharCount = countVisibleChars(paragraph.text)
@@ -611,6 +845,9 @@ export function analyzeText(text: string, options: TextStatsOptions = {}): TextS
     sentenceEndCount,
     sentenceCount: units.length,
     sentenceEndDensityPerThousand: perThousand(sentenceEndCount, visibleCharCount),
+    paragraphsPerThousand: perThousand(paragraphResults.length, visibleCharCount),
+    sentenceLength: distribution(sentenceLengths),
+    paragraphLength: distribution(paragraphResults.map((paragraph) => paragraph.visibleCharCount)),
     deCount: countLiteral(normalized, '的'),
     deDensityPerThousand: perThousand(countLiteral(normalized, '的'), visibleCharCount),
     dialogueCharCount,
@@ -625,17 +862,26 @@ export function analyzeText(text: string, options: TextStatsOptions = {}): TextS
     modalWordCount: MODAL_WORDS.reduce((sum, word) => sum + countLiteral(normalized, word), 0),
     averageSentenceVisibleCharCount: average(sentenceLengths),
     maxSentenceVisibleCharCount: sentenceLengths.reduce((max, value) => Math.max(max, value), 0),
-    longSentenceRatio: ratio(sentenceLengths.filter((length) => length > 40).length, sentenceLengths.length)
+    longSentenceRatio: ratio(sentenceLengths.filter((length) => length > 40).length, sentenceLengths.length),
+    commaCount: countMatches(normalized, /,|，/gu),
+    commaDensityPerHundred: perHundred(countMatches(normalized, /,|，/gu), visibleCharCount),
+    sentenceStartRepeatRatio: ratio(repeatAfterFirst(sentenceStartKeys), sentenceStartKeys.length),
+    exactRepeatedSentenceCount: repeatAfterFirst(repeatedSentenceValues),
+    repeatedPhraseCount: repeatedPhraseCount(normalized),
+    dialogueTurnCount: dialogueTurnLengths.length,
+    averageDialogueTurnVisibleCharCount: average(dialogueTurnLengths)
   }
   const profile = options.profile
     ? options.profile === 'story-humanizer'
       ? (() => {
           const findings = buildFindings(summary, noDialogueRuns.length, dialogueExpectation)
+          const structureScore = profileScore(findings)
           return {
             name: options.profile,
             ruleVersion: 'story-humanizer-v2',
             dialogueExpectation,
-            score: profileScore(findings),
+            structureScore,
+            score: structureScore,
             findings,
             segments: buildSegments(
               normalized,
@@ -651,19 +897,87 @@ export function analyzeText(text: string, options: TextStatsOptions = {}): TextS
           name: options.profile,
           ruleVersion: 'basic-v1',
           dialogueExpectation,
+          structureScore: 100,
           score: 100,
           findings: [],
           segments: []
         }
     : undefined
 
+  const baseline = buildBaselineComparison(
+    summary,
+    options.referenceTexts ?? [],
+    dialogueExpectation,
+    options.referenceLabels
+  )
   return {
     summary,
     terms: termOutput.results,
     paragraphs: paragraphResults,
     ...(profile ? { profile } : {}),
+    ...(baseline ? { baseline } : {}),
     sourceHash: sourceHash(text)
   }
+}
+
+export function compareText(
+  beforeText: string,
+  afterText: string,
+  protectedTerms: string[] = []
+): TextComparisonResult {
+  const before = analyzeText(beforeText).summary
+  const after = analyzeText(afterText).summary
+  const numberDelta = mapTokenDelta(
+    countTokens(beforeText, /\d+(?:\.\d+)?(?:%|％)?/gu),
+    countTokens(afterText, /\d+(?:\.\d+)?(?:%|％)?/gu)
+  )
+  const termDelta = mapTokenDelta(
+    countTokensByLiterals(beforeText, protectedTerms),
+    countTokensByLiterals(afterText, protectedTerms)
+  )
+  // 对白内容通常会被局部改写；这里只比较对白片段数量，不把改写后的新句子误判为删除。
+  const removedDialogueCount = Math.max(0, before.dialogueTurnCount - after.dialogueTurnCount)
+  const removedNumbers = numberDelta
+    .filter((item) => item.before > item.after)
+    .flatMap((item) => Array.from({ length: item.before - item.after }, () => item.token))
+  const addedNumbers = numberDelta
+    .filter((item) => item.after > item.before)
+    .flatMap((item) => Array.from({ length: item.after - item.before }, () => item.token))
+  const findings: TextStatsFinding[] = []
+  if (removedNumbers.length) {
+    findings.push({ code: 'protected-number-removed', severity: 'warning', message: '修改后有数字或百分比减少，请确认时间、数量和限制条件没有被误改', value: removedNumbers.length, threshold: 0 })
+  }
+  if (termDelta.some((item) => item.before > item.after)) {
+    findings.push({ code: 'protected-term-removed', severity: 'warning', message: '修改后有受保护词语减少，请确认人物、地点或专有名词没有被误删', value: termDelta.filter((item) => item.before > item.after).length, threshold: 0 })
+  }
+  if (removedDialogueCount > 0) {
+    findings.push({ code: 'dialogue-removed', severity: 'info', message: '修改后对白片段数量减少，仅提示复核叙事功能是否仍然完整', value: removedDialogueCount, threshold: 0 })
+  }
+  return {
+    preserved: removedNumbers.length === 0 && !termDelta.some((item) => item.before > item.after),
+    before,
+    after,
+    visibleCharDelta: after.visibleCharCount - before.visibleCharCount,
+    sentenceCountDelta: after.sentenceCount - before.sentenceCount,
+    removedNumbers,
+    addedNumbers,
+    protectedTerms: termDelta,
+    removedDialogueCount,
+    findings
+  }
+}
+
+function countTokensByLiterals(text: string, literals: string[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  if (!text && literals.length) {
+    for (const literal of literals) counts.set(literal, 0)
+    return counts
+  }
+  for (const literal of literals) {
+    if (!literal) continue
+    counts.set(literal, countLiteral(text, literal))
+  }
+  return counts
 }
 
 export function normalizeTextNewlines(text: string): string {

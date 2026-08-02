@@ -66,4 +66,38 @@ describe('Agent text_stats 与范围读取', () => {
     expect(stale.ok).toBe(false)
     expect(stale.error).toBe('正文版本已变化，expectedSourceHash 校验失败，请重新统计后再编辑')
   })
+
+  it('支持参考文章比较、来源标签和参考样本上限', async () => {
+    const { runtime } = makeRuntime()
+    const report = await runtime.execute('project_1', 'text_stats', {
+      content: '当前正文。',
+      referenceContents: ['参考正文。'],
+      referencePaths: ['chapters/chap_ref']
+    })
+
+    expect(report.ok).toBe(true)
+    expect((report.data as { baseline: { sampleCount: number; labels: string[] } }).baseline).toMatchObject({
+      sampleCount: 2,
+      labels: ['referenceContents[1]', 'chapters/chap_1（第一章）']
+    })
+
+    const tooMany = await runtime.execute('project_1', 'text_stats', {
+      content: '正文。',
+      referenceContents: Array.from({ length: 21 }, () => '参考。')
+    })
+    expect(tooMany.ok).toBe(false)
+    expect(tooMany.error).toBe('too_many_references')
+  })
+
+  it('提供 text_compare 运行时入口', async () => {
+    const { runtime } = makeRuntime()
+    const result = await runtime.execute('project_1', 'text_compare', {
+      before: '林舟有20%的把握。',
+      after: '林舟有10%的把握。',
+      terms: ['林舟']
+    })
+
+    expect(result.ok).toBe(true)
+    expect((result.data as { removedNumbers: string[] }).removedNumbers).toEqual(['20%'])
+  })
 })

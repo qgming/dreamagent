@@ -12,6 +12,7 @@ export type AgentToolName =
   | 'edit'
   | 'delete'
   | 'text_stats'
+  | 'text_compare'
   | 'web_search'
   | 'web_fetch'
   | 'todo'
@@ -207,7 +208,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {
     name: 'text_stats',
     description:
-      '统计文章或直接传入的文本。支持字词/短语计数、行号、段号、列号、上下文、每段字数，以及 story-humanizer 规则指标和自动结构分。path 与 content 二选一。',
+      '统计文章或直接传入的文本。支持字词/短语计数、行号、段号、列号、上下文、每段字数、重复模式、节奏分布、作者参考样本比较，以及 story-humanizer 结构指标。path 与 content 二选一。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -224,8 +225,36 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
         includeParagraphTermCounts: { type: 'boolean' },
         maxMatches: { type: 'number' },
         contextChars: { type: 'number' },
-        segmentCount: { type: 'number' }
+        segmentCount: { type: 'number' },
+        referencePaths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '可选：项目内参考文章路径数组，用于作者风格比较；与 referenceContents 合计最多 20 篇'
+        },
+        referenceContents: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '可选：直接传入的参考正文数组，用于作者风格比较；与 referencePaths 合计最多 20 篇，总长度最多 500000 字符'
+        }
       }
+    }
+  },
+  {
+    name: 'text_compare',
+    description:
+      '比较修改前后的两段文本。检查字数、句子、数字、受保护词和对白变化，返回可解释的保真复核提示；不能替代人工语义判断。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        before: { type: 'string', description: '修改前的正文' },
+        after: { type: 'string', description: '修改后的正文' },
+        terms: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '可选：人物、地点、专有名词等需要保护的词语'
+        }
+      },
+      required: ['before', 'after']
     }
   },
   {
@@ -305,10 +334,10 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
           items: {
             type: 'object',
             properties: {
-              startLine: { type: 'number' },
-              endLine: { type: 'number' },
-              expectedText: { type: 'string' },
-              newText: { type: 'string' }
+              startLine: { type: 'number', description: '起始行，从 1 开始' },
+              endLine: { type: 'number', description: '可选结束行；省略表示只替换起始行' },
+              expectedText: { type: 'string', description: '当前行内容，不含行边界换行符' },
+              newText: { type: 'string', description: '替换后的内容，可包含换行' }
             },
             required: ['startLine', 'expectedText', 'newText']
           }

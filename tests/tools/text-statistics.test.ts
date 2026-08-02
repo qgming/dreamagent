@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analyzeText } from '../../src/shared/text-statistics'
+import { analyzeText, compareText } from '../../src/shared/text-statistics'
 
 describe('text_stats 文本统计', () => {
   it('统计行、段、句子和查询词位置', () => {
@@ -77,7 +77,11 @@ describe('text_stats 文本统计', () => {
     expect(none.profile?.findings.some((item) => item.code === 'dialogue-absent')).toBe(false)
     expect(none.profile?.findings.some((item) => item.code === 'long-narration-runs')).toBe(false)
     expect(some.profile?.findings.some((item) => item.code === 'dialogue-absent')).toBe(true)
-    expect(driving.profile?.findings.some((item) => item.code === 'dialogue-ratio-low-soft')).toBe(true)
+    expect(driving.profile?.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'dialogue-ratio-low-soft', severity: 'info' })
+      ])
+    )
   })
 
   it('some 只要求出现对话，不因叙述跨度扣分', () => {
@@ -101,5 +105,77 @@ describe('text_stats 文本统计', () => {
     expect(report.terms[0]!.lineHits[0]!.count).toBe(5)
     expect(report.terms[0]!.lineHits[0]!.columns).toHaveLength(2)
     expect(report.terms[0]!.truncated).toBe(true)
+  })
+
+  it('返回句长和段落长度分布，而不是只有平均值', () => {
+    const report = analyzeText('甲乙。甲乙丙丁。甲乙丙丁戊己。\n\n短段。', {
+      profile: 'basic'
+    })
+
+    expect(report.summary.sentenceLength).toMatchObject({
+      average: 4.5,
+      median: 4,
+      p10: 3,
+      p90: 6.4
+    })
+    expect(report.summary.paragraphLength).toMatchObject({
+      average: 9,
+      median: 9,
+      p10: 4.2,
+      p90: 13.8
+    })
+    expect(report.paragraphs.map((paragraph) => paragraph.visibleCharCount)).toEqual([15, 3])
+  })
+
+  it('能定位重复句和句首重复，但不把它们自动变成扣分项', () => {
+    const report = analyzeText('他看向了那扇门。他看向了那扇门。他看向了那扇门。', {
+      profile: 'story-humanizer'
+    })
+
+    expect(report.summary.exactRepeatedSentenceCount).toBe(2)
+    expect(report.summary.sentenceStartRepeatRatio).toBe(0.667)
+    expect(report.profile?.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'repeated-sentences', severity: 'info' }),
+        expect.objectContaining({ code: 'sentence-start-repetition', severity: 'info' })
+      ])
+    )
+    expect(report.profile?.structureScore).toBe(100)
+  })
+
+  it('用作者参考样本返回中位数、范围和来源标签', () => {
+    const report = analyzeText('短句。', {
+      referenceTexts: ['短句。稍长一点。', '短句。'],
+      referenceLabels: ['认可章节 A', '认可章节 B']
+    })
+
+    expect(report.baseline).toMatchObject({
+      sampleCount: 2,
+      labels: ['认可章节 A', '认可章节 B']
+    })
+    expect(report.baseline?.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'sentenceEndDensityPerThousand' })
+      ])
+    )
+  })
+
+  it('比较修改前后数字、保护词和对白变化', () => {
+    const before = '第3章，林舟在七号楼等候。\n“我有20%的把握。”'
+    const after = '第3章，林舟在七号楼等候。\n“我有10%的把握。”'
+    const changedNumber = compareText(before, after, ['林舟', '七号楼'])
+
+    expect(changedNumber.preserved).toBe(false)
+    expect(changedNumber.removedNumbers).toEqual(['20%'])
+    expect(changedNumber.addedNumbers).toEqual(['10%'])
+    expect(changedNumber.removedDialogueCount).toBe(0)
+    expect(changedNumber.findings.map((finding) => finding.code)).toContain('protected-number-removed')
+
+    const removedTerm = compareText('林舟去了七号楼。', '他去了楼下。', ['林舟', '七号楼'])
+    expect(removedTerm.findings.map((finding) => finding.code)).toContain('protected-term-removed')
+
+    const removedDialogue = compareText('“走。”他说。', '他说。')
+    expect(removedDialogue.removedDialogueCount).toBe(1)
+    expect(removedDialogue.findings.map((finding) => finding.code)).toContain('dialogue-removed')
   })
 })

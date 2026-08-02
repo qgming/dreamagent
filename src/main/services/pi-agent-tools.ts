@@ -103,7 +103,15 @@ const textStatsParams = Type.Object({
   includeParagraphTermCounts: Type.Optional(Type.Boolean()),
   maxMatches: Type.Optional(Type.Number()),
   contextChars: Type.Optional(Type.Number()),
-  segmentCount: Type.Optional(Type.Number())
+  segmentCount: Type.Optional(Type.Number()),
+  referencePaths: Type.Optional(Type.Array(Type.String({ description: '项目内参考文章路径；与 referenceContents 合计最多 20 篇' }))),
+  referenceContents: Type.Optional(Type.Array(Type.String({ description: '直接传入的参考正文；与 referencePaths 合计最多 20 篇，总长度最多 500000 字符' })))
+})
+
+const textCompareParams = Type.Object({
+  before: Type.String({ description: '修改前正文' }),
+  after: Type.String({ description: '修改后正文' }),
+  terms: Type.Optional(Type.Array(Type.String({ description: '需要保护的人物、地点或专有名词' })))
 })
 
 const writeParams = Type.Object({
@@ -180,7 +188,7 @@ const editParams = Type.Object({
         expectedText: Type.String(),
         newText: Type.String()
       }),
-      { description: '按逻辑行替换；行号从 1 开始，expectedText 必须匹配当前正文' }
+        { description: '按逻辑行或连续多行替换；行号从 1 开始，expectedText 必须匹配当前正文，不能与其他区间重叠' }
     )
   ),
   paragraphEdits: Type.Optional(
@@ -229,11 +237,21 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       name: 'text_stats',
       label: 'text_stats',
       description:
-        '统计文章或传入文本。支持查询字词/短语的次数、行号、段号、上下文、每段字数，以及 story-humanizer 规则指标。path 与 content 二选一。',
+        '统计文章或传入文本。支持查询词语、重复模式、句段分布、作者参考样本比较，以及 story-humanizer 结构指标。path 与 content 二选一。',
       parameters: textStatsParams,
       executionMode: 'parallel',
-      execute: async (_id, params, _signal, _onUpdate, ctx) =>
+        execute: async (_id, params, _signal, _onUpdate, ctx) =>
         runRuntime(ctx, 'text_stats', { ...(params as Static<typeof textStatsParams>) })
+    },
+    {
+      name: 'text_compare',
+      label: 'text_compare',
+      description:
+        '比较修改前后文本的数字、受保护词、对白、句段和字数变化，作为编辑后的保真复核。',
+      parameters: textCompareParams,
+      executionMode: 'parallel',
+      execute: async (_id, params, _signal, _onUpdate, ctx) =>
+        runRuntime(ctx, 'text_compare', { ...(params as Static<typeof textCompareParams>) })
     },
     {
       name: 'write',
@@ -275,11 +293,12 @@ export const DREAM_AGENT_BASE_PROMPT = `你是「造梦师」的创作助手，�
 2. 不要编造未读取的设定；顺着 read 返回的出入链继续深入。
 3. 创建：write({ type:"entity", name, content }) / write({ type:"beat", title, content }) / write({ type:"chapter", title, content, sourceBeatIds, entityRefs })。
 4. 项目资料：read({ path:"project" })；write({ path:"project", title?, summary? }) 可改项目名称或梗概；局部修改梗概用 edit({ path:"project", edits:[{oldText,newText}] })。
-5. 对象覆盖：write({ path:"beats/{id}", content|title|status })；局部改用 edit({ path, edits:[{oldText,newText}] })。统计后的文章优先使用 text_stats + edit.lineEdits/paragraphEdits，并提供 expectedText 与 expectedSourceHash。
-6. 删除：delete({ path:"entities/{id}" })。
-7. 用中文回复用户；工具按需调用。
-8. 回复可用 Markdown。
-9. 不熟悉工具/双链时，先 read_skill「dreamagent-guide」。
+5. 对象覆盖：write({ path:"beats/{id}", content|title|status })；局部改用 edit({ path, edits:[{oldText,newText}] })。统计后的文章优先使用 text_stats + edit.lineEdits/paragraphEdits，并提供 expectedText 与 expectedSourceHash；有作者参考章节时用 text_stats 的 referencePaths/referenceContents 做风格比较。
+6. 文章修改后用 text_compare({ before, after, terms }) 检查数字、人物/地点名和对白变化；它只提供保真提示，不能替代人工语义判断。
+7. 删除：delete({ path:"entities/{id}" })。
+8. 用中文回复用户；工具按需调用。
+9. 回复可用 Markdown。
+10. 不熟悉工具/双链时，先 read_skill「dreamagent-guide」。
 
 ## 路径约定
 - 集合：beats / entities / chapters / outline
