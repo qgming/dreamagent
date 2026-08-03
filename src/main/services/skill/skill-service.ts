@@ -16,7 +16,7 @@ import type {
   SkillWriteResult,
   UninstallSkillResult,
   WriteSkillFileInput
-} from '../../shared/skills'
+} from '../../../shared/skills'
 import {
   ensureDir,
   listSubdirNames,
@@ -24,7 +24,7 @@ import {
   readJsonFile,
   removeDir,
   writeJsonAtomic
-} from './fs-utils'
+} from '../utils/fs-utils'
 import { parseSkillMd } from './skill-parser'
 
 const MAX_ARCHIVE_ENTRIES = 200

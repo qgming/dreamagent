@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import type { UpdateService } from '../services/update-service'
+import type { UpdateService } from '../services/update/update-service'
 
 export function registerUpdateIpc(updates: UpdateService): void {
   ipcMain.handle('updates:getStatus', () => updates.getStatus())

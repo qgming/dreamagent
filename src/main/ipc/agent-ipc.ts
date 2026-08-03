@@ -7,7 +7,7 @@ import type {
   AgentStartTurnInput,
   AgentSteerInput
 } from '../../shared/ui-chat'
-import type { AgentRunner } from '../services/agent-runner'
+import type { AgentRunner } from '../services/agent/agent-runner'
 
 function handle<T>(fn: () => Promise<T>): Promise<T> {
   return fn().catch((error: unknown) => {

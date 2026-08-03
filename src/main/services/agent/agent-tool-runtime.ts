@@ -12,7 +12,7 @@ import type {
   ReadEntityResult,
   ReadProjectResult,
   WriteChapterToolInput
-} from '../../shared/agent-tools'
+} from '../../../shared/agent-tools'
 import type {
   Beat,
   BeatStatus,
@@ -29,8 +29,8 @@ import type {
   UpdateChapterFolderInput,
   UpdateChapterInput,
   UpdateEntityInput
-} from '../../shared/project-types'
-import type { ProjectService } from './project-service'
+} from '../../../shared/project-types'
+import type { ProjectService } from '../project/project-service'
 import {
   applyExactEdits,
   applyLineEdits,
@@ -39,7 +39,7 @@ import {
   parseGraphPath,
   type LineEdit,
   type ParagraphEdit
-} from './graph-path'
+} from '../project/graph-path'
 import {
   analyzeText,
   compareText,
@@ -47,7 +47,7 @@ import {
   type DialogueExpectation,
   type TextStatsOptions,
   type TextStatsProfile
-} from '../../shared/text-statistics'
+} from '../../../shared/text-statistics'
 
 const MAX_REFERENCE_COUNT = 20
 const MAX_REFERENCE_CHARS = 500_000

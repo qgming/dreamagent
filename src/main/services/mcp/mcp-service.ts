@@ -15,8 +15,8 @@ import type {
   McpServersFile,
   McpTransport,
   McpUpsertInput
-} from '../../shared/mcp'
-import { ensureDir, readJsonFile, writeJsonAtomic } from './fs-utils'
+} from '../../../shared/mcp'
+import { ensureDir, readJsonFile, writeJsonAtomic } from '../utils/fs-utils'
 
 function getClientInfo(): { name: string; version: string } {
   return { name: 'DreamAgent', version: app.getVersion() }

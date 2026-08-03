@@ -4,7 +4,7 @@ import {
   type ProgressInfo,
   type UpdateInfo
 } from 'electron-updater'
-import type { UpdateStatus } from '../../shared/updates'
+import type { UpdateStatus } from '../../../shared/updates'
 
 const RELEASES_URL = 'https://github.com/qgming/dreamagent/releases'
 const AUTO_CHECK_DELAY_MS = 5_000

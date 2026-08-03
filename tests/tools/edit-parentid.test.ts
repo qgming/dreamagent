@@ -3,7 +3,7 @@
  * Agent edit 工具：parentId 支持（移动节点/实体到新父级或根）
  */
 import { describe, expect, it } from 'vitest'
-import { AgentToolRuntime } from '../../src/main/services/agent-tool-runtime'
+import { AgentToolRuntime } from '../../src/main/services/agent/agent-tool-runtime'
 
 interface FakeBeat {
   id: string

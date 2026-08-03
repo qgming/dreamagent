@@ -4,14 +4,14 @@ import {
   breakLinksInContent,
   extractRefIds,
   renameLinksInContent
-} from '../../shared/mentions'
+} from '../../../shared/mentions'
 import {
   createId,
   toBeatFileName,
   toChapterFileName,
   toEntityFileName,
   toFolderName
-} from '../../shared/ids'
+} from '../../../shared/ids'
 import {
   INDEX_SCHEMA_VERSION,
   PROJECT_SCHEMA_VERSION,
@@ -45,7 +45,7 @@ import {
   type UpdateChapterFolderInput,
   type UpdateChapterInput,
   type UpdateEntityInput
-} from '../../shared/project-types'
+} from '../../../shared/project-types'
 import {
   deleteAndPromote,
   getChildIds,
@@ -57,7 +57,7 @@ import {
   reorderSiblings,
   rebuildTreeFromParents,
   wouldCreateCycle
-} from '../../shared/tree-index'
+} from '../../../shared/tree-index'
 import type { LibraryService } from './library-service'
 import {
   ensureDir,
@@ -67,8 +67,8 @@ import {
   readJsonFile,
   removeDir,
   writeJsonAtomic
-} from './fs-utils'
-import type { WritingActivityDay } from '../../shared/activity'
+} from '../utils/fs-utils'
+import type { WritingActivityDay } from '../../../shared/activity'
 import type { ActivityLedgerService } from './activity-ledger'
 
 function nowIso(): string {

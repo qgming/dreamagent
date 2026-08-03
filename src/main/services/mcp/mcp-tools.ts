@@ -3,8 +3,8 @@
  */
 import { Type, type TSchema } from 'typebox'
 import type { AgentHarnessTool, AgentToolResult } from '@earendil-works/pi-agent-core'
-import type { DreamToolContext } from './pi-agent-tools'
-import type { McpDiscoveredTool, McpServerConfig } from '../../shared/mcp'
+import type { DreamToolContext } from '../agent/pi-agent-tools'
+import type { McpDiscoveredTool, McpServerConfig } from '../../../shared/mcp'
 import { getMcpService } from './mcp-service'
 
 type AnyMcpTool = AgentHarnessTool<DreamToolContext, TSchema, unknown>

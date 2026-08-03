@@ -6,8 +6,8 @@ import {
   type ProjectMeta,
   type ProjectIndex,
   type ProjectSummary
-} from '../../shared/project-types'
-import { ensureDir, listSubdirNames, pathExists, readJsonFile, writeJsonAtomic } from './fs-utils'
+} from '../../../shared/project-types'
+import { ensureDir, listSubdirNames, pathExists, readJsonFile, writeJsonAtomic } from '../utils/fs-utils'
 
 const LIBRARY_STATE_FILE = 'library.json'
 

@@ -2,8 +2,8 @@ import path from 'path'
 import type {
   ProjectActivityDay,
   WritingActivityDay
-} from '../../shared/activity'
-import { readJsonFile, writeJsonAtomic } from './fs-utils'
+} from '../../../shared/activity'
+import { readJsonFile, writeJsonAtomic } from '../utils/fs-utils'
 
 const ACTIVITY_SCHEMA_VERSION = 1
 const ACTIVITY_FILE = 'activity.json'

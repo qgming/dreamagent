@@ -3,7 +3,7 @@ import type {
   CreateSessionInput,
   UpdateSessionInput
 } from '../../shared/ui-chat'
-import type { PiSessionService } from '../services/pi-session-service'
+import type { PiSessionService } from '../services/session/pi-session-service'
 
 function handle<T>(fn: () => Promise<T>): Promise<T> {
   return fn().catch((error: unknown) => {

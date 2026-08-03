@@ -12,7 +12,7 @@ import type {
   ModelEffortLevel,
   ModelModality,
   ResolvedModelInfo
-} from '../../shared/context-usage'
+} from '../../../shared/context-usage'
 
 const DEFAULT_CONTEXT_WINDOW = 200_000
 const DEFAULT_MAX_OUTPUT = 32_768

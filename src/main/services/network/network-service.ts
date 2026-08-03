@@ -13,12 +13,12 @@ import type {
   WebSearchResponse,
   WebSearchSettings,
   WebSearchSettingsPatch
-} from '../../shared/web-search'
+} from '../../../shared/web-search'
 import {
   DEFAULT_SEARXNG_INSTANCES,
   DEFAULT_WEB_SEARCH_SETTINGS
-} from '../../shared/web-search'
-import { ensureDir, readJsonFile, writeJsonAtomic } from './fs-utils'
+} from '../../../shared/web-search'
+import { ensureDir, readJsonFile, writeJsonAtomic } from '../utils/fs-utils'
 
 const DEFAULT_TIMEOUT_MS = 120_000
 const MIN_TIMEOUT_MS = 3_000

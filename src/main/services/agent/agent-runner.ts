@@ -2,8 +2,8 @@
  * 真实 Agent Runner：AgentHarness + 流式事件
  */
 import { BrowserWindow } from 'electron'
-import { createId } from '../../shared/ids'
-import type { AgentStreamEvent } from '../../shared/agent-events'
+import { createId } from '../../../shared/ids'
+import type { AgentStreamEvent } from '../../../shared/agent-events'
 import type {
   AgentCancelTurnInput,
   AgentFollowUpInput,
@@ -15,25 +15,25 @@ import type {
   UiBeatStatusUpdate,
   UiChatMessage,
   UiToolCallPart
-} from '../../shared/ui-chat'
-import { GRAPH_MUTATING_TOOLS, type AgentToolName } from '../../shared/agent-tools'
-import type { ProjectSnapshot } from '../../shared/project-types'
-import type { ProjectService } from './project-service'
-import type { PiSessionService } from './pi-session-service'
-import type { LlmSettingsService } from './llm-settings-service'
+} from '../../../shared/ui-chat'
+import { GRAPH_MUTATING_TOOLS, type AgentToolName } from '../../../shared/agent-tools'
+import type { ProjectSnapshot } from '../../../shared/project-types'
+import type { ProjectService } from '../project/project-service'
+import type { PiSessionService } from '../session/pi-session-service'
+import type { LlmSettingsService } from '../llm/llm-settings-service'
 import type { GoalAuditHarness, HarnessManager, HarnessSelection } from './harness-manager'
 import type { AgentHarness } from '@earendil-works/pi-agent-core'
 import type { DreamToolContext } from './pi-agent-tools'
-import type { SessionContextUsage } from '../../shared/context-usage'
-import type { UiContextRef, UiActiveDocumentRef } from '../../shared/ui-chat'
-import { buildNarrativeCheckpointInstructions } from './context/narrative-compactor'
+import type { SessionContextUsage } from '../../../shared/context-usage'
+import type { UiContextRef, UiActiveDocumentRef } from '../../../shared/ui-chat'
+import { buildNarrativeCheckpointInstructions } from '../context/narrative-compactor'
 import {
   createSessionGoal,
   normalizeSessionGoalAudit,
   SESSION_GOAL_NOTE_LIMIT,
   type SessionGoal,
   type SessionGoalAuditDecision
-} from '../../shared/session-goals'
+} from '../../../shared/session-goals'
 
 type DreamHarness = AgentHarness<DreamToolContext>
 
@@ -782,7 +782,7 @@ export class AgentRunner {
 
           let chapterIds: string[] | undefined
           let statusUpdates: UiBeatStatusUpdate[] | undefined
-          let todosPayload: import('../../shared/todos').TodoItem[] | undefined
+          let todosPayload: import('../../../shared/todos').TodoItem[] | undefined
           // 路径式 write/edit 可能产出文章或状态变更
           if (event.toolName === 'write' || event.toolName === 'edit') {
             chapterIds = chapterIdsFromDetails(details)
@@ -813,7 +813,7 @@ export class AgentRunner {
                 ? (details as { data?: { todos?: unknown } }).data
                 : undefined
             if (data && Array.isArray(data.todos)) {
-              todosPayload = data.todos as import('../../shared/todos').TodoItem[]
+              todosPayload = data.todos as import('../../../shared/todos').TodoItem[]
             }
           }
 

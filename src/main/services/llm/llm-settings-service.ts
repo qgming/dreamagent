@@ -3,7 +3,7 @@
  */
 import { app, net, safeStorage } from 'electron'
 import path from 'path'
-import { createId } from '../../shared/ids'
+import { createId } from '../../../shared/ids'
 import type {
   LlmAddProviderInput,
   LlmModelConfig,
@@ -19,13 +19,13 @@ import type {
   LlmStoredSettingsV1,
   LlmThinkingLevel,
   LlmUpdateProviderInput
-} from '../../shared/llm-settings'
+} from '../../../shared/llm-settings'
 import {
   DEFAULT_THINKING_LEVEL,
   encodeModelKey,
   LLM_THINKING_LEVELS
-} from '../../shared/llm-settings'
-import { ensureDir, pathExists, readJsonFile, writeJsonAtomic } from './fs-utils'
+} from '../../../shared/llm-settings'
+import { ensureDir, pathExists, readJsonFile, writeJsonAtomic } from '../utils/fs-utils'
 import { cacheModelLogo, resolveModelInfo } from './model-catalog'
 
 const PLAIN_PREFIX = 'plain:'
@@ -71,11 +71,11 @@ function asThinkingLevels(raw: unknown): LlmThinkingLevel[] | undefined {
 
 function asModalities(
   raw: unknown
-): import('../../shared/llm-settings').LlmModelModality[] | undefined {
+): import('../../../shared/llm-settings').LlmModelModality[] | undefined {
   if (!Array.isArray(raw)) return undefined
   const allowed = new Set(['text', 'audio', 'image', 'video', 'pdf'])
   const mods = raw.filter(
-    (v): v is import('../../shared/llm-settings').LlmModelModality =>
+    (v): v is import('../../../shared/llm-settings').LlmModelModality =>
       typeof v === 'string' && allowed.has(v)
   )
   return mods.length ? mods : undefined

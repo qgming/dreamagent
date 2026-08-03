@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyLineEdits,
   applyParagraphEdits
-} from '../../src/main/services/graph-path'
+} from '../../src/main/services/project/graph-path'
 
 describe('按行和段落编辑', () => {
   it('按行替换并保留原有换行', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentToolRuntime } from '../../src/main/services/agent-tool-runtime'
+import { AgentToolRuntime } from '../../src/main/services/agent/agent-tool-runtime'
 
 function makeRuntime() {
   const chapter = {

@@ -24,8 +24,8 @@ import {
   streamSimple as anthropicMessagesStreamSimple
 } from '@earendil-works/pi-ai/api/anthropic-messages'
 import type { LlmSettingsService } from './llm-settings-service'
-import type { LlmRuntimeSelection, LlmThinkingLevel } from '../../shared/llm-settings'
-import type { ResolvedModelInfo } from '../../shared/context-usage'
+import type { LlmRuntimeSelection, LlmThinkingLevel } from '../../../shared/llm-settings'
+import type { ResolvedModelInfo } from '../../../shared/context-usage'
 import { cacheModelLogo, resolveModelInfo } from './model-catalog'
 
 const openaiCompletionsStreams: ProviderStreams = {

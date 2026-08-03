@@ -6,9 +6,9 @@ import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 import type { AgentHarnessTool } from '@earendil-works/pi-agent-core'
 import type { Skill } from '@earendil-works/pi-agent-core'
 import type { AgentToolRuntime } from './agent-tool-runtime'
-import type { SkillService } from './skill-service'
-import type { TodoService } from './todo-service'
-import type { AgentToolName } from '../../shared/agent-tools'
+import type { SkillService } from '../skill/skill-service'
+import type { TodoService } from '../todo/todo-service'
+import type { AgentToolName } from '../../../shared/agent-tools'
 
 /** 每轮注入的工具上下文 */
 export interface DreamToolContext {

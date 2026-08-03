@@ -4,7 +4,7 @@ import type {
   LlmThinkingLevel,
   LlmUpdateProviderInput
 } from '../../shared/llm-settings'
-import type { LlmSettingsService } from '../services/llm-settings-service'
+import type { LlmSettingsService } from '../services/llm/llm-settings-service'
 
 function handle<T>(fn: () => Promise<T>): Promise<T> {
   return fn().catch((error: unknown) => {

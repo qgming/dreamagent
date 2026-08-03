@@ -8,12 +8,12 @@ import type {
   UiChatMessage,
   UiChatPart,
   UiToolCallPart
-} from '../../shared/ui-chat'
-import { SESSION_ENTRY } from '../../shared/agent-events'
+} from '../../../shared/ui-chat'
+import { SESSION_ENTRY } from '../../../shared/agent-events'
 import {
   normalizeSessionGoal,
   type SessionGoal
-} from '../../shared/session-goals'
+} from '../../../shared/session-goals'
 
 function isoFromTs(ts: number | string | undefined): string {
   if (typeof ts === 'number' && Number.isFinite(ts)) {
@@ -280,11 +280,11 @@ export function readPinsFromBranch(branch: SessionTreeEntry[]): {
 /** 从 branch 读取最后一次 todo 工具写入的完整清单 */
 export function readTodosFromBranch(
   branch: SessionTreeEntry[]
-): import('../../shared/todos').TodoItem[] {
+): import('../../../shared/todos').TodoItem[] {
   const data = readLastCustomData<{ todos?: unknown }>(branch, SESSION_ENTRY.todos)
   if (!data || !Array.isArray(data.todos)) return []
   const VALID = new Set(['pending', 'in_progress', 'completed', 'cancelled'])
-  const out: import('../../shared/todos').TodoItem[] = []
+  const out: import('../../../shared/todos').TodoItem[] = []
   for (const raw of data.todos) {
     if (!raw || typeof raw !== 'object') continue
     const o = raw as Record<string, unknown>
@@ -293,7 +293,7 @@ export function readTodosFromBranch(
     out.push({
       id: o.id,
       content: o.content,
-      status: o.status as import('../../shared/todos').TodoStatus
+      status: o.status as import('../../../shared/todos').TodoStatus
     })
   }
   return out

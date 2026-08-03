@@ -3,7 +3,7 @@
  */
 import { ipcMain } from 'electron'
 import type { McpUpsertInput } from '../../shared/mcp'
-import { getMcpService } from '../services/mcp-service'
+import { getMcpService } from '../services/mcp/mcp-service'
 
 function handle<T>(fn: () => Promise<T>): Promise<T> {
   return fn().catch((error: unknown) => {

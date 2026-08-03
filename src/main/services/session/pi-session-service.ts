@@ -19,26 +19,26 @@ import {
 import type { Usage } from '@earendil-works/pi-ai'
 import type { JsonlSessionMetadata } from '@earendil-works/pi-agent-core'
 import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node'
-import { createId } from '../../shared/ids'
+import { createId } from '../../../shared/ids'
 import type {
   CreateSessionInput,
   SessionTokenUsageDay,
   SessionSummary,
   SessionView,
   UpdateSessionInput
-} from '../../shared/ui-chat'
-import { SESSION_ENTRY } from '../../shared/agent-events'
-import type { ProjectService } from './project-service'
-import { ensureDir } from './fs-utils'
-import type { PiModelsService } from './pi-models'
+} from '../../../shared/ui-chat'
+import { SESSION_ENTRY } from '../../../shared/agent-events'
+import type { ProjectService } from '../project/project-service'
+import { ensureDir } from '../utils/fs-utils'
+import type { PiModelsService } from '../llm/pi-models'
 import {
   AUTO_COMPACT_RATIO,
   type SessionContextUsage,
   type TokenUsageBreakdown
-} from '../../shared/context-usage'
-import { computeBudget } from './context/context-budget'
-import type { ProjectActivityDay } from '../../shared/activity'
-import type { ActivityLedgerService } from './activity-ledger'
+} from '../../../shared/context-usage'
+import { computeBudget } from '../context/context-budget'
+import type { ProjectActivityDay } from '../../../shared/activity'
+import type { ActivityLedgerService } from '../project/activity-ledger'
 import {
   countUserAssistant,
   parseSessionBranch,
@@ -47,7 +47,7 @@ import {
   readTodosFromBranch,
   readGoalFromBranch
 } from './pi-session-parser'
-import type { SessionGoal } from '../../shared/session-goals'
+import type { SessionGoal } from '../../../shared/session-goals'
 
 interface ProjectSessionRuntime {
   env: NodeExecutionEnv

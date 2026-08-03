@@ -9,12 +9,12 @@
  * ContextBuilder 负责系统提示词、工作集、manifest、预算与审计。
  */
 import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
-import type { ProjectService } from '../project-service'
-import type { PiSessionService } from '../pi-session-service'
-import type { TodoService } from '../todo-service'
+import type { ProjectService } from '../project/project-service'
+import type { PiSessionService } from '../session/pi-session-service'
+import type { TodoService } from '../todo/todo-service'
 import type { LlmThinkingLevel } from '../../../shared/llm-settings'
 import type { ContextRef, ActiveDocumentRef } from '../../../shared/context-refs'
-import { readGoalFromBranch, readPinsFromBranch } from '../pi-session-parser'
+import { readGoalFromBranch, readPinsFromBranch } from '../session/pi-session-parser'
 import {
   buildSystemPromptV2,
   type SystemPromptInput,

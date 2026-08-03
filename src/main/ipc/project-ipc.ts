@@ -1,6 +1,6 @@
 import { ipcMain, shell } from 'electron'
-import type { ProjectService } from '../services/project-service'
-import type { LegacyConversationMigrator } from '../services/legacy-migration'
+import type { ProjectService } from '../services/project/project-service'
+import type { LegacyConversationMigrator } from '../services/session/legacy-migration'
 import type {
   CreateBeatInput,
   CreateChapterFolderInput,

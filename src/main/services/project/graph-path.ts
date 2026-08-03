@@ -7,7 +7,7 @@
  * project                                # 项目标题与梗概
  * outline
  */
-import type { GraphResourceType } from '../../shared/agent-tools'
+import type { GraphResourceType } from '../../../shared/agent-tools'
 
 export type ParsedGraphPath =
   | { kind: 'collection'; type: 'beat' | 'entity' | 'chapter' | 'folder' }

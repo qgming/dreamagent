@@ -7,7 +7,7 @@ import type {
   WebSearchRequest,
   WebSearchSettingsPatch
 } from '../../shared/web-search'
-import { getNetworkService } from '../services/network-service'
+import { getNetworkService } from '../services/network/network-service'
 
 function handle<T>(fn: () => Promise<T>): Promise<T> {
   return fn().catch((error: unknown) => {

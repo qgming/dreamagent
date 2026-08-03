@@ -17,25 +17,25 @@ import type {
   Api
 } from '@earendil-works/pi-ai'
 import type { ThinkingLevel, AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
-import type { ProjectService } from './project-service'
-import type { PiSessionService } from './pi-session-service'
-import type { PiModelsService } from './pi-models'
-import type { SkillService } from './skill-service'
+import type { ProjectService } from '../project/project-service'
+import type { PiSessionService } from '../session/pi-session-service'
+import type { PiModelsService } from '../llm/pi-models'
+import type { SkillService } from '../skill/skill-service'
 import { AgentToolRuntime } from './agent-tool-runtime'
 import {
   buildDreamAgentTools,
   type DreamToolContext
 } from './pi-agent-tools'
-import { buildSkillTools } from './skill-tools'
-import { buildWebTools } from './web-tools'
-import { buildTodoTools } from './todo-tools'
-import { buildMcpTools } from './mcp-tools'
-import { getMcpService } from './mcp-service'
-import type { TodoService } from './todo-service'
-import type { LlmThinkingLevel } from '../../shared/llm-settings'
-import type { ContextRef, ActiveDocumentRef } from '../../shared/context-refs'
-import { ContextBuilder, type CompileInput } from './context/context-builder'
-import type { CompiledContext } from './context/types'
+import { buildSkillTools } from '../skill/skill-tools'
+import { buildWebTools } from '../network/web-tools'
+import { buildTodoTools } from '../todo/todo-tools'
+import { buildMcpTools } from '../mcp/mcp-tools'
+import { getMcpService } from '../mcp/mcp-service'
+import type { TodoService } from '../todo/todo-service'
+import type { LlmThinkingLevel } from '../../../shared/llm-settings'
+import type { ContextRef, ActiveDocumentRef } from '../../../shared/context-refs'
+import { ContextBuilder, type CompileInput } from '../context/context-builder'
+import type { CompiledContext } from '../context/types'
 
 type DreamHarness = AgentHarness<DreamToolContext>
 export type GoalAuditHarness = AgentHarness

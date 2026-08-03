@@ -3,7 +3,7 @@
  */
 import { Type, type Static, type TSchema } from 'typebox'
 import type { AgentHarnessTool, AgentToolResult } from '@earendil-works/pi-agent-core'
-import type { DreamToolContext } from './pi-agent-tools'
+import type { DreamToolContext } from '../agent/pi-agent-tools'
 import { getNetworkService } from './network-service'
 
 type AnyNetTool = AgentHarnessTool<DreamToolContext, TSchema, unknown>

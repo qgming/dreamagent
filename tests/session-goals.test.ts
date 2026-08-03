@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionTreeEntry } from '@earendil-works/pi-agent-core'
-import { readGoalFromBranch } from '../src/main/services/pi-session-parser'
+import { readGoalFromBranch } from '../src/main/services/session/pi-session-parser'
 import { buildSystemPromptV2 } from '../src/main/services/context/system-prompt'
 import { createSessionGoal } from '../src/shared/session-goals'
 import { normalizeSessionGoalAudit } from '../src/shared/session-goals'

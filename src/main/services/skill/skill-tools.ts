@@ -11,7 +11,7 @@ import {
 } from '@earendil-works/pi-agent-core'
 import { promises as fs } from 'fs'
 import path from 'path'
-import type { DreamToolContext } from './pi-agent-tools'
+import type { DreamToolContext } from '../agent/pi-agent-tools'
 
 type AnySkillTool = AgentHarnessTool<DreamToolContext, TSchema, unknown>
 

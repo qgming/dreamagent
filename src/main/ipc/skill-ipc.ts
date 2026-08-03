@@ -3,7 +3,7 @@ import type {
   CreateSkillInput,
   WriteSkillFileInput
 } from '../../shared/skills'
-import type { SkillService } from '../services/skill-service'
+import type { SkillService } from '../services/skill/skill-service'
 
 function handle<T>(fn: () => Promise<T>): Promise<T> {
   return fn().catch((error: unknown) => {
