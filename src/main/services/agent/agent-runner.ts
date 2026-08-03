@@ -27,6 +27,7 @@ import type { DreamToolContext } from './pi-agent-tools'
 import type { SessionContextUsage } from '../../../shared/context-usage'
 import type { UiContextRef, UiActiveDocumentRef } from '../../../shared/ui-chat'
 import { buildNarrativeCheckpointInstructions } from '../context/narrative-compactor'
+import { buildGoalAuditPrompt } from './goal-audit-prompts'
 import {
   createSessionGoal,
   normalizeSessionGoalAudit,
@@ -52,32 +53,6 @@ interface ActiveRun {
   activeDocument?: UiActiveDocumentRef
   /** 目标审计期间用于响应停止 / 新回合的中止句柄。 */
   goalAuditAbort?: () => Promise<void>
-}
-
-function clipAuditText(value: string, limit: number): string {
-  const text = value.trim()
-  return text.length <= limit ? text : `${text.slice(0, limit)}…`
-}
-
-function auditSnapshot(snapshot: ProjectSnapshot): Record<string, unknown> {
-  const summarize = (item: Record<string, unknown>): Record<string, unknown> => {
-    const result = { ...item }
-    if (typeof result.content === 'string') result.content = clipAuditText(result.content, 8_000)
-    delete result.fileName
-    delete result.createdAt
-    delete result.updatedAt
-    return result
-  }
-  return {
-    meta: {
-      title: snapshot.meta.title,
-      description: snapshot.meta.description,
-      version: snapshot.meta.version
-    },
-    beats: Object.values(snapshot.beats).map((item) => summarize(item as unknown as Record<string, unknown>)),
-    entities: Object.values(snapshot.entities).map((item) => summarize(item as unknown as Record<string, unknown>)),
-    chapters: Object.values(snapshot.chapters).map((item) => summarize(item as unknown as Record<string, unknown>))
-  }
 }
 
 function auditMessageText(content: unknown): string {
@@ -915,7 +890,6 @@ export class AgentRunner {
       }
 
       // 简化：turn 结束后用 session 全量投影校准
-      await this.sessions.maybeAutotitle(projectId, sessionId, userText)
       const sessionView = await this.sessions.open(projectId, sessionId)
       const snapshot = await this.projects.openProject(projectId)
 
@@ -942,6 +916,22 @@ export class AgentRunner {
           writtenChapterIds: [...new Set(writtenChapterIds)]
         }
       })
+
+      // 标题生成是独立的远程请求，不能阻塞已经完成的主回合。
+      void this.sessions
+        .maybeAutotitle(projectId, sessionId, userText, run.selection)
+        .then((title) => {
+          if (!title) return
+          this.emit({
+            type: 'session_title',
+            projectId,
+            sessionId,
+            title
+          })
+        })
+        .catch((error) => {
+          console.warn('[agent-runner] 后台生成会话标题失败', error)
+        })
 
       // 自动续跑会复用同一个缓存 harness。先解除本轮订阅，避免下一轮
       // 的流式事件同时被上一轮和当前轮处理，导致 UI 出现重复 AI 回复。
@@ -1002,7 +992,11 @@ export class AgentRunner {
     let auditHarness: GoalAuditHarness | null = null
 
     try {
-      auditHarness = await this.harnesses.createGoalAuditHarness(run.selection)
+      auditHarness = await this.harnesses.createGoalAuditHarness(
+        projectId,
+        sessionId,
+        run.selection
+      )
       run.goalAuditAbort = () => auditHarness!.abort().then(() => undefined)
       const [snapshot, sessionView] = await Promise.all([
         this.projects.openProject(projectId),
@@ -1016,19 +1010,13 @@ export class AgentRunner {
         80_000,
         Math.max(24_000, auditHarness.getModel().contextWindow * 2)
       )
-      const snapshotText = clipAuditText(
-        JSON.stringify(auditSnapshot(snapshot), null, 2),
-        auditCharBudget
-      )
-      const prompt = [
-        '这是一次全新的独立目标审计。只判断当前目标是否已在项目状态中完成，不读取或推断任何之前的审计结果，也不参考无关会话内容。',
-        `目标：${goal.objective}`,
-        '',
-        '项目快照（以此为准判断文件和结构是否真实存在）：',
-        snapshotText,
-        '',
-        '只审计与目标直接相关的项目事实。若目标的所有可验证条件均已满足，返回 complete；只要仍有工作或证据不足，返回 continue，并给出具体下一步。只返回 JSON。'
-      ].join('\n')
+      const lastMessage = sessionView.messages[sessionView.messages.length - 1]
+      const prompt = buildGoalAuditPrompt({
+        objective: goal.objective,
+        lastMessage,
+        snapshot,
+        snapshotCharBudget: auditCharBudget
+      })
       const result = await auditHarness.prompt(prompt)
       if (run.aborted) return
 

@@ -268,6 +268,14 @@ function ensureAgentSubscription(
   if (unsubAgent) return
   unsubAgent = window.api.agent.onEvent((event: AgentStreamEvent) => {
     const state = get()
+    if (event.type === 'session_title') {
+      if (useProjectStore.getState().activeProjectId !== event.projectId) return
+      if (event.sessionId === state.activeSessionId && state.session) {
+        set({ session: { ...state.session, title: event.title } })
+      }
+      void get().refreshSessionList()
+      return
+    }
     if (event.sessionId !== state.activeSessionId) return
     if (state.runId && 'runId' in event && event.runId !== state.runId) {
       // 允许 turn_start 建立 runId 之前的竞态：仅 turn_start 可改 runId

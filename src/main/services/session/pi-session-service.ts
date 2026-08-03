@@ -41,6 +41,7 @@ import type { ProjectActivityDay } from '../../../shared/activity'
 import type { ActivityLedgerService } from '../project/activity-ledger'
 import {
   countUserAssistant,
+  firstUserTextFromMessages,
   parseSessionBranch,
   previewFromMessages,
   readPinsFromBranch,
@@ -48,6 +49,8 @@ import {
   readGoalFromBranch
 } from './pi-session-parser'
 import type { SessionGoal } from '../../../shared/session-goals'
+import { fallbackSessionTitle } from './session-title'
+import type { SessionTitleService } from './session-title-service'
 
 interface ProjectSessionRuntime {
   env: NodeExecutionEnv
@@ -107,7 +110,8 @@ export class PiSessionService {
   constructor(
     private readonly projects: ProjectService,
     private readonly models: PiModelsService,
-    private readonly activityLedger: ActivityLedgerService
+    private readonly activityLedger: ActivityLedgerService,
+    private readonly titleService: SessionTitleService
   ) {}
 
   private async activeHistory(session: Session): Promise<SessionTreeEntry[]> {
@@ -341,9 +345,11 @@ export class PiSessionService {
         const branch = await this.activeHistory(session).catch(() => [])
         const messages = parseSessionBranch(branch)
         const name = (await session.getSessionName().catch(() => undefined))?.trim()
+        const firstUserText = firstUserTextFromMessages(messages)
         const title =
+          (name && name !== '新对话' ? name : undefined) ||
+          fallbackSessionTitle(firstUserText ?? '') ||
           name ||
-          previewFromMessages(messages)?.slice(0, 30) ||
           '新对话'
         const updatedAt =
           branch.length > 0
@@ -470,9 +476,13 @@ export class PiSessionService {
     const todos = readTodosFromBranch(branch)
     const goal = readGoalFromBranch(branch)
     const name = (await session.getSessionName().catch(() => undefined))?.trim()
+    const firstUserText = firstUserTextFromMessages(messages)
     const meta = await session.getMetadata()
     const title =
-      name || previewFromMessages(messages)?.slice(0, 30) || '新对话'
+      (name && name !== '新对话' ? name : undefined) ||
+      fallbackSessionTitle(firstUserText ?? '') ||
+      name ||
+      '新对话'
     const updatedAt =
       branch.length > 0
         ? new Date(Math.max(...branch.map((e) => entryTimeMs(e)))).toISOString()
@@ -538,13 +548,19 @@ export class PiSessionService {
   async maybeAutotitle(
     projectId: string,
     sessionId: string,
-    userText: string
-  ): Promise<void> {
+    userText: string,
+    selection?: { providerId?: string; modelId?: string }
+  ): Promise<string | undefined> {
     const session = await this.openSessionObject(projectId, sessionId)
     const name = (await session.getSessionName().catch(() => undefined))?.trim()
-    if (name && name !== '新对话') return
-    const title = userText.trim().slice(0, 30)
-    if (!title) return
+    if (name && name !== '新对话') return undefined
+    const branch = await this.activeHistory(session)
+    const firstUserText = firstUserTextFromMessages(parseSessionBranch(branch))
+    const title = await this.titleService.generate(firstUserText ?? userText, selection)
+    if (!title) return undefined
+    const latestName = (await session.getSessionName().catch(() => undefined))?.trim()
+    if (latestName && latestName !== '新对话') return undefined
     await session.appendSessionName(title)
+    return title
   }
 }

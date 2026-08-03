@@ -1,30 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Check, CirclePause, CirclePlay, Pencil, Target, Trash2 } from 'lucide-react'
+import { CirclePause, CirclePlay, Pencil, Target, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { TooltipHint } from '@/components/ui/tooltip'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import { NamePromptDialog } from '@/components/ui/name-prompt-modal'
 import { useCreateStore } from '@/stores/create-store'
 import {
   SESSION_GOAL_OBJECTIVE_LIMIT,
   type SessionGoal,
   type SessionGoalStatus
 } from '@shared/session-goals'
-
-const STATUS_LABEL: Record<SessionGoalStatus, string> = {
-  active: '进行中',
-  paused: '已暂停',
-  blocked: '已阻塞',
-  complete: '已完成'
-}
 
 const STATUS_CLASS: Record<SessionGoalStatus, string> = {
   active: 'text-sky-600 dark:text-sky-400',
@@ -218,139 +202,27 @@ function SessionGoalDialog({
   onOpenChange: (open: boolean) => void
   onUpdate: (goal: SessionGoal | null) => Promise<void>
 }): React.JSX.Element {
-  const [objective, setObjective] = useState(goal.objective)
-  const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    if (open) setObjective(goal.objective)
-  }, [goal.id, goal.objective, open])
-
-  const run = async (next: SessionGoal | null, close = true): Promise<void> => {
-    setBusy(true)
-    try {
-      await onUpdate(next)
-      if (close) onOpenChange(false)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const save = (): void => {
-    const text = objective.trim()
-    if (!text) return
-    void run(
-      updatedGoal(goal, {
-        objective: text.slice(0, SESSION_GOAL_OBJECTIVE_LIMIT),
-        status: 'active',
-        note: '',
-        statusReason: '目标已更新'
-      })
-    )
-  }
-
-  const statusAction = goal.status === 'active' ? '暂停' : '恢复'
-  const statusIcon = goal.status === 'active' ? <CirclePause className="size-4" /> : <CirclePlay className="size-4" />
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>会话目标</DialogTitle>
-          <DialogDescription>
-            目标会随会话保存，并在每次生成时作为完成标准提供给 Agent。
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 text-xs">
-            <span className={cn('size-2 rounded-full bg-current', STATUS_CLASS[goal.status])} />
-            <span className={cn('font-medium', STATUS_CLASS[goal.status])}>
-              {STATUS_LABEL[goal.status]}
-            </span>
-          </div>
-
-          {goal.note ? (
-            <p className="rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-              {goal.note}
-            </p>
-          ) : null}
-
-          <label className="space-y-1.5 text-sm font-medium">
-            <span className="flex items-center justify-between gap-2">
-              <span>目标内容</span>
-              <span className="text-[11px] font-normal tabular-nums text-muted-foreground">
-                {objective.length}/{SESSION_GOAL_OBJECTIVE_LIMIT}
-              </span>
-            </span>
-            <Textarea
-              value={objective}
-              onChange={(event) => setObjective(event.target.value)}
-              maxLength={SESSION_GOAL_OBJECTIVE_LIMIT}
-              rows={5}
-              placeholder="描述需要完成并验证的结果…"
-            />
-          </label>
-        </div>
-
-        <DialogFooter className="gap-2 sm:justify-between">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={busy}
-            className="text-destructive hover:text-destructive"
-            onClick={() => void run(null)}
-          >
-            <Trash2 className="size-4" />
-            清除目标
-          </Button>
-          <div className="flex gap-2">
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => onOpenChange(false)}>
-              取消
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy || goal.status === 'complete'}
-              onClick={() =>
-                void run(
-                  updatedGoal(goal, {
-                    status: goal.status === 'active' ? 'paused' : 'active',
-                    statusReason: statusAction === '暂停' ? '用户暂停' : '用户恢复'
-                  }),
-                  false
-                )
-              }
-            >
-              {statusIcon}
-              {statusAction}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy || goal.status === 'complete'}
-              onClick={() =>
-                void run(
-                  updatedGoal(goal, {
-                    status: 'complete',
-                    statusReason: '用户标记完成'
-                  })
-                )
-              }
-            >
-              <Check className="size-4" />
-              完成
-            </Button>
-            <Button
-              size="sm"
-              disabled={busy || !objective.trim() || goal.status === 'complete'}
-              onClick={save}
-            >
-              <Check className="size-4" />
-              保存
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <NamePromptDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="编辑会话目标"
+      label="目标内容"
+      placeholder="描述需要完成并验证的结果…"
+      initialValue={goal.objective}
+      maxLength={SESSION_GOAL_OBJECTIVE_LIMIT}
+      confirmLabel="保存"
+      submittingLabel="保存中…"
+      onSubmit={async (text) => {
+        await onUpdate(
+          updatedGoal(goal, {
+            objective: text.slice(0, SESSION_GOAL_OBJECTIVE_LIMIT),
+            status: 'active',
+            note: '',
+            statusReason: '目标已更新'
+          })
+        )
+      }}
+    />
   )
 }

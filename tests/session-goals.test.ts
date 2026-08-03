@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionTreeEntry } from '@earendil-works/pi-agent-core'
-import { readGoalFromBranch } from '../src/main/services/session/pi-session-parser'
+import { parseSessionBranch, readGoalFromBranch } from '../src/main/services/session/pi-session-parser'
 import { buildSystemPromptV2 } from '../src/main/services/context/system-prompt'
 import { createSessionGoal } from '../src/shared/session-goals'
 import { normalizeSessionGoalAudit } from '../src/shared/session-goals'
@@ -13,6 +13,16 @@ function customGoal(data: unknown, id: string): SessionTreeEntry {
     timestamp: '2026-08-03T00:00:00.000Z',
     customType: 'session_goal',
     data
+  } as unknown as SessionTreeEntry
+}
+
+function messageEntry(message: unknown, id = 'message_1'): SessionTreeEntry {
+  return {
+    type: 'message',
+    id,
+    parentId: null,
+    timestamp: '2026-08-03T00:00:00.000Z',
+    message
   } as unknown as SessionTreeEntry
 }
 
@@ -62,5 +72,17 @@ describe('session goal mode', () => {
       .toMatchObject({ status: 'complete' })
     expect(normalizeSessionGoalAudit({ status: 'complete', progress: '' })).toBeNull()
     expect(normalizeSessionGoalAudit({ status: 'continue', progress: '还没完' })).toBeNull()
+  })
+
+  it('preserves aborted assistant turns for goal audit context', () => {
+    const messages = parseSessionBranch([
+      messageEntry({
+        role: 'assistant',
+        content: [{ type: 'text', text: '执行到一半被中止' }],
+        stopReason: 'aborted',
+        timestamp: Date.now()
+      })
+    ])
+    expect(messages[0]).toMatchObject({ role: 'assistant', status: 'aborted' })
   })
 })

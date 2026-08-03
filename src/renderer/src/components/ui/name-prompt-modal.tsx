@@ -22,6 +22,8 @@ export interface NamePromptDialogProps {
   label?: string
   /** 占位符 */
   placeholder?: string
+  /** 可选最大长度 */
+  maxLength?: number
   /** 初始值（编辑时灌入；打开时重置） */
   initialValue?: string
   /** 确认按钮文案，默认「创建」或有 initialValue 时「保存」 */
@@ -42,6 +44,7 @@ export function NamePromptDialog({
   title,
   label = '名称',
   placeholder,
+  maxLength,
   initialValue = '',
   confirmLabel,
   submittingLabel = '保存中…',
@@ -95,6 +98,7 @@ export function NamePromptDialog({
                 onChange={(e) => setValue(e.target.value)}
                 placeholder={placeholder}
                 value={value}
+                maxLength={maxLength}
               />
             </div>
           </div>

@@ -36,9 +36,13 @@ import type { LlmThinkingLevel } from '../../../shared/llm-settings'
 import type { ContextRef, ActiveDocumentRef } from '../../../shared/context-refs'
 import { ContextBuilder, type CompileInput } from '../context/context-builder'
 import type { CompiledContext } from '../context/types'
+import {
+  applyGoalAuditJsonMode,
+  GOAL_AUDIT_SYSTEM_PROMPT
+} from './goal-audit-prompts'
 
 type DreamHarness = AgentHarness<DreamToolContext>
-export type GoalAuditHarness = AgentHarness
+export type GoalAuditHarness = AgentHarness<DreamToolContext>
 
 function harnessKey(projectId: string, sessionId: string): string {
   return `${projectId}::${sessionId}`
@@ -219,6 +223,8 @@ export class HarnessManager {
    * 审计不能写入创作 session，也不暴露创作工具，避免审计过程污染会话或修改项目。
    */
   async createGoalAuditHarness(
+    projectId: string,
+    sessionId: string,
     selection?: HarnessSelection
   ): Promise<GoalAuditHarness> {
     const [{ models, model }, session] = await Promise.all([
@@ -229,13 +235,21 @@ export class HarnessManager {
       new InMemorySessionRepo().create()
     ])
 
-    return new AgentHarness({
+    const auditToolNames = new Set(['list', 'read', 'text_stats'])
+    const tools = buildDreamAgentTools().filter((tool) => auditToolNames.has(tool.name))
+    const toolContext: DreamToolContext = {
+      projectId,
+      sessionId,
+      runtime: this.toolRuntime
+    }
+
+    const harness = new AgentHarness<DreamToolContext>({
       session,
       models: models as Models,
       model: model as Model<Api>,
-      tools: [],
-      systemPrompt:
-        '你是会话目标审计器。你只根据用户提供的项目快照和会话证据判断目标是否已经完成。不要调用工具，不要修改项目，不要把计划当成完成。必须只输出一个 JSON 对象，不要 Markdown。字段必须是：status（complete 或 continue）、progress（已完成和验证到什么程度）、nextStep（status=continue 时下一步）、evidence（证据字符串数组）。证据不足时选择 continue。',
+      tools,
+      toolContext,
+      systemPrompt: GOAL_AUDIT_SYSTEM_PROMPT,
       thinkingLevel: 'low',
       streamOptions: {
         maxRetries: 1,
@@ -244,6 +258,12 @@ export class HarnessManager {
         metadata: { purpose: 'session-goal-audit' }
       }
     })
+
+    harness.on('before_provider_payload', ({ model: requestModel, payload }) => ({
+      payload: applyGoalAuditJsonMode(payload, requestModel.api)
+    }))
+
+    return harness
   }
 
   private async applySelection(

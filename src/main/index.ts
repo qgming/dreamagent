@@ -4,6 +4,7 @@ import { LibraryService } from './services/project/library-service'
 import { ProjectService } from './services/project/project-service'
 import { LlmSettingsService } from './services/llm/llm-settings-service'
 import { PiModelsService } from './services/llm/pi-models'
+import { SessionTitleService } from './services/session/session-title-service'
 import { PiSessionService } from './services/session/pi-session-service'
 import { HarnessManager } from './services/agent/harness-manager'
 import { AgentRunner } from './services/agent/agent-runner'
@@ -152,7 +153,13 @@ app.whenReady().then(async () => {
   const projectService = new ProjectService(libraryService, activityLedger)
   const llmSettings = new LlmSettingsService()
   const piModels = new PiModelsService(llmSettings)
-  const sessionService = new PiSessionService(projectService, piModels, activityLedger)
+  const sessionTitleService = new SessionTitleService(piModels)
+  const sessionService = new PiSessionService(
+    projectService,
+    piModels,
+    activityLedger,
+    sessionTitleService
+  )
   const skillService = new SkillService()
   await skillService.ensureReady()
   const todoService = new TodoService(sessionService)

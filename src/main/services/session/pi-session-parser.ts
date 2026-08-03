@@ -234,7 +234,12 @@ export function parseSessionBranch(branch: SessionTreeEntry[]): UiChatMessage[] 
           role: 'assistant',
           createdAt,
           parts,
-          status: am.stopReason === 'error' ? 'error' : 'complete',
+          status:
+            am.stopReason === 'error'
+              ? 'error'
+              : am.stopReason === 'aborted'
+                ? 'aborted'
+                : 'complete',
           chapterIds: chapterIds.length ? chapterIds : undefined,
           beatStatusUpdates: beatStatusUpdates.length ? beatStatusUpdates : undefined
         }
@@ -313,6 +318,20 @@ export function previewFromMessages(messages: UiChatMessage[]): string | undefin
     for (const p of m.parts) {
       if (p.type === 'text' && p.text.trim()) return p.text.trim().slice(0, 80)
     }
+  }
+  return undefined
+}
+
+/** 取首条用户文本，用于会话标题等只应参考第一次输入的场景。 */
+export function firstUserTextFromMessages(messages: UiChatMessage[]): string | undefined {
+  for (const message of messages) {
+    if (message.role !== 'user') continue
+    const text = message.parts
+      .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+      .map((part) => part.text)
+      .join('')
+      .trim()
+    if (text) return text
   }
   return undefined
 }

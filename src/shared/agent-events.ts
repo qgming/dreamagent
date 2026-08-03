@@ -101,6 +101,13 @@ export type AgentStreamEvent =
       payload: AgentTurnDonePayload
     }
   | {
+      /** 标题在回合结束后异步生成，不能绑定已经结束的 runId。 */
+      type: 'session_title'
+      projectId: string
+      sessionId: string
+      title: string
+    }
+  | {
       type: 'context_update'
       projectId: string
       sessionId: string
