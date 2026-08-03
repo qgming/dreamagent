@@ -7,10 +7,10 @@ import {
   CircleGauge,
   FileJson,
   Loader2,
-  Plug,
   Plus,
   RefreshCw,
   Save,
+  ToolCase,
   Trash2,
   Wrench
 } from 'lucide-react'
@@ -203,7 +203,7 @@ export function McpPage(): React.JSX.Element {
 
         {status === 'ready' && sorted.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border py-16 text-center">
-            <Plug className="size-8 text-muted-foreground" />
+            <ToolCase className="size-8 text-muted-foreground" />
             <div>
               <p className="text-sm font-medium">还没有云端 MCP</p>
               <p className="mt-1 text-xs text-muted-foreground">

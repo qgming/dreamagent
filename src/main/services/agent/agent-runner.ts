@@ -12,6 +12,7 @@ import type {
   AgentStartTurnInput,
   AgentStartTurnResult,
   AgentSteerInput,
+  UiImageAttachment,
   UiBeatStatusUpdate,
   UiChatMessage,
   UiToolCallPart
@@ -23,6 +24,7 @@ import type { PiSessionService } from '../session/pi-session-service'
 import type { LlmSettingsService } from '../llm/llm-settings-service'
 import type { GoalAuditHarness, HarnessManager, HarnessSelection } from './harness-manager'
 import type { AgentHarness } from '@earendil-works/pi-agent-core'
+import type { ImageContent } from '@earendil-works/pi-ai'
 import type { DreamToolContext } from './pi-agent-tools'
 import type { SessionContextUsage } from '../../../shared/context-usage'
 import type { UiContextRef, UiActiveDocumentRef } from '../../../shared/ui-chat'
@@ -37,6 +39,23 @@ import {
 } from '../../../shared/session-goals'
 
 type DreamHarness = AgentHarness<DreamToolContext>
+
+function toImageContent(images?: UiImageAttachment[]): ImageContent[] | undefined {
+  if (!images?.length) return undefined
+  const valid = images.filter(
+    (image) =>
+      typeof image.data === 'string' &&
+      image.data.length > 0 &&
+      typeof image.mimeType === 'string' &&
+      image.mimeType.startsWith('image/')
+  )
+  if (!valid.length) return undefined
+  return valid.map((image) => ({
+    type: 'image',
+    data: image.data,
+    mimeType: image.mimeType
+  }))
+}
 
 interface ActiveRun {
   runId: string
@@ -272,7 +291,9 @@ export class AgentRunner {
     )
 
     // 异步执行，立即返回 runId
-    void this.executeTurn(run, userMessage).catch((error) => {
+    void this.executeTurn(run, userMessage, {
+      images: toImageContent(input.images)
+    }).catch((error) => {
       this.handleRunError(run, error)
     })
 
@@ -317,7 +338,7 @@ export class AgentRunner {
       input.sessionId,
       run.selection
     )
-    await harness.steer(text)
+    await harness.steer(text, { images: toImageContent(input.images) })
     run.steerCount += 1
     this.emit({
       type: 'queue_update',
@@ -360,7 +381,7 @@ export class AgentRunner {
       input.sessionId,
       run.selection
     )
-    await harness.followUp(text)
+    await harness.followUp(text, { images: toImageContent(input.images) })
     run.followUpCount += 1
     run.followUpPreview = text.slice(0, 80)
     this.emit({
@@ -542,6 +563,7 @@ export class AgentRunner {
       skipOptimisticUser?: boolean
       harness?: DreamHarness
       preserveRun?: boolean
+      images?: ImageContent[]
     }
   ): Promise<void> {
     const { projectId, sessionId, runId } = run
@@ -833,7 +855,10 @@ export class AgentRunner {
 
     try {
       // prompt 返回最终 AssistantMessage；失败时 stopReason=error/aborted 且可能不 throw
-      const finalMessage = (await harness.prompt(userText)) as {
+      const finalMessage = (await harness.prompt(
+        userText,
+        options?.images ? { images: options.images } : undefined
+      )) as {
         stopReason?: string
         errorMessage?: string
         content?: unknown

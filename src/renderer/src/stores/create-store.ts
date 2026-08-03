@@ -7,7 +7,8 @@ import type {
   SessionSummary,
   SessionView,
   UiChatMessage,
-  UiToolCallPart
+  UiToolCallPart,
+  UiImageAttachment
 } from '@shared/ui-chat'
 import type { ProjectSnapshot } from '@shared/project-types'
 import type { TodoItem } from '@shared/todos'
@@ -89,11 +90,11 @@ interface CreateState {
   setThinkingLevel: (level: LlmThinkingLevel) => void
   setGoalArmed: (armed: boolean) => void
   updateGoal: (goal: SessionGoal | null) => Promise<void>
-  sendMessage: (text: string) => Promise<void>
+  sendMessage: (text: string, images?: UiImageAttachment[]) => Promise<void>
   /** 运行中插话 */
-  steerMessage: (text: string) => Promise<void>
+  steerMessage: (text: string, images?: UiImageAttachment[]) => Promise<void>
   /** 排队到本轮结束后 */
-  queueFollowUp: (text: string) => Promise<void>
+  queueFollowUp: (text: string, images?: UiImageAttachment[]) => Promise<void>
   /** 重新生成：以 parentId（用户消息 id）为锚点 */
   regenerateMessage: (userMessageId: string) => Promise<void>
   cancelTurn: () => Promise<void>
@@ -943,7 +944,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     }
   },
 
-  sendMessage: async (text) => {
+  sendMessage: async (text, images) => {
     ensureAgentSubscription(get, set)
     const projectId = useProjectStore.getState().activeProjectId
     const {
@@ -962,7 +963,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     if (sending && goalAuditing) {
       await get().cancelTurn()
     } else if (sending) {
-      await get().steerMessage(trimmed)
+      await get().steerMessage(trimmed, images)
       return
     }
 
@@ -997,7 +998,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         modelId: decoded?.modelId,
         thinkingLevel,
         contextRefs,
-        goalMode: goalArmed
+        goalMode: goalArmed,
+        images: images?.length ? images : undefined
       })
       const currentSession = get().session
       set({
@@ -1024,7 +1026,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     }
   },
 
-  steerMessage: async (text) => {
+  steerMessage: async (text, images) => {
     ensureAgentSubscription(get, set)
     const projectId = useProjectStore.getState().activeProjectId
     const { activeSessionId, runId, sending } = get()
@@ -1036,14 +1038,15 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         projectId,
         sessionId: activeSessionId,
         text: trimmed,
-        runId: runId ?? undefined
+        runId: runId ?? undefined,
+        images: images?.length ? images : undefined
       })
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
     }
   },
 
-  queueFollowUp: async (text) => {
+  queueFollowUp: async (text, images) => {
     ensureAgentSubscription(get, set)
     const projectId = useProjectStore.getState().activeProjectId
     const { activeSessionId, runId, sending } = get()
@@ -1055,7 +1058,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         projectId,
         sessionId: activeSessionId,
         text: trimmed,
-        runId: runId ?? undefined
+        runId: runId ?? undefined,
+        images: images?.length ? images : undefined
       })
       set({
         followUpCount: get().followUpCount + 1,

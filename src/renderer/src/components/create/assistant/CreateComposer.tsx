@@ -18,6 +18,7 @@ import {
   CircleDot,
   FileText,
   MessageSquarePlus,
+  Plus,
   Sparkles,
   Square,
   Users,
@@ -36,6 +37,8 @@ import {
   ComposerAttachments
 } from '@/components/assistant-ui/attachment'
 import { ComposerTriggerPopover } from '@/components/assistant-ui/composer-trigger-popover'
+import { PromptLibraryPopover } from '@/components/assistant-ui/prompt-library-popover'
+import { getModelAttachmentCapabilities } from '@/components/assistant-ui/attachment-capabilities'
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
 import { LexicalDirectiveChip } from '@/components/assistant-ui/lexical-directive-chip'
 import { SessionGoalControl, SessionGoalStatusBar } from './SessionGoalControl'
@@ -156,6 +159,28 @@ export function CreateComposer({
     })
   }, [selectableModels])
 
+  const selectedModel = useMemo(
+    () => selectableModels.find((model) => model.key === selectedModelKey),
+    [selectableModels, selectedModelKey]
+  )
+  const attachmentCapabilities = useMemo(
+    () => getModelAttachmentCapabilities(selectedModel),
+    [selectedModel]
+  )
+
+  useEffect(() => {
+    const attachments = aui.composer.getState().attachments
+    for (const attachment of attachments) {
+      const supported =
+        attachment.type === 'image'
+          ? attachmentCapabilities.canAttachImage
+          : attachmentCapabilities.canAttachText
+      if (!supported) {
+        void aui.composer.attachment({ id: attachment.id }).remove()
+      }
+    }
+  }, [aui, attachmentCapabilities])
+
   const categories = useMemo((): Unstable_MentionCategory[] => {
     const enabledSkills = skills.filter((s) => s.enabled && s.isValid)
     const beats =
@@ -272,11 +297,29 @@ export function CreateComposer({
     aui.composer.setText(`${stateText}${needSpace ? ' ' : ''}@`)
   }, [aui])
 
+  const insertPrompt = useCallback(
+    (content: string) => {
+      const current = aui.composer.getState().text ?? ''
+      const next = current.trim()
+        ? `${current.trimEnd()}\n\n${content}`
+        : content
+      aui.composer.setText(next)
+      requestAnimationFrame(() => {
+        const editable =
+          editorRootRef.current?.querySelector<HTMLElement>('[contenteditable="true"]') ?? null
+        editable?.focus()
+      })
+    },
+    [aui]
+  )
+
   /** 拦截 Enter / Alt+Enter：运行中分别走插话 / 排队 */
   const handleKeyDownCapture = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key !== 'Enter' || e.shiftKey) return
       if (!sending) return
+      // 让 assistant-ui 处理带附件的发送，以便保留已解析的文件内容。
+      if (aui.composer.getState().attachments.length > 0) return
       // 运行中：阻止默认发送
       e.preventDefault()
       e.stopPropagation()
@@ -344,7 +387,38 @@ export function CreateComposer({
 
             <div className="relative flex items-center justify-between gap-1.5">
               <div className="flex min-w-0 items-center gap-0.5">
-                <ComposerAddAttachment />
+                {attachmentCapabilities.canAttach ? (
+                  <ComposerAddAttachment
+                    tooltip={
+                      attachmentCapabilities.canAttachImage &&
+                      attachmentCapabilities.canAttachText
+                        ? '添加文本或图片附件'
+                        : attachmentCapabilities.canAttachImage
+                          ? '添加图片附件'
+                          : '添加文本附件'
+                    }
+                  />
+                ) : (
+                  <TooltipHint
+                    label={
+                      selectedModel
+                        ? '当前模型不支持附件'
+                        : '选择模型后可添加附件'
+                    }
+                    side="top"
+                  >
+                    <span className="inline-flex">
+                      <button
+                        type="button"
+                        disabled
+                        className="flex size-8 items-center justify-center rounded-full text-muted-foreground/40"
+                        aria-label="当前模型不支持附件"
+                      >
+                        <Plus className="size-4.5 stroke-[1.5px]" />
+                      </button>
+                    </span>
+                  </TooltipHint>
+                )}
                 <TooltipIconButton
                   tooltip="附加技能 / 节点 / 实体…"
                   side="top"
@@ -357,6 +431,7 @@ export function CreateComposer({
                 >
                   <AtSign className="size-4" />
                 </TooltipIconButton>
+                <PromptLibraryPopover onSelect={insertPrompt} />
                 <SessionGoalControl />
               </div>
 

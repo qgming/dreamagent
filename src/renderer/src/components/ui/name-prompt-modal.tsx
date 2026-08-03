@@ -30,6 +30,8 @@ export interface NamePromptDialogProps {
   confirmLabel?: string
   /** 提交中按钮文案 */
   submittingLabel?: string
+  /** 表单校验错误 */
+  error?: React.ReactNode
   /** 提交回调；返回 Promise 时自动处理 loading；成功后关闭 */
   onSubmit: (value: string) => void | Promise<void>
 }
@@ -48,6 +50,7 @@ export function NamePromptDialog({
   initialValue = '',
   confirmLabel,
   submittingLabel = '保存中…',
+  error,
   onSubmit
 }: NamePromptDialogProps): React.JSX.Element {
   const [value, setValue] = useState(initialValue)
@@ -101,6 +104,7 @@ export function NamePromptDialog({
                 maxLength={maxLength}
               />
             </div>
+            {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
           </div>
 
           <DialogFooter>

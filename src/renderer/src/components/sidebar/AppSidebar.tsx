@@ -4,11 +4,12 @@ import {
   CircleDot,
   Download,
   Home,
+  Leaf,
   LayoutDashboard,
   Loader2,
   MoreHorizontal,
   Pencil,
-  Plug,
+  ToolCase,
   Plus,
   Settings,
   Sparkles,
@@ -57,6 +58,7 @@ export function AppSidebar({
   const toggleProjectExpanded = useProjectStore((s) => s.toggleProjectExpanded)
   const openProject = useProjectStore((s) => s.openProject)
   const openSkills = useProjectStore((s) => s.openSkills)
+  const openPrompts = useProjectStore((s) => s.openPrompts)
   const openMcp = useProjectStore((s) => s.openMcp)
   const openCreateProjectModal = useProjectStore((s) => s.openCreateProjectModal)
   const openEditProjectModal = useProjectStore((s) => s.openEditProjectModal)
@@ -89,6 +91,7 @@ export function AppSidebar({
 
   const isAppHome = appSurface === 'home'
   const isSkills = appSurface === 'skills'
+  const isPrompts = appSurface === 'prompts'
   const isMcp = appSurface === 'mcp'
   const showUpdate = Boolean(
     updateStatus?.enabled &&
@@ -114,7 +117,8 @@ export function AppSidebar({
         <nav className="space-y-1">
           <SidebarButton active={isAppHome} icon={Home} label="首页" onClick={closeProject} />
           <SidebarButton active={isSkills} icon={Sparkles} label="技能" onClick={openSkills} />
-          <SidebarButton active={isMcp} icon={Plug} label="MCP" onClick={openMcp} />
+          <SidebarButton active={isPrompts} icon={Leaf} label="提示词" onClick={openPrompts} />
+          <SidebarButton active={isMcp} icon={ToolCase} label="MCP" onClick={openMcp} />
         </nav>
       </div>
 

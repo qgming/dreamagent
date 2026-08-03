@@ -45,6 +45,7 @@ import type {
   UninstallSkillResult,
   WriteSkillFileInput
 } from '../shared/skills'
+import type { PromptCategoryResource } from '../shared/prompts'
 import type { UpdateStatus } from '../shared/updates'
 import type { ProjectActivityDay } from '../shared/activity'
 
@@ -245,6 +246,10 @@ export interface SkillsApi {
   readFile: (id: string, relativePath: string) => Promise<string>
 }
 
+export interface PromptsApi {
+  listBuiltin: () => Promise<PromptCategoryResource[]>
+}
+
 export interface McpApi {
   list: () => Promise<import('../shared/mcp').McpServerConfig[]>
   get: (id: string) => Promise<import('../shared/mcp').McpServerConfig | null>
@@ -277,6 +282,7 @@ export interface DreamAgentApi {
   agent: AgentApi
   settings: SettingsApi
   skills: SkillsApi
+  prompts: PromptsApi
   network: NetworkApi
   mcp: McpApi
 }

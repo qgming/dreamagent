@@ -15,12 +15,14 @@ import { registerSessionIpc } from './ipc/session-ipc'
 import { registerAgentIpc } from './ipc/agent-ipc'
 import { registerSettingsIpc } from './ipc/settings-ipc'
 import { registerSkillIpc } from './ipc/skill-ipc'
+import { registerPromptIpc } from './ipc/prompt-ipc'
 import { registerNetworkIpc } from './ipc/network-ipc'
 import { registerMcpIpc } from './ipc/mcp-ipc'
 import { registerUpdateIpc } from './ipc/update-ipc'
 import { UpdateService } from './services/update/update-service'
 import { ActivityLedgerService } from './services/project/activity-ledger'
 import { LegacyConversationMigrator } from './services/session/legacy-migration'
+import { PromptService } from './services/prompt/prompt-service'
 
 /** 是否为开发环境 */
 const isDev = !app.isPackaged
@@ -162,6 +164,7 @@ app.whenReady().then(async () => {
   )
   const skillService = new SkillService()
   await skillService.ensureReady()
+  const promptService = new PromptService()
   const todoService = new TodoService(sessionService)
   const harnessManager = new HarnessManager(
     projectService,
@@ -183,6 +186,7 @@ app.whenReady().then(async () => {
   registerAgentIpc(agentRunner)
   registerSettingsIpc(llmSettings, () => harnessManager.invalidateCaches())
   registerSkillIpc(skillService)
+  registerPromptIpc(promptService)
   registerNetworkIpc()
   registerMcpIpc()
 

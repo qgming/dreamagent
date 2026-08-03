@@ -14,6 +14,7 @@ import { HomePage, useBootstrapLibrary } from '@/pages/HomePage'
 import { OverviewPage } from '@/pages/OverviewPage'
 import { SkillsPage } from '@/pages/SkillsPage'
 import { McpPage } from '@/pages/McpPage'
+import { PromptsPage } from '@/pages/PromptsPage'
 import {
   isDetailTargetAvailable,
   useCreateStore
@@ -192,11 +193,12 @@ function MainView({
   hasSnapshot
 }: {
   activeProjectId: string | null
-  appSurface: 'home' | 'skills' | 'mcp' | 'project'
+  appSurface: 'home' | 'skills' | 'prompts' | 'mcp' | 'project'
   projectView: ProjectView
   hasSnapshot: boolean
 }): React.JSX.Element {
   if (appSurface === 'skills') return <SkillsPage />
+  if (appSurface === 'prompts') return <PromptsPage />
   if (appSurface === 'mcp') return <McpPage />
   if (appSurface === 'project' && activeProjectId && hasSnapshot) {
     if (projectView === 'overview') return <OverviewPage />

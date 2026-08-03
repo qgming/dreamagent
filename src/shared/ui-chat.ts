@@ -104,6 +104,13 @@ export interface UiContextRef {
   label?: string
 }
 
+/** 渲染层解码后的图片附件，data 为不含 data URL 前缀的 base64。 */
+export interface UiImageAttachment {
+  name: string
+  data: string
+  mimeType: string
+}
+
 export interface UiActiveDocumentRef {
   type: 'chapter' | 'beat' | 'entity'
   id: string
@@ -124,6 +131,8 @@ export interface AgentStartTurnInput {
   activeDocument?: UiActiveDocumentRef
   /** 将本次用户消息作为新会话目标，并在本轮 system prompt 中启用目标契约。 */
   goalMode?: boolean
+  /** 当前用户消息中的图片附件。文本附件已经加入 userMessage。 */
+  images?: UiImageAttachment[]
 }
 
 export interface AgentStartTurnResult {
@@ -167,6 +176,7 @@ export interface AgentSteerInput {
   sessionId: string
   text: string
   runId?: string
+  images?: UiImageAttachment[]
 }
 
 /** 排队到本轮结束后 */
@@ -175,6 +185,7 @@ export interface AgentFollowUpInput {
   sessionId: string
   text: string
   runId?: string
+  images?: UiImageAttachment[]
 }
 
 export interface AgentTurnDonePayload {

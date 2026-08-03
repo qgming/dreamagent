@@ -47,6 +47,7 @@ import type {
   UninstallSkillResult,
   WriteSkillFileInput
 } from '../shared/skills'
+import type { PromptCategoryResource } from '../shared/prompts'
 import type { UpdateStatus } from '../shared/updates'
 
 /**
@@ -341,6 +342,11 @@ const skillsApi = {
     ipcRenderer.invoke('skills:readFile', id, relativePath)
 }
 
+const promptsApi = {
+  listBuiltin: (): Promise<PromptCategoryResource[]> =>
+    ipcRenderer.invoke('prompts:listBuiltin')
+}
+
 /**
  * 云端 MCP API
  */
@@ -382,6 +388,7 @@ const api = {
   agent: agentApi,
   settings: settingsApi,
   skills: skillsApi,
+  prompts: promptsApi,
   network: networkApi,
   mcp: mcpApi
 }
