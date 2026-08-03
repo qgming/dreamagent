@@ -5,6 +5,35 @@
 import type { ThreadMessageLike } from '@assistant-ui/react'
 import type { UiChatMessage } from '@shared/ui-chat'
 
+function stripAttachmentMarkers(text: string): string {
+  return text
+    .replace(/\[附件:(?:图片|文件)\s+[^\]\r\n]+\]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function convertImageAttachment(
+  messageId: string,
+  attachment: NonNullable<UiChatMessage['attachments']>[number],
+  index: number
+): NonNullable<ThreadMessageLike['attachments']>[number] {
+  const mimeType = attachment.mimeType || 'image/png'
+  return {
+    id: `${messageId}-attachment-${index}`,
+    type: 'image',
+    name: attachment.name || '图片',
+    contentType: mimeType,
+    content: [
+      {
+        type: 'image',
+        image: `data:${mimeType};base64,${attachment.data}`,
+        filename: attachment.name || '图片'
+      }
+    ],
+    status: { type: 'complete' }
+  }
+}
+
 export function convertUiMessage(message: UiChatMessage): ThreadMessageLike {
   const content: Array<
     | { type: 'text'; text: string }
@@ -22,7 +51,10 @@ export function convertUiMessage(message: UiChatMessage): ThreadMessageLike {
 
   for (const part of message.parts) {
     if (part.type === 'text') {
-      content.push({ type: 'text', text: part.text })
+      content.push({
+        type: 'text',
+        text: message.role === 'user' ? stripAttachmentMarkers(part.text) : part.text
+      })
     } else if (part.type === 'reasoning') {
       content.push({ type: 'reasoning', text: part.text })
     } else {
@@ -63,6 +95,12 @@ export function convertUiMessage(message: UiChatMessage): ThreadMessageLike {
     role: message.role,
     content: safeContent as ThreadMessageLike['content'],
     createdAt: new Date(message.createdAt),
-    status
+    status,
+    attachments:
+      message.role === 'user' && message.attachments?.length
+        ? message.attachments.map((attachment, index) =>
+            convertImageAttachment(message.id, attachment, index)
+          )
+        : undefined
   }
 }

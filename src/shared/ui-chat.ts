@@ -45,6 +45,8 @@ export interface UiChatMessage {
   role: UiChatRole
   createdAt: string
   parts: UiChatPart[]
+  /** 本条用户消息中的图片附件（用于消息展示和重新生成）。 */
+  attachments?: UiImageAttachment[]
   status?: UiMessageStatus
   /** 本条消息关联写出的文章 id（从 write_chapter details 提取） */
   chapterIds?: string[]

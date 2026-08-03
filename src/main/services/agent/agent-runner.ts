@@ -41,20 +41,24 @@ import {
 type DreamHarness = AgentHarness<DreamToolContext>
 
 function toImageContent(images?: UiImageAttachment[]): ImageContent[] | undefined {
-  if (!images?.length) return undefined
-  const valid = images.filter(
-    (image) =>
-      typeof image.data === 'string' &&
-      image.data.length > 0 &&
-      typeof image.mimeType === 'string' &&
-      image.mimeType.startsWith('image/')
-  )
+  const valid = validImageAttachments(images)
   if (!valid.length) return undefined
   return valid.map((image) => ({
     type: 'image',
     data: image.data,
     mimeType: image.mimeType
   }))
+}
+
+function validImageAttachments(images?: UiImageAttachment[]): UiImageAttachment[] {
+  if (!images?.length) return []
+  return images.filter(
+    (image) =>
+      typeof image.data === 'string' &&
+      image.data.length > 0 &&
+      typeof image.mimeType === 'string' &&
+      image.mimeType.startsWith('image/')
+  )
 }
 
 interface ActiveRun {
@@ -292,7 +296,8 @@ export class AgentRunner {
 
     // 异步执行，立即返回 runId
     void this.executeTurn(run, userMessage, {
-      images: toImageContent(input.images)
+      images: toImageContent(input.images),
+      imageAttachments: validImageAttachments(input.images)
     }).catch((error) => {
       this.handleRunError(run, error)
     })
@@ -360,6 +365,7 @@ export class AgentRunner {
         role: 'user',
         createdAt: new Date().toISOString(),
         parts: [{ type: 'text', text }],
+        attachments: validImageAttachments(input.images),
         status: 'complete'
       }
     })
@@ -485,6 +491,7 @@ export class AgentRunner {
       role: 'user',
       createdAt: new Date().toISOString(),
       parts: [{ type: 'text', text: userText }],
+      attachments: truncated.messages.find((m) => m.id === userMessageId)?.attachments,
       status: 'complete'
     }
 
@@ -506,7 +513,9 @@ export class AgentRunner {
     await this.executeTurn(run, userText, {
       harnessAlreadyCreated: true,
       harness,
-      skipOptimisticUser: true
+      skipOptimisticUser: true,
+      images: toImageContent(restoredUser.attachments),
+      imageAttachments: validImageAttachments(restoredUser.attachments)
     })
   }
 
@@ -564,6 +573,7 @@ export class AgentRunner {
       harness?: DreamHarness
       preserveRun?: boolean
       images?: ImageContent[]
+      imageAttachments?: UiImageAttachment[]
     }
   ): Promise<void> {
     const { projectId, sessionId, runId } = run
@@ -584,6 +594,9 @@ export class AgentRunner {
         role: 'user',
         createdAt: new Date().toISOString(),
         parts: [{ type: 'text', text: userText }],
+        attachments: options?.imageAttachments?.length
+          ? options.imageAttachments
+          : undefined,
         status: 'complete'
       }
       this.emit({

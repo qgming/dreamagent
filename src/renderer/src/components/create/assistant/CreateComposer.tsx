@@ -389,14 +389,12 @@ export function CreateComposer({
               <div className="flex min-w-0 items-center gap-0.5">
                 {attachmentCapabilities.canAttach ? (
                   <ComposerAddAttachment
-                    tooltip={
-                      attachmentCapabilities.canAttachImage &&
-                      attachmentCapabilities.canAttachText
-                        ? '添加文本或图片附件'
-                        : attachmentCapabilities.canAttachImage
-                          ? '添加图片附件'
-                          : '添加文本附件'
-                    }
+                    tooltip={`添加${[
+                      attachmentCapabilities.canAttachText ? '文本' : '',
+                      attachmentCapabilities.canAttachImage ? '图片' : ''
+                    ]
+                      .filter(Boolean)
+                      .join('、')}附件`}
                   />
                 ) : (
                   <TooltipHint

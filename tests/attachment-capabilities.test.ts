@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { prepareComposerMessage } from '../src/renderer/src/components/assistant-ui/attachment-payload'
 import { getModelAttachmentCapabilities } from '../src/renderer/src/components/assistant-ui/attachment-capabilities'
+import { convertUiMessage } from '../src/renderer/src/components/create/assistant/convert-message'
 import type { LlmSelectableModel } from '../src/shared/llm-settings'
 import type { AppendMessage } from '@assistant-ui/react'
 
@@ -75,9 +76,35 @@ describe('prepareComposerMessage', () => {
 
     expect(result.text).toContain('请检查附件')
     expect(result.text).toContain('notes.md')
-    expect(result.text).toContain('[附件:图片 cover.png]')
+    expect(result.text).not.toContain('[附件:图片 cover.png]')
     expect(result.images).toEqual([
       { name: 'cover.png', data: 'QUJD', mimeType: 'image/png' }
+    ])
+  })
+
+  it('把图片附件转换为用户消息中的可展示图片，并清理旧占位标记', () => {
+    const message = convertUiMessage({
+      id: 'msg-1',
+      role: 'user',
+      createdAt: '2026-08-03T00:00:00.000Z',
+      parts: [{ type: 'text', text: '图片是什么\n[附件:图片 cover.png]' }],
+      attachments: [{ name: 'cover.png', data: 'QUJD', mimeType: 'image/png' }],
+      status: 'complete'
+    })
+
+    expect(message.content).toEqual([{ type: 'text', text: '图片是什么' }])
+    expect(message.attachments).toMatchObject([
+      {
+        type: 'image',
+        name: 'cover.png',
+        contentType: 'image/png',
+        content: [
+          {
+            type: 'image',
+            image: 'data:image/png;base64,QUJD'
+          }
+        ]
+      }
     ])
   })
 })

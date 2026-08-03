@@ -28,12 +28,10 @@ export function prepareComposerMessage(
     .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
     .map((part) => part.text)
   const attachmentTexts: string[] = []
-  const imageNotes: string[] = []
   const images: UiImageAttachment[] = []
 
   for (const attachment of attachments) {
     if (attachment.type === 'image') {
-      imageNotes.push(`[附件:图片 ${attachment.name}]`)
       const imagePart = attachment.content?.find(
         (part): part is { type: 'image'; image: string } => part.type === 'image'
       )
@@ -59,10 +57,7 @@ export function prepareComposerMessage(
   }
 
   return {
-    text: [...textParts, ...attachmentTexts, ...imageNotes]
-      .filter(Boolean)
-      .join('\n')
-      .trim(),
+    text: [...textParts, ...attachmentTexts].filter(Boolean).join('\n').trim(),
     images
   }
 }

@@ -62,6 +62,18 @@ function toPiApi(type: string): Api {
   return 'openai-completions'
 }
 
+type PiInputModality = 'text' | 'image'
+
+function toPiInputModalities(
+  modalities?: readonly string[]
+): PiInputModality[] {
+  const supported = (modalities ?? []).filter(
+    (modality): modality is PiInputModality =>
+      modality === 'text' || modality === 'image'
+  )
+  return supported.length > 0 ? supported : ['text']
+}
+
 /**
  * 根据当前 LLM 多供应商设置构建 pi Models，并解析默认 / 覆盖 Model
  */
@@ -112,7 +124,10 @@ export class PiModelsService {
         baseURL: p.baseURL,
         type: p.type,
         key: p.apiKey ? 'set' : '',
-        models: p.models.map((m) => m.id)
+        models: p.models.map((m) => ({
+          id: m.id,
+          inputModalities: m.inputModalities
+        }))
       }))
     )
 
@@ -131,7 +146,7 @@ export class PiModelsService {
             provider: p.id,
             baseUrl: p.baseURL,
             reasoning: m.reasoning ?? info.reasoning,
-            input: ['text'],
+            input: toPiInputModalities(m.inputModalities ?? info.inputModalities),
             cost: info.price,
             contextWindow: m.contextWindow ?? info.contextWindow,
             // 输出上限取 models.dev 的真实上限（不再硬编码 32k）；pi-ai 内部还会按
@@ -165,24 +180,25 @@ export class PiModelsService {
     }
 
     // 从集合取当前 model；若不在集合（未启用）则现场构造
-    let model = modelsCollection.getModel(selection.providerId, selection.modelId) as
-      | Model<Api>
-      | undefined
-    if (!model) {
+    const registeredModel = modelsCollection.getModel(
+      selection.providerId,
+      selection.modelId
+    ) as Model<Api> | undefined
+    const model: Model<Api> = registeredModel ?? (() => {
       const info = resolveModelInfo(selection.modelId, selection.baseURL)
-      model = {
+      return {
         id: selection.modelId,
         name: selection.modelName || info.name,
         api: toPiApi(selection.type),
         provider: selection.providerId,
         baseUrl: selection.baseURL,
         reasoning: selection.reasoning,
-        input: ['text'],
+        input: toPiInputModalities(info.inputModalities),
         cost: info.price,
         contextWindow: selection.contextWindow,
         maxTokens: selection.maxTokens
       }
-    }
+    })()
 
     return { models: modelsCollection, model, selection }
   }

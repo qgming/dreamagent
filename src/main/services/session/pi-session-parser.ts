@@ -7,7 +7,8 @@ import type {
   UiBeatStatusUpdate,
   UiChatMessage,
   UiChatPart,
-  UiToolCallPart
+  UiToolCallPart,
+  UiImageAttachment
 } from '../../../shared/ui-chat'
 import { SESSION_ENTRY } from '../../../shared/agent-events'
 import {
@@ -48,6 +49,37 @@ function textFromUserContent(content: AgentMessage extends never ? never : unkno
     }
   }
   return parts.join('')
+}
+
+function imagesFromUserContent(
+  content: AgentMessage extends never ? never : unknown
+): UiImageAttachment[] | undefined {
+  if (!Array.isArray(content)) return undefined
+  const images: UiImageAttachment[] = []
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue
+    const candidate = block as {
+      type?: string
+      data?: unknown
+      mimeType?: unknown
+      filename?: unknown
+    }
+    if (
+      candidate.type !== 'image' ||
+      typeof candidate.data !== 'string' ||
+      !candidate.data ||
+      typeof candidate.mimeType !== 'string' ||
+      !candidate.mimeType.startsWith('image/')
+    ) {
+      continue
+    }
+    images.push({
+      name: typeof candidate.filename === 'string' ? candidate.filename : '图片',
+      data: candidate.data,
+      mimeType: candidate.mimeType
+    })
+  }
+  return images.length > 0 ? images : undefined
 }
 
 function summaryFromToolResult(message: {
@@ -148,12 +180,15 @@ export function parseSessionBranch(branch: SessionTreeEntry[]): UiChatMessage[] 
 
     if (message.role === 'user') {
       flushAssistant()
-      const text = textFromUserContent((message as { content?: unknown }).content)
+      const userContent = (message as { content?: unknown }).content
+      const text = textFromUserContent(userContent)
+      const attachments = imagesFromUserContent(userContent)
       out.push({
         id: entryId,
         role: 'user',
         createdAt,
         parts: text ? [{ type: 'text', text }] : [],
+        attachments,
         status: 'complete'
       })
       continue

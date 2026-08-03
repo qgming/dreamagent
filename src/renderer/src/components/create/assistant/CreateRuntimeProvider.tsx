@@ -40,7 +40,7 @@ export function CreateRuntimeProvider({
   const onNew = useCallback(
     async (message: AppendMessage) => {
       const prepared = prepareComposerMessage(message.content, message.attachments)
-      const text = prepared.text
+      const text = prepared.text || (prepared.images.length > 0 ? '请分析附件中的内容。' : '')
       if (!text) return
       await sendMessage(text, prepared.images)
     },
