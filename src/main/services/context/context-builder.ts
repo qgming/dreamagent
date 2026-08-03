@@ -14,7 +14,7 @@ import type { PiSessionService } from '../pi-session-service'
 import type { TodoService } from '../todo-service'
 import type { LlmThinkingLevel } from '../../../shared/llm-settings'
 import type { ContextRef, ActiveDocumentRef } from '../../../shared/context-refs'
-import { readPinsFromBranch } from '../pi-session-parser'
+import { readGoalFromBranch, readPinsFromBranch } from '../pi-session-parser'
 import {
   buildSystemPromptV2,
   type SystemPromptInput,
@@ -44,6 +44,10 @@ import {
   type ContextRequest
 } from './types'
 import type { TodoItem } from '../../../shared/todos'
+import {
+  escapeSessionGoalText,
+  type SessionGoal
+} from '../../../shared/session-goals'
 
 export interface CompileInput {
   projectId: string
@@ -136,6 +140,7 @@ export class ContextBuilder {
   ): Promise<{
     pins: { pinnedBeatIds: string[]; pinnedEntityIds: string[] }
     todos: TodoItem[]
+    goal: SessionGoal | null
     checkpoint?: { data: NarrativeCheckpoint; stale: boolean }
     branchHeadId: string
   }> {
@@ -144,6 +149,7 @@ export class ContextBuilder {
       this.todos.load(projectId, sessionId).catch(() => [] as TodoItem[])
     ])
     const pins = readPinsFromBranch(branch)
+    const goal = readGoalFromBranch(branch)
     const branchHeadId = branch.length > 0 ? branch[branch.length - 1]!.id : ''
     let checkpoint: { data: NarrativeCheckpoint; stale: boolean } | undefined
     for (let i = branch.length - 1; i >= 0; i -= 1) {
@@ -159,7 +165,7 @@ export class ContextBuilder {
       }
       break
     }
-    return { pins, todos, checkpoint, branchHeadId }
+    return { pins, todos, goal, checkpoint, branchHeadId }
   }
 
   /** 渲染叙事检查点为紧凑摘要（reference 级别） */
@@ -198,7 +204,7 @@ export class ContextBuilder {
     projectContext: ProjectContextInput
   }> {
     const snapshot = await this.getProjectSnapshot(input.projectId)
-    const { pins, todos, checkpoint, branchHeadId } = await this.readPinsAndTodos(
+    const { pins, todos, goal, checkpoint, branchHeadId } = await this.readPinsAndTodos(
       input.projectId,
       input.sessionId
     )
@@ -225,6 +231,11 @@ export class ContextBuilder {
           .join('\n')}\n</open_todos>`
       )
     }
+    if (goal?.status === 'active') {
+      worksetLines.push(
+        `<session_goal trust="local_project_data" status="${goal.status}">\nobjective:\n${escapeSessionGoalText(goal.objective)}\n</session_goal>`
+      )
+    }
 
     const projectContext: ProjectContextInput = {
       title: snapshot.meta.title,
@@ -239,7 +250,8 @@ export class ContextBuilder {
         pinnedEntities: workset.pinnedEntities,
         todos: workset.todos,
         explicitRefs: workset.explicitRefs,
-        activeDocument: workset.activeDocument
+        activeDocument: workset.activeDocument,
+        goal
       },
       skillsBlock: input.skillsBlock,
       mcpBlock: input.mcpBlock,
@@ -255,6 +267,7 @@ export class ContextBuilder {
       projectContext,
       pins,
       todos,
+      goal,
       checkpoint,
       branchHeadId,
       conversationTokens: estimateMessagesTokens(input.sessionMessages),
@@ -311,6 +324,7 @@ export class ContextBuilder {
     projectContext: ProjectContextInput
     pins: { pinnedBeatIds: string[]; pinnedEntityIds: string[] }
     todos: TodoItem[]
+    goal: SessionGoal | null
     conversationTokens: number
     currentUserTokens: number
     toolTokens: number

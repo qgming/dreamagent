@@ -11,6 +11,7 @@ import type {
 } from '@shared/ui-chat'
 import type { ProjectSnapshot } from '@shared/project-types'
 import type { TodoItem } from '@shared/todos'
+import type { SessionGoal } from '@shared/session-goals'
 import type { ContextCompactionState } from '@shared/context-usage'
 import type {
   LlmSelectableModel,
@@ -52,6 +53,7 @@ interface CreateState {
   sessionSummaries: SessionSummary[]
   /** 当前会话 Agent 待办（只读展示；仅 AI todo 工具可写/清理，打开会话时从磁盘恢复） */
   todos: TodoItem[]
+  goalArmed: boolean
   rightPanelOpen: boolean
   /** true = 用户手动开关，右栏走 spring；false = 进页/会话恢复等硬切 */
   rightPanelAnimate: boolean
@@ -61,6 +63,8 @@ interface CreateState {
   leftTodosOpen: boolean
   leftListTab: LeftListTab
   sending: boolean
+  /** 目标审计期间为 true；用户输入会先中断自动链再启动新回合。 */
+  goalAuditing: boolean
   runId: string | null
   error: string | null
   compactionState: ContextCompactionState
@@ -83,6 +87,8 @@ interface CreateState {
   loadSelectableModels: () => Promise<void>
   setSelectedModelKey: (key: string) => void
   setThinkingLevel: (level: LlmThinkingLevel) => void
+  setGoalArmed: (armed: boolean) => void
+  updateGoal: (goal: SessionGoal | null) => Promise<void>
   sendMessage: (text: string) => Promise<void>
   /** 运行中插话 */
   steerMessage: (text: string) => Promise<void>
@@ -114,6 +120,7 @@ const initialState = {
   session: null as SessionView | null,
   sessionSummaries: [] as SessionSummary[],
   todos: [] as TodoItem[],
+  goalArmed: false,
   rightPanelOpen: false,
   rightPanelAnimate: false,
   detailTarget: null as DetailTarget | null,
@@ -122,6 +129,7 @@ const initialState = {
   leftTodosOpen: false,
   leftListTab: 'conversations' as LeftListTab,
   sending: false,
+  goalAuditing: false,
   runId: null as string | null,
   error: null as string | null,
   compactionState: 'idle' as ContextCompactionState,
@@ -237,7 +245,12 @@ async function restoreRunningRun(
     const runs = await window.api.agent.getRunning({ projectId, sessionId })
     const run = runs[0]
     if (run) {
-      set({ sending: true, runId: run.runId, error: null })
+      set({
+        sending: true,
+        goalAuditing: Boolean(run.goalAuditing),
+        runId: run.runId,
+        error: null
+      })
     }
   } catch {
     // 主进程无运行状态时忽略
@@ -263,7 +276,7 @@ function ensureAgentSubscription(
 
     switch (event.type) {
       case 'turn_start':
-        set({ runId: event.runId, sending: true, error: null })
+        set({ runId: event.runId, sending: true, goalAuditing: false, error: null })
         break
       case 'branch_reset': {
         const sess = get().session
@@ -459,6 +472,7 @@ function ensureAgentSubscription(
           session: payload.session,
           todos: payload.session.todos ?? get().todos,
           sending: false,
+          goalAuditing: false,
           runId: null,
           error: null,
           followUpCount: 0,
@@ -482,11 +496,28 @@ function ensureAgentSubscription(
         applySelectedModelToSessionUsage(get, set)
         break
       }
+      case 'goal_audit': {
+        const sess = get().session
+        set({
+          ...(sess && event.goal ? { session: { ...sess, goal: event.goal } } : {}),
+          sending: event.phase === 'checking' || event.phase === 'continued',
+          goalAuditing: event.phase === 'checking',
+          error: event.phase === 'error' ? event.message ?? '目标自动续跑失败' : null,
+          ...(event.phase === 'completed' || event.phase === 'blocked' || event.phase === 'error'
+            ? { runId: null }
+            : {})
+        })
+        if (event.phase === 'completed' || event.phase === 'blocked' || event.phase === 'error') {
+          void get().refreshSessionList()
+        }
+        break
+      }
       case 'error': {
         const sess = get().session
         if (sess) {
           set({
             sending: false,
+            goalAuditing: false,
             runId: null,
             error: event.message,
             session: {
@@ -497,7 +528,7 @@ function ensureAgentSubscription(
             }
           })
         } else {
-          set({ sending: false, runId: null, error: event.message })
+          set({ sending: false, goalAuditing: false, runId: null, error: event.message })
         }
         break
       }
@@ -506,6 +537,7 @@ function ensureAgentSubscription(
         if (sess) {
           set({
             sending: false,
+            goalAuditing: false,
             runId: null,
             followUpCount: 0,
             followUpPreview: null,
@@ -520,6 +552,7 @@ function ensureAgentSubscription(
         } else {
           set({
             sending: false,
+            goalAuditing: false,
             runId: null,
             followUpCount: 0,
             followUpPreview: null,
@@ -623,6 +656,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
             activeSessionId: view.id,
             session: view,
             todos: view.todos ?? [],
+            goalArmed: false,
+            goalAuditing: false,
             sessionSummaries: after.length > 0 ? after : [
               {
                 id: view.id,
@@ -649,6 +684,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
           activeSessionId: view.id,
           session: view,
           todos: view.todos ?? [],
+          goalArmed: false,
+          goalAuditing: false,
           sessionSummaries: summaries,
           bootstrappedProjectId: projectId,
           detailTarget: null,
@@ -700,6 +737,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         rightPanelAnimate: false,
         // 新会话无待办；待办仅由 AI todo 工具写入/清理
         todos: view.todos ?? [],
+        goalArmed: false,
+        goalAuditing: false,
         error: null,
         compactionState: 'idle',
         compactionError: null
@@ -730,6 +769,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
         rightPanelAnimate: false,
         // 从 session custom entry 恢复持久化待办（UI 只读，不可手动清理）
         todos: view.todos ?? [],
+        goalArmed: false,
+        goalAuditing: false,
         error: null,
         sending: false,
         runId: null,
@@ -761,11 +802,13 @@ export const useCreateStore = create<CreateState>((set, get) => ({
 
       if (summaries.length > 0) {
         const next = await window.api.session.open(projectId, summaries[0].id)
-        set({
-          activeSessionId: next.id,
-          session: next,
-          todos: next.todos ?? [],
-          detailTarget: null,
+      set({
+        activeSessionId: next.id,
+        session: next,
+        todos: next.todos ?? [],
+        goalArmed: false,
+        goalAuditing: false,
+        detailTarget: null,
           rightPanelOpen: false,
           rightPanelAnimate: false,
           error: null,
@@ -778,6 +821,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
           activeSessionId: view.id,
           session: view,
           todos: view.todos ?? [],
+          goalArmed: false,
+          goalAuditing: false,
           sessionSummaries: [
             {
               id: view.id,
@@ -875,21 +920,45 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     void window.api.settings.setThinkingLevel(level).catch(() => undefined)
   },
 
+  setGoalArmed: (armed) => set({ goalArmed: armed }),
+
+  updateGoal: async (goal) => {
+    const projectId = useProjectStore.getState().activeProjectId
+    const sess = get().session
+    if (!projectId || !sess) return
+    if (get().goalAuditing) await get().cancelTurn()
+    try {
+      const next = await window.api.session.update(projectId, sess.id, { goal })
+      set({ session: next, goalArmed: false, error: null })
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) })
+    }
+  },
+
   sendMessage: async (text) => {
     ensureAgentSubscription(get, set)
     const projectId = useProjectStore.getState().activeProjectId
-    const { activeSessionId, sending, selectedModelKey, thinkingLevel } = get()
+    const {
+      activeSessionId,
+      sending,
+      goalAuditing,
+      selectedModelKey,
+      thinkingLevel,
+      goalArmed
+    } = get()
     if (!projectId || !activeSessionId) return
     const trimmed = text.trim()
     if (!trimmed) return
 
     // 运行中 → 插话
-    if (sending) {
+    if (sending && goalAuditing) {
+      await get().cancelTurn()
+    } else if (sending) {
       await get().steerMessage(trimmed)
       return
     }
 
-    set({ sending: true, error: null, followUpCount: 0, followUpPreview: null })
+    set({ sending: true, goalAuditing: false, error: null, followUpCount: 0, followUpPreview: null })
     const prev = get().session
     if (prev) {
       set({
@@ -912,25 +981,35 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     const decoded = selectedModelKey ? decodeModelKey(selectedModelKey) : null
     try {
       const contextRefs = extractContextRefsFromText(trimmed)
-      const { runId } = await window.api.agent.startTurn({
+      const { runId, goal } = await window.api.agent.startTurn({
         projectId,
         sessionId: activeSessionId,
         userMessage: trimmed,
         providerId: decoded?.providerId,
         modelId: decoded?.modelId,
         thinkingLevel,
-        contextRefs
+        contextRefs,
+        goalMode: goalArmed
       })
-      set({ runId })
+      const currentSession = get().session
+      set({
+        runId,
+        goalArmed: false,
+        ...(goal && currentSession
+          ? { session: { ...currentSession, goal } }
+          : {})
+      })
     } catch (error) {
       set({
         sending: false,
+        goalAuditing: false,
         runId: null,
+        goalArmed: false,
         error: error instanceof Error ? error.message : String(error)
       })
       try {
         const view = await window.api.session.open(projectId, activeSessionId)
-        set({ session: view, todos: view.todos ?? [] })
+        set({ session: view, todos: view.todos ?? [], goalArmed: false, goalAuditing: false })
       } catch {
         // ignore
       }
@@ -997,6 +1076,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
 
     set({
       sending: true,
+      goalAuditing: false,
       error: null,
       session: { ...session, messages: truncated }
     })
@@ -1014,6 +1094,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     } catch (error) {
       set({
         sending: false,
+        goalAuditing: false,
         runId: null,
         error: error instanceof Error ? error.message : String(error)
       })
@@ -1040,7 +1121,7 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) })
     } finally {
-      set({ sending: false, runId: null })
+      set({ sending: false, goalAuditing: false, runId: null })
     }
   },
 

@@ -21,12 +21,19 @@ import type { ProjectSnapshot } from '../../shared/project-types'
 import type { ProjectService } from './project-service'
 import type { PiSessionService } from './pi-session-service'
 import type { LlmSettingsService } from './llm-settings-service'
-import type { HarnessManager, HarnessSelection } from './harness-manager'
+import type { GoalAuditHarness, HarnessManager, HarnessSelection } from './harness-manager'
 import type { AgentHarness } from '@earendil-works/pi-agent-core'
 import type { DreamToolContext } from './pi-agent-tools'
 import type { SessionContextUsage } from '../../shared/context-usage'
 import type { UiContextRef, UiActiveDocumentRef } from '../../shared/ui-chat'
 import { buildNarrativeCheckpointInstructions } from './context/narrative-compactor'
+import {
+  createSessionGoal,
+  normalizeSessionGoalAudit,
+  SESSION_GOAL_NOTE_LIMIT,
+  type SessionGoal,
+  type SessionGoalAuditDecision
+} from '../../shared/session-goals'
 
 type DreamHarness = AgentHarness<DreamToolContext>
 
@@ -43,6 +50,65 @@ interface ActiveRun {
   /** 本轮结构化上下文引用（P2） */
   contextRefs?: UiContextRef[]
   activeDocument?: UiActiveDocumentRef
+  /** 目标审计期间用于响应停止 / 新回合的中止句柄。 */
+  goalAuditAbort?: () => Promise<void>
+}
+
+function clipAuditText(value: string, limit: number): string {
+  const text = value.trim()
+  return text.length <= limit ? text : `${text.slice(0, limit)}…`
+}
+
+function auditSnapshot(snapshot: ProjectSnapshot): Record<string, unknown> {
+  const summarize = (item: Record<string, unknown>): Record<string, unknown> => {
+    const result = { ...item }
+    if (typeof result.content === 'string') result.content = clipAuditText(result.content, 8_000)
+    delete result.fileName
+    delete result.createdAt
+    delete result.updatedAt
+    return result
+  }
+  return {
+    meta: {
+      title: snapshot.meta.title,
+      description: snapshot.meta.description,
+      version: snapshot.meta.version
+    },
+    beats: Object.values(snapshot.beats).map((item) => summarize(item as unknown as Record<string, unknown>)),
+    entities: Object.values(snapshot.entities).map((item) => summarize(item as unknown as Record<string, unknown>)),
+    chapters: Object.values(snapshot.chapters).map((item) => summarize(item as unknown as Record<string, unknown>))
+  }
+}
+
+function auditMessageText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .filter((part): part is { type: 'text'; text: string } =>
+      Boolean(part && typeof part === 'object' && (part as { type?: unknown }).type === 'text' && typeof (part as { text?: unknown }).text === 'string')
+    )
+    .map((part) => part.text)
+    .join('\n')
+}
+
+function parseAuditResponse(content: unknown): SessionGoalAuditDecision | null {
+  const text = auditMessageText(content).trim()
+  if (!text) return null
+  const candidates = [text]
+  const objectStart = text.indexOf('{')
+  const objectEnd = text.lastIndexOf('}')
+  if (objectStart >= 0 && objectEnd > objectStart) {
+    candidates.push(text.slice(objectStart, objectEnd + 1))
+  }
+  for (const candidate of candidates) {
+    try {
+      const parsed = normalizeSessionGoalAudit(JSON.parse(candidate))
+      if (parsed) return parsed
+    } catch {
+      // 继续尝试从回答中提取 JSON 对象。
+    }
+  }
+  return null
 }
 
 function chapterIdsFromDetails(details: unknown): string[] {
@@ -208,6 +274,15 @@ export class AgentRunner {
     if (!userMessage) throw new Error('消息不能为空')
 
     await this.llm.assertConfigured()
+    let goal: AgentStartTurnResult['goal']
+    if (input.goalMode) {
+      const current = await this.sessions.open(projectId, sessionId)
+      if (current.goal && current.goal.status !== 'complete') {
+        throw new Error('当前会话已有目标，请先完成、暂停或清除它')
+      }
+      goal = createSessionGoal(userMessage)
+      await this.sessions.update(projectId, sessionId, { goal })
+    }
     const selection: HarnessSelection = {
       providerId: input.providerId,
       modelId: input.modelId,
@@ -226,7 +301,7 @@ export class AgentRunner {
       this.handleRunError(run, error)
     })
 
-    return { runId: run.runId }
+    return { runId: run.runId, goal }
   }
 
   /**
@@ -335,6 +410,7 @@ export class AgentRunner {
     const prev = this.active.get(key)
     if (prev) {
       prev.aborted = true
+      void prev.goalAuditAbort?.().catch(() => undefined)
       this.harnesses.abortSession(projectId, sessionId)
     }
 
@@ -447,6 +523,7 @@ export class AgentRunner {
     }
     if (input.runId && input.runId !== run.runId) return
     run.aborted = true
+    void run.goalAuditAbort?.().catch(() => undefined)
     this.harnesses.abortSession(input.projectId, input.sessionId)
     this.emit({
       type: 'aborted',
@@ -475,7 +552,8 @@ export class AgentRunner {
         runId: run.runId,
         providerId: run.selection?.providerId,
         modelId: run.selection?.modelId,
-        thinkingLevel: run.selection?.thinkingLevel
+        thinkingLevel: run.selection?.thinkingLevel,
+        goalAuditing: Boolean(run.goalAuditAbort)
       })
     }
     return out
@@ -488,6 +566,7 @@ export class AgentRunner {
       harnessAlreadyCreated?: boolean
       skipOptimisticUser?: boolean
       harness?: DreamHarness
+      preserveRun?: boolean
     }
   ): Promise<void> {
     const { projectId, sessionId, runId } = run
@@ -608,7 +687,7 @@ export class AgentRunner {
       })
     }
 
-    const unsubscribe = harness.subscribe(async (event) => {
+    let unsubscribe: (() => void) | null = harness.subscribe(async (event) => {
       if (run.aborted) return
 
       switch (event.type) {
@@ -864,6 +943,11 @@ export class AgentRunner {
         }
       })
 
+      // 自动续跑会复用同一个缓存 harness。先解除本轮订阅，避免下一轮
+      // 的流式事件同时被上一轮和当前轮处理，导致 UI 出现重复 AI 回复。
+      unsubscribe?.()
+      unsubscribe = null
+
       // turn_done 已让界面恢复可用；随后压缩，并用 per-session promise 串行化下一轮。
       // 注意：此时 session.buildContext() 已包含刚完成的 user+assistant 回合，
       // 不再把 userText 作为 current_user 追加，避免重复计入同一条用户消息。
@@ -876,6 +960,10 @@ export class AgentRunner {
         await compaction
       } finally {
         if (this.compactions.get(key) === compaction) this.compactions.delete(key)
+      }
+
+      if (sessionView.goal?.status === 'active' && !run.aborted) {
+        await this.auditGoalAndContinue(run, sessionView.goal)
       }
     } catch (error) {
       flushAll(true)
@@ -891,10 +979,163 @@ export class AgentRunner {
       await this.sessions.tokenActivity(projectId).catch((error) => {
         console.warn('[agent-runner] 持久化 Token 活动失败', error)
       })
-      unsubscribe()
-      if (this.active.get(key)?.runId === runId) {
+      unsubscribe?.()
+      if (!options?.preserveRun && this.active.get(key)?.runId === runId) {
         this.active.delete(key)
       }
     }
+  }
+
+  private async auditGoalAndContinue(run: ActiveRun, goal: SessionGoal): Promise<void> {
+    const { projectId, sessionId, runId } = run
+    if (run.aborted) return
+
+    this.emit({
+      type: 'goal_audit',
+      projectId,
+      sessionId,
+      runId,
+      phase: 'checking',
+      goal
+    })
+
+    let auditHarness: GoalAuditHarness | null = null
+
+    try {
+      auditHarness = await this.harnesses.createGoalAuditHarness(run.selection)
+      run.goalAuditAbort = () => auditHarness!.abort().then(() => undefined)
+      const [snapshot, sessionView] = await Promise.all([
+        this.projects.openProject(projectId),
+        this.sessions.open(projectId, sessionId)
+      ])
+      if (run.aborted || sessionView.goal?.id !== goal.id || sessionView.goal.status !== 'active') {
+        return
+      }
+
+      const auditCharBudget = Math.min(
+        80_000,
+        Math.max(24_000, auditHarness.getModel().contextWindow * 2)
+      )
+      const snapshotText = clipAuditText(
+        JSON.stringify(auditSnapshot(snapshot), null, 2),
+        auditCharBudget
+      )
+      const prompt = [
+        '这是一次全新的独立目标审计。只判断当前目标是否已在项目状态中完成，不读取或推断任何之前的审计结果，也不参考无关会话内容。',
+        `目标：${goal.objective}`,
+        '',
+        '项目快照（以此为准判断文件和结构是否真实存在）：',
+        snapshotText,
+        '',
+        '只审计与目标直接相关的项目事实。若目标的所有可验证条件均已满足，返回 complete；只要仍有工作或证据不足，返回 continue，并给出具体下一步。只返回 JSON。'
+      ].join('\n')
+      const result = await auditHarness.prompt(prompt)
+      if (run.aborted) return
+
+      const decision = parseAuditResponse(result?.content)
+      if (!decision) {
+        await this.blockGoalAfterAuditFailure(run, goal, '自动审计返回格式无效，已暂停自动续跑。')
+        return
+      }
+
+      const latest = await this.sessions.open(projectId, sessionId)
+      if (run.aborted || latest.goal?.id !== goal.id || latest.goal.status !== 'active') return
+
+      if (decision.status === 'complete') {
+        const completedGoal: SessionGoal = {
+          ...latest.goal,
+          status: 'complete',
+          note: this.goalNote(decision, '目标已完成并通过自动审计。'),
+          statusReason: '自动审计确认完成',
+          updatedAt: new Date().toISOString()
+        }
+        const saved = await this.sessions.update(projectId, sessionId, { goal: completedGoal })
+        this.emit({
+          type: 'goal_audit',
+          projectId,
+          sessionId,
+          runId,
+          phase: 'completed',
+          goal: saved.goal,
+          message: '自动审计确认目标已完成。'
+        })
+        return
+      }
+
+      const progressGoal: SessionGoal = {
+        ...latest.goal,
+        note: this.goalNote(decision),
+        statusReason: '自动审计确认仍需继续',
+        updatedAt: new Date().toISOString()
+      }
+
+      const saved = await this.sessions.update(projectId, sessionId, { goal: progressGoal })
+      this.emit({
+        type: 'goal_audit',
+        projectId,
+        sessionId,
+        runId,
+        phase: 'continued',
+        goal: saved.goal,
+        message: '目标尚未完成，正在自动开始下一轮。'
+      })
+      if (run.aborted || saved.goal?.status !== 'active') return
+
+      const continuation = [
+        '继续自动完成当前会话目标。',
+        `目标：${saved.goal.objective}`,
+        `自动审计进度：${saved.goal.note}`,
+        `下一步：${decision.nextStep}`,
+        '请直接执行下一步，使用工具修改项目并验证结果；不要只输出计划。'
+      ].join('\n')
+      await this.executeTurn(run, continuation, { preserveRun: true })
+    } catch (error) {
+      if (run.aborted) return
+      const message = error instanceof Error ? error.message : String(error)
+      await this.blockGoalAfterAuditFailure(run, goal, `自动审计失败，已暂停自动续跑：${message}`)
+    } finally {
+      run.goalAuditAbort = undefined
+      if (auditHarness) {
+        await auditHarness.abort().catch(() => undefined)
+        await auditHarness.waitForIdle().catch(() => undefined)
+      }
+    }
+  }
+
+  private goalNote(decision: SessionGoalAuditDecision, prefix?: string): string {
+    const evidence = decision.evidence.length
+      ? `证据：${decision.evidence.join('；')}`
+      : ''
+    return [prefix, `进度：${decision.progress}`, decision.status === 'continue' ? `下一步：${decision.nextStep}` : '', evidence]
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, SESSION_GOAL_NOTE_LIMIT)
+  }
+
+  private async blockGoalAfterAuditFailure(
+    run: ActiveRun,
+    goal: SessionGoal,
+    message: string
+  ): Promise<void> {
+    const { projectId, sessionId, runId } = run
+    const latest = await this.sessions.open(projectId, sessionId).catch(() => null)
+    if (!latest?.goal || latest.goal.id !== goal.id || latest.goal.status !== 'active') return
+    const blocked: SessionGoal = {
+      ...latest.goal,
+      status: 'blocked',
+      note: message.slice(0, SESSION_GOAL_NOTE_LIMIT),
+      statusReason: '自动审计不可用',
+      updatedAt: new Date().toISOString()
+    }
+    const saved = await this.sessions.update(projectId, sessionId, { goal: blocked })
+    this.emit({
+      type: 'goal_audit',
+      projectId,
+      sessionId,
+      runId,
+      phase: 'error',
+      goal: saved.goal,
+      message
+    })
   }
 }

@@ -12,6 +12,7 @@ import type {
   ContextCompactionState,
   SessionContextUsage
 } from './context-usage'
+import type { SessionGoal } from './session-goals'
 
 export type AgentStreamEvent =
   | {
@@ -109,6 +110,16 @@ export type AgentStreamEvent =
       compactionError?: string
     }
   | {
+      /** 目标模式后台审计 / 自动续跑状态。 */
+      type: 'goal_audit'
+      projectId: string
+      sessionId: string
+      runId: string
+      phase: 'checking' | 'continued' | 'completed' | 'blocked' | 'error'
+      goal: SessionGoal | null
+      message?: string
+    }
+  | {
       type: 'error'
       projectId: string
       sessionId: string
@@ -148,5 +159,6 @@ export type AgentStreamEvent =
 export const SESSION_ENTRY = {
   pinnedBeats: 'pinned_beats',
   pinnedEntities: 'pinned_entities',
-  todos: 'session_todos'
+  todos: 'session_todos',
+  goal: 'session_goal'
 } as const

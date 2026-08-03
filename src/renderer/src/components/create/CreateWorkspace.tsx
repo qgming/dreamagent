@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Circle,
   CircleDot,
+  Eye,
   FileText,
   GripVertical,
   ListTodo,
@@ -22,9 +24,15 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import {
   BEAT_STATUS_LABELS,
+  BEAT_STATUSES,
   CHAPTER_STATUS_LABELS,
+  CHAPTER_STATUSES,
   ENTITY_STATUS_LABELS,
-  type Chapter
+  ENTITY_STATUSES,
+  type BeatStatus,
+  type Chapter,
+  type ChapterStatus,
+  type EntityStatus
 } from '@shared/project-types'
 import type { SessionSummary } from '@shared/ui-chat'
 import type { TodoItem, TodoStatus } from '@shared/todos'
@@ -32,6 +40,7 @@ import { CreateRuntimeProvider } from './assistant/CreateRuntimeProvider'
 import { CreateAssistantThread } from './assistant/CreateAssistantThread'
 import { Button } from '@/components/ui/button'
 import { DetailMarkdown } from '@/components/create/DetailMarkdown'
+import { MentionEditor } from '@/components/EntityMentionEditor'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   SortableHandle,
@@ -88,6 +97,12 @@ import {
 
 /** 右栏固定宽度，展开/收起带动中栏平滑变宽 */
 const RIGHT_PANEL_WIDTH = 400
+
+const DETAIL_BODY_CLASS = 'min-h-0 flex-1 px-4 py-3'
+const DETAIL_FOOTER_CLASS =
+  'flex shrink-0 items-center justify-between gap-2 border-t border-border p-3'
+const DETAIL_EDITOR_CLASS =
+  'h-full min-h-0 w-full flex-1 resize-none bg-transparent text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground app-scrollbar'
 
 const PANEL_SPRING = { type: 'spring' as const, stiffness: 380, damping: 36 }
 
@@ -1170,6 +1185,269 @@ function RightPanelHeader({
   )
 }
 
+type DetailStatusOption = {
+  value: string
+  label: string
+  dotClass: string
+}
+
+function DetailStatusMenu({
+  value,
+  options,
+  onChange
+}: {
+  value: string
+  options: DetailStatusOption[]
+  onChange: (value: string) => void
+}): React.JSX.Element {
+  const selected = options.find((option) => option.value === value) ?? options[0]
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs outline-none hover:bg-muted"
+        type="button"
+      >
+        <span className={cn('size-2 shrink-0 rounded-full', selected?.dotClass)} />
+        {selected?.label ?? value}
+        <ChevronDown className="size-3.5 opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {options.map((option) => (
+          <DropdownMenuItem
+            className={cn(
+              value === option.value &&
+                'bg-black/[0.06] text-foreground dark:bg-white/[0.08]'
+            )}
+            key={option.value}
+            onSelect={() => onChange(option.value)}
+          >
+            <span className={cn('size-2 rounded-full', option.dotClass)} />
+            {option.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function DetailFooter({
+  editing,
+  status,
+  statusOptions,
+  onChangeStatus,
+  onToggleEditing,
+  trailing
+}: {
+  editing: boolean
+  status: string
+  statusOptions: DetailStatusOption[]
+  onChangeStatus: (value: string) => void
+  onToggleEditing: () => void
+  trailing?: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div className={DETAIL_FOOTER_CLASS}>
+      <div className="flex min-w-0 items-center gap-2">
+        <DetailStatusMenu
+          onChange={onChangeStatus}
+          options={statusOptions}
+          value={status}
+        />
+        <Button onClick={onToggleEditing} size="sm" type="button" variant="outline">
+          {editing ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
+          {editing ? '预览' : '编辑'}
+        </Button>
+      </div>
+      {trailing}
+    </div>
+  )
+}
+
+type DetailEditPatch = {
+  title?: string
+  name?: string
+  content?: string
+  status?: string
+}
+
+/** 节点 / 实体详情：默认 Markdown 预览，编辑时复用全页双链编辑器。 */
+function EditableResourceDetail({
+  sourceType,
+  resourceId,
+  title: resourceTitle,
+  titlePlaceholder,
+  content: resourceContent,
+  status: resourceStatus,
+  statusOptions,
+  updatedAt,
+  outgoing,
+  incoming,
+  onUpdate,
+  onOpenInPage,
+  openLabel,
+  onOpenRelated
+}: {
+  sourceType: 'beat' | 'entity'
+  resourceId: string
+  title: string
+  titlePlaceholder: string
+  content: string
+  status: string
+  statusOptions: DetailStatusOption[]
+  updatedAt: string
+  outgoing: RelatedLinkItem[]
+  incoming: RelatedLinkItem[]
+  onUpdate: (patch: DetailEditPatch) => Promise<void>
+  onOpenInPage: () => void
+  openLabel: string
+  onOpenRelated: (t: DetailTarget) => void
+}): React.JSX.Element {
+  const [editing, setEditing] = useState(false)
+  const [title, setTitle] = useState(resourceTitle)
+  const [content, setContent] = useState(resourceContent)
+  const [status, setStatus] = useState(resourceStatus)
+  const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved'>('idle')
+  const resourceRef = useRef({
+    id: resourceId,
+    title: resourceTitle,
+    content: resourceContent,
+    status: resourceStatus
+  })
+  const onUpdateRef = useRef(onUpdate)
+  resourceRef.current = {
+    id: resourceId,
+    title: resourceTitle,
+    content: resourceContent,
+    status: resourceStatus
+  }
+  onUpdateRef.current = onUpdate
+
+  useEffect(() => {
+    setTitle(resourceTitle)
+    setContent(resourceContent)
+    setStatus(resourceStatus)
+    setEditing(false)
+    setSaveState('idle')
+  }, [resourceId])
+
+  useEffect(() => {
+    if (saveState === 'dirty' || saveState === 'saving') return
+    if (title !== resourceTitle) setTitle(resourceTitle)
+    if (content !== resourceContent) setContent(resourceContent)
+    if (status !== resourceStatus) setStatus(resourceStatus)
+    // 外部写入且本地没有未保存修改时跟进快照。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resourceTitle, resourceContent, resourceStatus, updatedAt])
+
+  useEffect(() => {
+    const current = resourceRef.current
+    if (title === current.title && content === current.content && status === current.status) return
+    setSaveState('dirty')
+    const timer = window.setTimeout(() => {
+      const latest = resourceRef.current
+      const patch: DetailEditPatch = {}
+      const nextTitle = title.trim() || latest.title
+      if (title !== latest.title) {
+        if (sourceType === 'beat') patch.title = nextTitle
+        else patch.name = nextTitle
+      }
+      if (content !== latest.content) patch.content = content
+      if (status !== latest.status) patch.status = status
+      if (title === latest.title) {
+        delete patch.title
+        delete patch.name
+      }
+      if (Object.keys(patch).length === 0) {
+        setSaveState('idle')
+        return
+      }
+      setSaveState('saving')
+      void onUpdateRef.current(patch)
+        .then(() => setSaveState('saved'))
+        .catch(() => setSaveState('dirty'))
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [content, sourceType, status, title])
+
+  const saveHint =
+    saveState === 'saving'
+      ? '保存中…'
+      : saveState === 'saved'
+        ? '已保存'
+        : saveState === 'dirty'
+          ? '未保存'
+          : null
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-card/10">
+      <RightPanelHeader
+        extra={
+          <div className="flex shrink-0 items-center gap-1.5">
+            <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <span>{content.length} 字</span>
+              {saveHint ? <span>{saveHint}</span> : null}
+            </span>
+            <RelatedLinksPopover
+              incoming={incoming}
+              onOpen={onOpenRelated}
+              outgoing={outgoing}
+            />
+          </div>
+        }
+        title={title || titlePlaceholder}
+        titleSlot={
+          editing ? (
+            <input
+              className="h-8 min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none placeholder:text-muted-foreground"
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={titlePlaceholder}
+              value={title}
+            />
+          ) : undefined
+        }
+      />
+      <div
+        className={cn(
+          DETAIL_BODY_CLASS,
+          editing ? 'flex flex-col overflow-hidden' : 'overflow-y-auto app-scrollbar'
+        )}
+      >
+        {editing ? (
+          <MentionEditor
+            className="h-full min-h-0"
+            excludeId={resourceId}
+            onChange={setContent}
+            onOpenBeat={(id) => onOpenRelated({ type: 'beat', id })}
+            onOpenEntity={(id) => onOpenRelated({ type: 'entity', id })}
+            padClassName="px-0 py-0"
+            placeholder={sourceType === 'beat' ? '编辑节点正文…' : '编辑实体正文…'}
+            sourceType={sourceType}
+            value={content}
+          />
+        ) : (
+          <DetailMarkdown
+            content={content}
+            onOpenMention={(type, id) => onOpenRelated({ type, id })}
+            sourceType={sourceType}
+          />
+        )}
+      </div>
+      <DetailFooter
+        editing={editing}
+        onChangeStatus={setStatus}
+        onToggleEditing={() => setEditing((value) => !value)}
+        status={status}
+        statusOptions={statusOptions}
+        trailing={
+          <Button onClick={onOpenInPage} size="sm" type="button" variant="outline">
+            {openLabel}
+          </Button>
+        }
+      />
+    </div>
+  )
+}
+
 /**
  * 文章可编辑预览：标题 + 纯正文，400ms 防抖自动保存
  */
@@ -1185,6 +1463,8 @@ function ArticleEditor({
   const updateChapter = useProjectStore((s) => s.updateChapter)
   const [title, setTitle] = useState(chapter.title)
   const [content, setContent] = useState(chapter.content)
+  const [status, setStatus] = useState<ChapterStatus>(chapter.status)
+  const [editing, setEditing] = useState(true)
   const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved'>('idle')
   const chapterRef = useRef(chapter)
   chapterRef.current = chapter
@@ -1193,6 +1473,8 @@ function ArticleEditor({
   useEffect(() => {
     setTitle(chapter.title)
     setContent(chapter.content)
+    setStatus(chapter.status)
+    setEditing(true)
     setSaveState('idle')
   }, [chapter.id])
 
@@ -1201,21 +1483,23 @@ function ArticleEditor({
     if (saveState === 'dirty' || saveState === 'saving') return
     if (title !== chapter.title) setTitle(chapter.title)
     if (content !== chapter.content) setContent(chapter.content)
+    if (status !== chapter.status) setStatus(chapter.status)
     // 仅在非编辑脏状态下跟随磁盘
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapter.title, chapter.content, chapter.updatedAt])
+  }, [chapter.title, chapter.content, chapter.status, chapter.updatedAt])
 
   useEffect(() => {
     const cur = chapterRef.current
-    if (title === cur.title && content === cur.content) {
+    if (title === cur.title && content === cur.content && status === cur.status) {
       return
     }
     setSaveState('dirty')
     const timer = window.setTimeout(() => {
       const latest = chapterRef.current
-      const patch: { title?: string; content?: string } = {}
+      const patch: { title?: string; content?: string; status?: ChapterStatus } = {}
       if (title !== latest.title) patch.title = title.trim() || latest.title
       if (content !== latest.content) patch.content = content
+      if (status !== latest.status) patch.status = status
       if (Object.keys(patch).length === 0) {
         setSaveState('idle')
         return
@@ -1226,7 +1510,7 @@ function ArticleEditor({
         .catch(() => setSaveState('dirty'))
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [title, content, updateChapter])
+  }, [title, content, status, updateChapter])
 
   const saveHint =
     saveState === 'saving'
@@ -1255,7 +1539,6 @@ function ArticleEditor({
   return (
     <div className="flex h-full flex-col bg-card/10">
       <RightPanelHeader
-        badge={CHAPTER_STATUS_LABELS[chapter.status]}
         extra={
           <div className="flex shrink-0 items-center gap-1.5">
             <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -1278,14 +1561,34 @@ function ArticleEditor({
           />
         }
       />
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4">
-        <textarea
-          className="h-full min-h-0 w-full flex-1 resize-none bg-transparent text-[14px] leading-7 text-foreground outline-none placeholder:text-muted-foreground app-scrollbar"
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="在此编写文章正文…"
-          value={content}
-        />
+      <div
+        className={cn(
+          DETAIL_BODY_CLASS,
+          editing ? 'flex flex-col overflow-hidden' : 'overflow-y-auto app-scrollbar'
+        )}
+      >
+        {editing ? (
+          <textarea
+            className={DETAIL_EDITOR_CLASS}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="在此编写文章正文…"
+            value={content}
+          />
+        ) : (
+          <DetailMarkdown content={content} sourceType="beat" />
+        )}
       </div>
+      <DetailFooter
+        editing={editing}
+        onChangeStatus={(value) => setStatus(value as ChapterStatus)}
+        onToggleEditing={() => setEditing((value) => !value)}
+        status={status}
+        statusOptions={CHAPTER_STATUSES.map((value) => ({
+          dotClass: CHAPTER_STATUS_DOT_CLASS[value],
+          label: CHAPTER_STATUS_LABELS[value],
+          value
+        }))}
+      />
     </div>
   )
 }
@@ -1311,6 +1614,9 @@ function DetailContent({
   onOpenInPage: (t: DetailTarget) => void
   onOpenRelated: (t: DetailTarget) => void
 }): React.JSX.Element {
+  const updateBeat = useProjectStore((s) => s.updateBeat)
+  const updateEntity = useProjectStore((s) => s.updateEntity)
+
   if (target.type === 'chapter') {
     const chapter = snapshot.chapters[target.id]
     if (!chapter) {
@@ -1350,37 +1656,32 @@ function DetailContent({
         }))
     ]
     return (
-      <div className="flex h-full flex-col bg-card/10">
-        <RightPanelHeader
-          badge={BEAT_STATUS_LABELS[beat.status]}
-          extra={
-            <RelatedLinksPopover
-              incoming={backlinkItems(back)}
-              onOpen={onOpenRelated}
-              outgoing={outgoing}
-            />
-          }
-          title={beat.title || '未命名节点'}
-        />
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 app-scrollbar">
-          <DetailMarkdown
-            content={beat.content}
-            onOpenMention={(type, id) => onOpenRelated({ type, id })}
-            sourceType="beat"
-          />
-        </div>
-        <div className="border-t border-border p-3">
-          <Button
-            className="w-full"
-            onClick={() => onOpenInPage(target)}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            在节点页打开
-          </Button>
-        </div>
-      </div>
+      <EditableResourceDetail
+        content={beat.content}
+        incoming={backlinkItems(back)}
+        onOpenInPage={() => onOpenInPage(target)}
+        onOpenRelated={onOpenRelated}
+        onUpdate={(patch) =>
+          updateBeat(beat.id, {
+            content: patch.content,
+            status: patch.status as BeatStatus | undefined,
+            title: patch.title
+          })
+        }
+        openLabel="在节点页打开"
+        outgoing={outgoing}
+        resourceId={beat.id}
+        sourceType="beat"
+        status={beat.status}
+        statusOptions={BEAT_STATUSES.map((value) => ({
+          dotClass: BEAT_STATUS_DOT_CLASS[value],
+          label: BEAT_STATUS_LABELS[value],
+          value
+        }))}
+        title={beat.title}
+        titlePlaceholder="节点标题"
+        updatedAt={beat.updatedAt}
+      />
     )
   }
 
@@ -1409,36 +1710,31 @@ function DetailContent({
       }))
   ]
   return (
-    <div className="flex h-full flex-col bg-card/10">
-      <RightPanelHeader
-        badge={ENTITY_STATUS_LABELS[entity.status]}
-        extra={
-          <RelatedLinksPopover
-            incoming={backlinkItems(back)}
-            onOpen={onOpenRelated}
-            outgoing={outgoing}
-          />
-        }
-        title={entity.name}
-      />
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 app-scrollbar">
-        <DetailMarkdown
-          content={entity.content}
-          onOpenMention={(type, id) => onOpenRelated({ type, id })}
-          sourceType="entity"
-        />
-      </div>
-      <div className="border-t border-border p-3">
-        <Button
-          className="w-full"
-          onClick={() => onOpenInPage(target)}
-          size="sm"
-          type="button"
-          variant="secondary"
-        >
-          在实体页打开
-        </Button>
-      </div>
-    </div>
+    <EditableResourceDetail
+      content={entity.content}
+      incoming={backlinkItems(back)}
+      onOpenInPage={() => onOpenInPage(target)}
+      onOpenRelated={onOpenRelated}
+      onUpdate={(patch) =>
+        updateEntity(entity.id, {
+          content: patch.content,
+          name: patch.name,
+          status: patch.status as EntityStatus | undefined
+        })
+      }
+      openLabel="在实体页打开"
+      outgoing={outgoing}
+      resourceId={entity.id}
+      sourceType="entity"
+      status={entity.status}
+      statusOptions={ENTITY_STATUSES.map((value) => ({
+        dotClass: ENTITY_STATUS_DOT_CLASS[value],
+        label: ENTITY_STATUS_LABELS[value],
+        value
+      }))}
+      title={entity.name}
+      titlePlaceholder="实体名称"
+      updatedAt={entity.updatedAt}
+    />
   )
 }

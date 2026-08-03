@@ -76,6 +76,8 @@ export interface SessionView {
   pinnedEntityIds: string[]
   /** 会话级 Agent 待办（仅 AI todo 工具可写/清理，打开时从 session 持久化恢复） */
   todos: import('./todos').TodoItem[]
+  /** 当前会话目标；目标状态通过 session custom entry 持久化。 */
+  goal: import('./session-goals').SessionGoal | null
   createdAt: string
   updatedAt: string
   usage: import('./context-usage').SessionContextUsage
@@ -91,6 +93,8 @@ export interface UpdateSessionInput {
   title?: string
   pinnedBeatIds?: string[]
   pinnedEntityIds?: string[]
+  /** 传 null 清除目标；不传表示不修改。 */
+  goal?: import('./session-goals').SessionGoal | null
 }
 
 /** 显式引用（Composer directive mention 结构化形式，P2） */
@@ -118,10 +122,14 @@ export interface AgentStartTurnInput {
   contextRefs?: UiContextRef[]
   /** 当前打开的文章 / 节点 / 实体（可选） */
   activeDocument?: UiActiveDocumentRef
+  /** 将本次用户消息作为新会话目标，并在本轮 system prompt 中启用目标契约。 */
+  goalMode?: boolean
 }
 
 export interface AgentStartTurnResult {
   runId: string
+  /** 目标模式发送时返回实际落盘的目标，供 UI 立即展示。 */
+  goal?: import('./session-goals').SessionGoal
 }
 
 /** 主进程仍在运行的 Agent 回合（用于页面重新挂载后恢复运行状态） */
@@ -132,6 +140,8 @@ export interface AgentRunningRun {
   providerId?: string
   modelId?: string
   thinkingLevel?: import('./llm-settings').LlmThinkingLevel
+  /** 当前 run 是否正在等待目标审计结果。 */
+  goalAuditing?: boolean
 }
 
 /** 重新生成：以某条用户消息为锚点，截断其后分支并再跑一轮 */

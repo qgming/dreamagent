@@ -9,6 +9,10 @@
  */
 import { createHash } from 'crypto'
 import { PROMPT_VERSION } from './types'
+import {
+  escapeSessionGoalText,
+  type SessionGoal
+} from '../../../shared/session-goals'
 
 export interface ProjectContextInput {
   title: string
@@ -22,6 +26,7 @@ export interface WorksetInput {
   todos: Array<{ content: string; status: string }>
   explicitRefs: string[]
   activeDocument?: string
+  goal?: SessionGoal | null
 }
 
 export interface ManifestSummaryInput {
@@ -188,6 +193,14 @@ function buildWorksetText(input: WorksetInput): string {
       `## 未完成待办\n${input.todos
         .map((t) => `- [${t.status}] ${t.content}`)
         .join('\n')}`
+    )
+  }
+  if (input.goal?.status === 'active') {
+    parts.push(
+      `<session_goal trust="local_project_data" status="${input.goal.status}">\n` +
+        `objective:\n${escapeSessionGoalText(input.goal.objective)}\n` +
+        '将此目标作为本会话的验收标准。依据证据工作，不要在未验证时声称完成；结束本轮时用简洁、事实性的进度说明列出：已完成、已验证、待完成。\n' +
+        '</session_goal>'
     )
   }
   return parts.join('\n\n')

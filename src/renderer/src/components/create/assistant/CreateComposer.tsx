@@ -38,6 +38,7 @@ import {
 import { ComposerTriggerPopover } from '@/components/assistant-ui/composer-trigger-popover'
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
 import { LexicalDirectiveChip } from '@/components/assistant-ui/lexical-directive-chip'
+import { SessionGoalControl, SessionGoalStatusBar } from './SessionGoalControl'
 import {
   ModelSelector,
   type ModelOption,
@@ -306,6 +307,8 @@ export function CreateComposer({
         </div>
       )}
 
+      <SessionGoalStatusBar />
+
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerPrimitive.Root className="aui-composer-root relative mx-auto flex w-full max-w-[var(--thread-max-width,42rem)] flex-col">
           <div
@@ -354,9 +357,10 @@ export function CreateComposer({
                 >
                   <AtSign className="size-4" />
                 </TooltipIconButton>
+                <SessionGoalControl />
               </div>
 
-              {/* 右侧：官方 ModelSelector Ghost + 发送/停止 */}
+              {/* 右侧：模型 + 发送/停止 */}
               <div className="flex shrink-0 items-center gap-1">
                 {modelOptions.length > 0 ? (
                   <ModelSelector

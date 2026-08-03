@@ -44,8 +44,10 @@ import {
   parseSessionBranch,
   previewFromMessages,
   readPinsFromBranch,
-  readTodosFromBranch
+  readTodosFromBranch,
+  readGoalFromBranch
 } from './pi-session-parser'
+import type { SessionGoal } from '../../shared/session-goals'
 
 interface ProjectSessionRuntime {
   env: NodeExecutionEnv
@@ -453,6 +455,7 @@ export class PiSessionService {
       pinnedBeatIds: input.pinnedBeatIds ?? [],
       pinnedEntityIds: input.pinnedEntityIds ?? [],
       todos: [],
+      goal: null,
       createdAt: meta.createdAt,
       updatedAt: meta.createdAt,
       usage
@@ -465,6 +468,7 @@ export class PiSessionService {
     const messages = parseSessionBranch(branch)
     const pins = readPinsFromBranch(branch)
     const todos = readTodosFromBranch(branch)
+    const goal = readGoalFromBranch(branch)
     const name = (await session.getSessionName().catch(() => undefined))?.trim()
     const meta = await session.getMetadata()
     const title =
@@ -482,6 +486,7 @@ export class PiSessionService {
       pinnedBeatIds: pins.pinnedBeatIds,
       pinnedEntityIds: pins.pinnedEntityIds,
       todos,
+      goal,
       createdAt: meta.createdAt,
       updatedAt,
       usage
@@ -506,6 +511,9 @@ export class PiSessionService {
       await session.appendCustomEntry(SESSION_ENTRY.pinnedEntities, {
         ids: patch.pinnedEntityIds
       })
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'goal')) {
+      await session.appendCustomEntry(SESSION_ENTRY.goal, patch.goal ?? null)
     }
     return this.open(projectId, sessionId)
   }

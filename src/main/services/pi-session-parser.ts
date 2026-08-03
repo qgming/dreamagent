@@ -10,6 +10,10 @@ import type {
   UiToolCallPart
 } from '../../shared/ui-chat'
 import { SESSION_ENTRY } from '../../shared/agent-events'
+import {
+  normalizeSessionGoal,
+  type SessionGoal
+} from '../../shared/session-goals'
 
 function isoFromTs(ts: number | string | undefined): string {
   if (typeof ts === 'number' && Number.isFinite(ts)) {
@@ -293,6 +297,12 @@ export function readTodosFromBranch(
     })
   }
   return out
+}
+
+/** 从 branch 读取最后一条有效目标状态。 */
+export function readGoalFromBranch(branch: SessionTreeEntry[]): SessionGoal | null {
+  const raw = readLastCustomData<unknown>(branch, SESSION_ENTRY.goal)
+  return normalizeSessionGoal(raw)
 }
 
 /** 从消息中取预览文本 */

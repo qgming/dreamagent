@@ -56,11 +56,14 @@ function maskKey(key: string): string | undefined {
   return `${t.slice(0, 3)}••••${t.slice(-4)}`
 }
 
-/** 按分钟轮转列表，避免总是打同一个公共实例 */
-function rotateList<T>(list: T[]): T[] {
-  if (list.length <= 1) return list
-  const offset = Math.floor(Date.now() / 60_000) % list.length
-  return list.slice(offset).concat(list.slice(0, offset))
+/** 每次搜索随机打散候选，避免固定命中同一个公共实例。 */
+function shuffleList<T>(list: T[]): T[] {
+  const out = [...list]
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[out[i], out[j]] = [out[j]!, out[i]!]
+  }
+  return out
 }
 
 interface ElectronHttpResponse {
@@ -563,13 +566,14 @@ export class NetworkService {
       .split(/[\n,]/)
       .map((line) => line.trim())
       .filter(Boolean)
-    // 用户自定义优先；否则使用内置公共清单，并做轻度打散以避免总打同一节点
-    const targetInstances =
-      custom.length > 0 ? custom : rotateList([...DEFAULT_SEARXNG_INSTANCES])
+    const uniqueCustom = [...new Set(custom)]
+    // 自定义实例优先，但单个自定义节点失败时仍回退到其他公共实例。
+    const customSet = new Set(uniqueCustom)
+    const fallback = DEFAULT_SEARXNG_INSTANCES.filter((instance) => !customSet.has(instance))
+    const targetInstances = [...shuffleList(uniqueCustom), ...shuffleList(fallback)]
     const limit = Math.min(Math.max(Number(request.limit || 5), 1), 10)
     let lastError: unknown = null
-    // 最多尝试前 N 个，避免一次请求拖太久
-    const maxAttempts = Math.min(targetInstances.length, custom.length > 0 ? custom.length : 12)
+    const maxAttempts = Math.min(targetInstances.length, 3)
     for (let i = 0; i < maxAttempts; i++) {
       const instance = targetInstances[i]
       try {
@@ -612,7 +616,7 @@ export class NetworkService {
       }
     }
     const msg = lastError instanceof Error ? lastError.message : String(lastError || '')
-    throw new Error(`所有 SearXNG 实例均不可用${msg ? `：${msg}` : ''}`)
+    throw new Error(`SearXNG 连续尝试 ${maxAttempts} 个实例仍失败${msg ? `：${msg}` : ''}`)
   }
 
   private async braveSearch(request: WebSearchRequest): Promise<WebSearchResponse> {
