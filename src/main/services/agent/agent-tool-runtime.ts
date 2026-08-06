@@ -40,14 +40,8 @@ import {
   type LineEdit,
   type ParagraphEdit
 } from '../project/graph-path'
-import {
-  analyzeText,
-  compareText,
-  hashText,
-  type DialogueExpectation,
-  type TextStatsOptions,
-  type TextStatsProfile
-} from '../../../shared/text-statistics'
+import { hashText } from '../../../shared/text-hash'
+import { checkProse } from '../../../shared/check-prose'
 
 const MAX_REFERENCE_COUNT = 20
 const MAX_REFERENCE_CHARS = 500_000
@@ -201,10 +195,8 @@ export class AgentToolRuntime {
             startLine: typeof input.startLine === 'number' ? input.startLine : undefined,
             endLine: typeof input.endLine === 'number' ? input.endLine : undefined
           })
-        case 'text_stats':
-          return await this.textStats(projectId, input)
-        case 'text_compare':
-          return this.textCompare(input)
+        case 'check_prose':
+          return await this.checkProse(projectId, input)
         case 'write':
           return await this.writePath(projectId, input)
         case 'edit':
@@ -321,7 +313,7 @@ export class AgentToolRuntime {
     return this.readChapter(projectId, parsed.id)
   }
 
-  private async textStats(
+  private async checkProse(
     projectId: string,
     input: Record<string, unknown>
   ): Promise<AgentToolResult> {
@@ -330,135 +322,31 @@ export class AgentToolRuntime {
     if (Boolean(pathRaw) === hasContent) {
       return {
         ok: false,
-        summary: 'text_stats 需要在 path 与 content 中二选一',
+        summary: 'check_prose 需要在 path 与 content 中二选一',
         error: 'invalid_source'
       }
     }
-
     let content: string
-    let source: Record<string, unknown>
+    let title: string | undefined
     if (pathRaw) {
       const parsed = parseGraphPath(pathRaw)
       if (parsed.kind !== 'item' || parsed.type !== 'chapter') {
         return {
           ok: false,
-          summary: 'text_stats 的 path 必须是 chapters/{id}',
+          summary: 'check_prose 的 path 必须是 chapters/{id}',
           error: 'invalid_path'
         }
       }
       const chapter = await this.projects.getChapter(projectId, parsed.id)
       content = chapter.content || ''
-      source = {
-        type: 'chapter',
-        path: `chapters/${chapter.id}`,
-        title: chapter.title,
-        status: chapter.status,
-        updatedAt: chapter.updatedAt
-      }
+      title = chapter.title
     } else {
       content = input.content as string
-      source = { type: 'content' }
     }
-
-    const profile =
-      input.profile === 'basic' || input.profile === 'story-humanizer'
-        ? (input.profile as TextStatsProfile)
-        : undefined
-    const dialogueExpectation =
-      input.dialogueExpectation === 'some' || input.dialogueExpectation === 'driving'
-        ? (input.dialogueExpectation as DialogueExpectation)
-        : 'none'
-    const referenceContents = Array.isArray(input.referenceContents)
-      ? input.referenceContents.filter((text): text is string => typeof text === 'string')
-      : []
-    const referencePaths = Array.isArray(input.referencePaths)
-      ? input.referencePaths
-          .filter((path): path is string => typeof path === 'string' && path.trim().length > 0)
-          .map((path) => path.trim())
-      : []
-    if (referenceContents.length + referencePaths.length > MAX_REFERENCE_COUNT) {
-      return {
-        ok: false,
-        summary: '参考样本最多支持 20 篇（referencePaths 与 referenceContents 合计）',
-        error: 'too_many_references'
-      }
-    }
-
-    const referenceTexts = [...referenceContents]
-    const referenceLabels = referenceContents.map((_text, index) => `referenceContents[${index + 1}]`)
-    if (referenceTexts.reduce((total, text) => total + text.length, 0) > MAX_REFERENCE_CHARS) {
-      return {
-        ok: false,
-        summary: '参考样本总长度不能超过 500000 个字符',
-        error: 'references_too_large'
-      }
-    }
-
-    const options: TextStatsOptions = {
-      terms: Array.isArray(input.terms)
-        ? input.terms.filter((term): term is string => typeof term === 'string')
-        : undefined,
-      includeContext: typeof input.includeContext === 'boolean' ? input.includeContext : undefined,
-      includeParagraphTermCounts:
-        typeof input.includeParagraphTermCounts === 'boolean'
-          ? input.includeParagraphTermCounts
-          : undefined,
-      maxMatches: typeof input.maxMatches === 'number' ? input.maxMatches : undefined,
-      contextChars: typeof input.contextChars === 'number' ? input.contextChars : undefined,
-      segmentCount: typeof input.segmentCount === 'number' ? input.segmentCount : undefined,
-      profile,
-      dialogueExpectation,
-      referenceTexts: referenceTexts.length ? referenceTexts : undefined,
-      referenceLabels: referenceLabels.length ? referenceLabels : undefined
-    }
-    if (referencePaths.length) {
-      for (const referencePath of referencePaths) {
-        const parsedReference = parseGraphPath(referencePath)
-        if (parsedReference.kind !== 'item' || parsedReference.type !== 'chapter') {
-          return { ok: false, summary: `参考路径必须是 chapters/{id}: ${referencePath}`, error: 'invalid_reference_path' }
-        }
-        const chapter = await this.projects.getChapter(projectId, parsedReference.id)
-        const chapterContent = chapter.content || ''
-        if (referenceTexts.reduce((total, text) => total + text.length, 0) + chapterContent.length > MAX_REFERENCE_CHARS) {
-          return {
-            ok: false,
-            summary: '参考样本总长度不能超过 500000 个字符',
-            error: 'references_too_large'
-          }
-        }
-        referenceTexts.push(chapterContent)
-        referenceLabels.push(`chapters/${chapter.id}${chapter.title ? `（${chapter.title}）` : ''}`)
-      }
-      options.referenceTexts = referenceTexts
-      options.referenceLabels = referenceLabels
-    }
-    const report = analyzeText(content, options)
-    const sourceWithHash = { ...source, sourceHash: report.sourceHash }
+    const report = checkProse(content)
     return {
       ok: true,
-      summary: `已统计${pathRaw ? `文章「${String(source.title || '未命名文章')}」` : '传入文本'} · ${report.summary.visibleCharCount} 字 · ${report.summary.paragraphCount} 段`,
-      data: {
-        source: sourceWithHash,
-        ...report
-      }
-    }
-  }
-
-  private textCompare(input: Record<string, unknown>): AgentToolResult {
-    if (typeof input.before !== 'string' || typeof input.after !== 'string') {
-      return {
-        ok: false,
-        summary: 'text_compare 需要 before 与 after 两段文本',
-        error: 'invalid_source'
-      }
-    }
-    const terms = Array.isArray(input.terms)
-      ? input.terms.filter((term): term is string => typeof term === 'string')
-      : []
-    const report = compareText(input.before, input.after, terms)
-    return {
-      ok: true,
-      summary: `已比较修改前后文本 · 字数 ${report.before.visibleCharCount} → ${report.after.visibleCharCount} · ${report.findings.length} 项复核提示`,
+      summary: `已检查${pathRaw ? `文章「${String(title || '未命名文章')}」` : '传入文本'} · ${report.hanCount} 字 · ${report.failures.length} 项硬性违规 · ${report.warnings.length} 项需人工判断`,
       data: report
     }
   }
@@ -1565,3 +1453,4 @@ export class AgentToolRuntime {
     return { ok: true, summary: `节点 ${items.length} 项`, data: items }
   }
 }
+

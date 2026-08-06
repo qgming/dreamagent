@@ -83,37 +83,10 @@ const readParams = Type.Object({
   endLine: Type.Optional(Type.Number({ description: '文章正文结束行，从 1 开始' }))
 })
 
-const textStatsParams = Type.Object({
-  path: Type.Optional(Type.String({ description: '文章路径，如 chapters/{id}' })),
-  content: Type.Optional(Type.String({ description: '直接分析的纯文本，与 path 二选一' })),
-  terms: Type.Optional(Type.Array(Type.String({ description: '要查询的字词或短语' }))),
-  profile: Type.Optional(
-    Type.Union([Type.Literal('basic'), Type.Literal('story-humanizer')])
-  ),
-  dialogueExpectation: Type.Optional(
-    Type.Union([
-      Type.Literal('none'),
-      Type.Literal('some'),
-      Type.Literal('driving')
-    ], {
-      description: 'none=不要求对话；some=只要求出现对话；driving=低于 10% 时提示复核'
-    })
-  ),
-  includeContext: Type.Optional(Type.Boolean()),
-  includeParagraphTermCounts: Type.Optional(Type.Boolean()),
-  maxMatches: Type.Optional(Type.Number()),
-  contextChars: Type.Optional(Type.Number()),
-  segmentCount: Type.Optional(Type.Number()),
-  referencePaths: Type.Optional(Type.Array(Type.String({ description: '项目内参考文章路径；与 referenceContents 合计最多 20 篇' }))),
-  referenceContents: Type.Optional(Type.Array(Type.String({ description: '直接传入的参考正文；与 referencePaths 合计最多 20 篇，总长度最多 500000 字符' })))
+const checkProseParams = Type.Object({
+  content: Type.Optional(Type.String({ description: '直接传入要检查的正文纯文本，与 path 二选一' })),
+  path: Type.Optional(Type.String({ description: '文章路径，如 chapters/{id}，与 content 二选一' }))
 })
-
-const textCompareParams = Type.Object({
-  before: Type.String({ description: '修改前正文' }),
-  after: Type.String({ description: '修改后正文' }),
-  terms: Type.Optional(Type.Array(Type.String({ description: '需要保护的人物、地点或专有名词' })))
-})
-
 const writeParams = Type.Object({
   path: Type.Optional(
     Type.String({ description: '有则全量覆盖该对象，如 beats/{id}' })
@@ -234,24 +207,14 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
         runRuntime(ctx, 'read', { ...(params as Static<typeof readParams>) })
     },
     {
-      name: 'text_stats',
-      label: 'text_stats',
+      name: 'check_prose',
+      label: 'check_prose',
       description:
-        '统计文章或传入文本。支持查询词语、重复模式、句段分布、作者参考样本比较，以及 story-humanizer 结构指标。path 与 content 二选一。',
-      parameters: textStatsParams,
-      executionMode: 'parallel',
-        execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'text_stats', { ...(params as Static<typeof textStatsParams>) })
-    },
-    {
-      name: 'text_compare',
-      label: 'text_compare',
-      description:
-        '比较修改前后文本的数字、受保护词、对白、句段和字数变化，作为编辑后的保真复核。',
-      parameters: textCompareParams,
+        '检查中文成稿的硬禁令与模型化形状（沿用 human-writing 技能的检查规则）：禁用标点、翻案句、黑话、模型路标、抒情词、名词化、同构排比、连词密度、句长变异、长前置、借喻簇等。只报警不自动改文。content 与 path 二选一。',
+      parameters: checkProseParams,
       executionMode: 'parallel',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>
-        runRuntime(ctx, 'text_compare', { ...(params as Static<typeof textCompareParams>) })
+        runRuntime(ctx, 'check_prose', { ...(params as Static<typeof checkProseParams>) })
     },
     {
       name: 'write',
@@ -293,8 +256,8 @@ export const DREAM_AGENT_BASE_PROMPT = `你是「造梦师」的创作助手，�
 2. 不要编造未读取的设定；顺着 read 返回的出入链继续深入。
 3. 创建：write({ type:"entity", name, content }) / write({ type:"beat", title, content }) / write({ type:"chapter", title, content, sourceBeatIds, entityRefs })。
 4. 项目资料：read({ path:"project" })；write({ path:"project", title?, summary? }) 可改项目名称或梗概；局部修改梗概用 edit({ path:"project", edits:[{oldText,newText}] })。
-5. 对象覆盖：write({ path:"beats/{id}", content|title|status })；局部改用 edit({ path, edits:[{oldText,newText}] })。统计后的文章优先使用 text_stats + edit.lineEdits/paragraphEdits，并提供 expectedText 与 expectedSourceHash；有作者参考章节时用 text_stats 的 referencePaths/referenceContents 做风格比较。
-6. 文章修改后用 text_compare({ before, after, terms }) 检查数字、人物/地点名和对白变化；它只提供保真提示，不能替代人工语义判断。
+5. 对象覆盖：write({ path:"beats/{id}", content|title|status })；局部改用 edit({ path, edits:[{oldText,newText}] })。文章修改后可用 check_prose({ content|path }) 检查硬禁令与模型化形状；局部修改用 edit.lineEdits/paragraphEdits，并提供 expectedText 与 expectedSourceHash。
+6. 文章修改后用 check_prose 复核，直到禁用项清零；它只提供规则提示，语义判断仍需人工确认。
 7. 删除：delete({ path:"entities/{id}" })。
 8. 用中文回复用户；工具按需调用。
 9. 回复可用 Markdown。
@@ -330,3 +293,5 @@ export const DREAM_AGENT_BASE_PROMPT = `你是「造梦师」的创作助手，�
 - 文章与节点分离：成稿进 chapters，不回写 beat.content。
 - 删除不可恢复，执行前确认用户意图。
 `
+
+

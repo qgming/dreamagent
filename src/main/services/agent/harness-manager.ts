@@ -235,7 +235,7 @@ export class HarnessManager {
       new InMemorySessionRepo().create()
     ])
 
-    const auditToolNames = new Set(['list', 'read', 'text_stats'])
+    const auditToolNames = new Set(['list', 'read'])
     const tools = buildDreamAgentTools().filter((tool) => auditToolNames.has(tool.name))
     const toolContext: DreamToolContext = {
       projectId,
@@ -519,3 +519,4 @@ export class HarnessManager {
     }
   }
 }
+

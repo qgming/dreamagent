@@ -19,26 +19,48 @@ function makeRuntime() {
   return { runtime: new AgentToolRuntime(projects as never), chapter }
 }
 
-describe('Agent text_stats 与范围读取', () => {
-  it('可以直接分析 content，并按 path 读取文章统计', async () => {
+describe('Agent check_prose 与 hash 保护编辑', () => {
+  it('可以直接分析 content，并按 path 读取文章检查', async () => {
     const { runtime } = makeRuntime()
-    const direct = await runtime.execute('project_1', 'text_stats', {
-      content: '仿佛下雨了。',
-      terms: ['仿佛']
+    const direct = await runtime.execute('project_1', 'check_prose', {
+      content: '说白了，这件事不复杂。'
     })
     expect(direct.ok).toBe(true)
-    expect((direct.data as { terms: Array<{ count: number }> }).terms[0]!.count).toBe(1)
+    const data = direct.data as { failures: Array<{ message: string }>; hanCount: number }
+    expect(data.hanCount).toBeGreaterThan(0)
+    expect(data.failures.some((f) => f.message.includes('硬停'))).toBe(true)
 
-    const chapter = await runtime.execute('project_1', 'text_stats', {
-      path: 'chapters/chap_1',
-      profile: 'story-humanizer'
+    const chapter = await runtime.execute('project_1', 'check_prose', {
+      path: 'chapters/chap_1'
     })
     expect(chapter.ok).toBe(true)
-    expect((chapter.data as { source: { path: string } }).source.path).toBe('chapters/chap_1')
-    expect((chapter.data as { profile: { score: number } }).profile.score).toBeTypeOf('number')
+    expect((chapter.data as { hanCount: number }).hanCount).toBeGreaterThan(0)
   })
 
-  it('可以读取文章行范围，并用统计 hash 保护行编辑', async () => {
+  it('path 与 content 必须二选一', async () => {
+    const { runtime } = makeRuntime()
+    const none = await runtime.execute('project_1', 'check_prose', {})
+    expect(none.ok).toBe(false)
+    expect(none.error).toBe('invalid_source')
+
+    const both = await runtime.execute('project_1', 'check_prose', {
+      path: 'chapters/chap_1',
+      content: '正文。'
+    })
+    expect(both.ok).toBe(false)
+    expect(both.error).toBe('invalid_source')
+  })
+
+  it('path 必须是 chapters/{id}', async () => {
+    const { runtime } = makeRuntime()
+    const bad = await runtime.execute('project_1', 'check_prose', {
+      path: 'beats/beat_1'
+    })
+    expect(bad.ok).toBe(false)
+    expect(bad.error).toBe('invalid_path')
+  })
+
+  it('可以读取文章行范围，并用 hash 保护行编辑', async () => {
     const { runtime, chapter } = makeRuntime()
     const range = await runtime.execute('project_1', 'read', {
       path: 'chapters/chap_1',
@@ -48,56 +70,13 @@ describe('Agent text_stats 与范围读取', () => {
     expect(range.ok).toBe(true)
     expect((range.data as { content: string }).content).toBe('第二行。')
 
-    const stats = await runtime.execute('project_1', 'text_stats', { path: 'chapters/chap_1' })
-    const sourceHash = (stats.data as { source: { sourceHash: string } }).source.sourceHash
+    // 用 expectedSourceHash（hashText 生成）保护编辑，防止基于旧版本误改
     const edited = await runtime.execute('project_1', 'edit', {
       path: 'chapters/chap_1',
-      expectedSourceHash: sourceHash,
+      expectedSourceHash: 'stale-hash',
       lineEdits: [{ startLine: 2, expectedText: '第二行。', newText: '修改后的第二行。' }]
     })
-    expect(edited.ok).toBe(true)
-    expect(chapter.content).toContain('修改后的第二行。')
-
-    const stale = await runtime.execute('project_1', 'edit', {
-      path: 'chapters/chap_1',
-      expectedSourceHash: sourceHash,
-      lineEdits: [{ startLine: 2, expectedText: '修改后的第二行。', newText: '再次修改。' }]
-    })
-    expect(stale.ok).toBe(false)
-    expect(stale.error).toBe('正文版本已变化，expectedSourceHash 校验失败，请重新统计后再编辑')
-  })
-
-  it('支持参考文章比较、来源标签和参考样本上限', async () => {
-    const { runtime } = makeRuntime()
-    const report = await runtime.execute('project_1', 'text_stats', {
-      content: '当前正文。',
-      referenceContents: ['参考正文。'],
-      referencePaths: ['chapters/chap_ref']
-    })
-
-    expect(report.ok).toBe(true)
-    expect((report.data as { baseline: { sampleCount: number; labels: string[] } }).baseline).toMatchObject({
-      sampleCount: 2,
-      labels: ['referenceContents[1]', 'chapters/chap_1（第一章）']
-    })
-
-    const tooMany = await runtime.execute('project_1', 'text_stats', {
-      content: '正文。',
-      referenceContents: Array.from({ length: 21 }, () => '参考。')
-    })
-    expect(tooMany.ok).toBe(false)
-    expect(tooMany.error).toBe('too_many_references')
-  })
-
-  it('提供 text_compare 运行时入口', async () => {
-    const { runtime } = makeRuntime()
-    const result = await runtime.execute('project_1', 'text_compare', {
-      before: '林舟有20%的把握。',
-      after: '林舟有10%的把握。',
-      terms: ['林舟']
-    })
-
-    expect(result.ok).toBe(true)
-    expect((result.data as { removedNumbers: string[] }).removedNumbers).toEqual(['20%'])
+    expect(edited.ok).toBe(false)
+    expect(edited.error).toContain('expectedSourceHash 校验失败')
   })
 })

@@ -11,8 +11,7 @@ export type AgentToolName =
   | 'write'
   | 'edit'
   | 'delete'
-  | 'text_stats'
-  | 'text_compare'
+  | 'check_prose'
   | 'web_search'
   | 'web_fetch'
   | 'todo'
@@ -206,58 +205,17 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     }
   },
   {
-    name: 'text_stats',
+    name: 'check_prose',
     description:
-      '统计文章或直接传入的文本。支持字词/短语计数、行号、段号、列号、上下文、每段字数、重复模式、节奏分布、作者参考样本比较，以及 story-humanizer 结构指标。path 与 content 二选一。',
+      '检查中文成稿的硬禁令与模型化形状（沿用 human-writing 技能的检查规则）。检查禁用标点、翻案句、黑话、模型路标、抒情词、名词化句式、同构排比、连词密度、句长变异、长前置成分、借喻簇等。只报警，不自动改文。content 与 path 二选一。',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '文章路径，如 chapters/{id}' },
-        content: { type: 'string', description: '直接分析的纯文本，与 path 二选一' },
-        terms: { type: 'array', items: { type: 'string' }, description: '要查询的字词或短语' },
-        profile: { type: 'string', enum: ['basic', 'story-humanizer'] },
-        dialogueExpectation: {
-          type: 'string',
-          enum: ['none', 'some', 'driving'],
-          description: 'none=不要求；some=只要求出现对话；driving=低于 10% 时软提示'
-        },
-        includeContext: { type: 'boolean' },
-        includeParagraphTermCounts: { type: 'boolean' },
-        maxMatches: { type: 'number' },
-        contextChars: { type: 'number' },
-        segmentCount: { type: 'number' },
-        referencePaths: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '可选：项目内参考文章路径数组，用于作者风格比较；与 referenceContents 合计最多 20 篇'
-        },
-        referenceContents: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '可选：直接传入的参考正文数组，用于作者风格比较；与 referencePaths 合计最多 20 篇，总长度最多 500000 字符'
-        }
+        content: { type: 'string', description: '直接传入要检查的正文纯文本，与 path 二选一' },
+        path: { type: 'string', description: '文章路径，如 chapters/{id}，与 content 二选一' }
       }
     }
-  },
-  {
-    name: 'text_compare',
-    description:
-      '比较修改前后的两段文本。检查字数、句子、数字、受保护词和对白变化，返回可解释的保真复核提示；不能替代人工语义判断。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        before: { type: 'string', description: '修改前的正文' },
-        after: { type: 'string', description: '修改后的正文' },
-        terms: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '可选：人物、地点、专有名词等需要保护的词语'
-        }
-      },
-      required: ['before', 'after']
-    }
-  },
-  {
+  },  {
     name: 'write',
     description:
       '创建或全量覆盖。项目名称/梗概：write({ path:"project", title?, summary? })，至少传一项。创建：type=beat|entity|chapter|folder。folder 只需 name（可选 parentId 建子夹），如 write({ type:"folder", name:"卷一" })。chapter 可带 folderId 进夹。覆盖：path=beats/{id}|folders/{id} 等。beat/entity content 可含双链；chapter content 必须纯正文。',
@@ -423,3 +381,5 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     }
   }
 ]
+
+
