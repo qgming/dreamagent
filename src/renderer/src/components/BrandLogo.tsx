@@ -1,4 +1,4 @@
-import brandStarUrl from '@/assets/brand/dreamagent-star.png'
+import brandStarUrl from '@/assets/brand/dreamagent.png'
 import { cn } from '@/lib/utils'
 
 interface BrandStarProps {
@@ -28,9 +28,6 @@ export function BrandLogo({ className }: { className?: string }): React.JSX.Elem
       <BrandStar className="size-4" decorative />
       <div className="min-w-0 leading-none">
         <div className="truncate text-base font-semibold text-foreground">造梦师</div>
-        <div className="mt-1 truncate text-[10px] font-medium uppercase text-muted-foreground">
-          Dream Agent
-        </div>
       </div>
     </div>
   )
