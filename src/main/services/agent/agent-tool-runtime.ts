@@ -346,7 +346,7 @@ export class AgentToolRuntime {
     const report = checkProse(content)
     return {
       ok: true,
-      summary: `已检查${pathRaw ? `文章「${String(title || '未命名文章')}」` : '传入文本'} · ${report.hanCount} 字 · ${report.failures.length} 项硬性违规 · ${report.warnings.length} 项需人工判断`,
+      summary: `已检查${pathRaw ? `文章「${String(title || '未命名文章')}」` : '传入文本'} · 总 ${report.totalCount} 字（汉字 ${report.hanCount}）· ${report.failures.length} 项硬性违规 · ${report.warnings.length} 项需人工判断`,
       data: report
     }
   }

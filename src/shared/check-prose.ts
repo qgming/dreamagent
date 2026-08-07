@@ -11,6 +11,8 @@ export interface CheckProseIssue {
 }
 
 export interface CheckProseCounts {
+  /** 总字数（非空白字符，含标点、数字、英文与汉字） */
+  totalCount: number
   hanCount: number
   pivots: number
   semanticPivots: number
@@ -29,6 +31,8 @@ export interface CheckProseCounts {
 export interface CheckProseResult {
   /** 是否可直接交稿（无硬性违规） */
   pass: boolean
+  /** 总字数（非空白字符，含标点、数字、英文与汉字） */
+  totalCount: number
   hanCount: number
   failures: CheckProseIssue[]
   warnings: CheckProseIssue[]
@@ -214,6 +218,11 @@ const ROAD_STRIP_CHARS = /[。！？!? \n]/gu
 
 export function hanCount(text: string): number {
   return (text.match(/[\u4e00-\u9fff]/gu) || []).length
+}
+
+/** 总字数：非空白字符数（含标点、数字、英文与汉字），与检查范围一致。 */
+export function totalCharCount(text: string): number {
+  return text.replace(/\s/gu, '').length
 }
 
 function lineNumber(text: string, position: number): number {
@@ -439,12 +448,14 @@ function uniquePreservingOrder(values: string[]): string[] {
 export function checkProse(content: string): CheckProseResult {
   const prose = maskNonProse(content)
   const totalHan = hanCount(prose)
+  const totalChars = totalCharCount(prose)
   const failures: CheckProseIssue[] = []
   const warnings: CheckProseIssue[] = []
 
   if (totalHan === 0) {
     return {
       pass: true,
+      totalCount: 0,
       hanCount: 0,
       failures: [{ severity: 'failure', line: 1, message: '没有检测到汉字。' }],
       warnings: [],
@@ -704,6 +715,7 @@ export function checkProse(content: string): CheckProseResult {
   }
 
   const countsResult: CheckProseCounts = {
+    totalCount: totalChars,
     hanCount: totalHan,
     pivots: pivots.length,
     semanticPivots: semanticPivots.length,
@@ -721,6 +733,7 @@ export function checkProse(content: string): CheckProseResult {
 
   return {
     pass: failures.length === 0,
+    totalCount: totalChars,
     hanCount: totalHan,
     failures,
     warnings,
@@ -730,6 +743,7 @@ export function checkProse(content: string): CheckProseResult {
 
 function emptyCounts(): CheckProseCounts {
   return {
+    totalCount: 0,
     hanCount: 0,
     pivots: 0,
     semanticPivots: 0,

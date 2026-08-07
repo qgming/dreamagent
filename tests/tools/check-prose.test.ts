@@ -1,10 +1,25 @@
 import { describe, it, expect } from 'vitest'
-import { checkProse, hanCount } from '../../src/shared/check-prose'
+import { checkProse, hanCount, totalCharCount } from '../../src/shared/check-prose'
 
 describe('checkProse 硬禁令检查', () => {
   it('统计汉字数', () => {
     expect(hanCount('你好世界')).toBe(4)
     expect(hanCount('abc 123')).toBe(0)
+  })
+
+  it('统计总字数（非空白字符）', () => {
+    expect(totalCharCount('你好世界')).toBe(4)
+    expect(totalCharCount('你好，世界。abc 123')).toBe(12)
+    expect(totalCharCount('  你好 世界\n')).toBe(4)
+    expect(totalCharCount('')).toBe(0)
+  })
+
+  it('checkProse 返回总字数与汉字数', () => {
+    const result = checkProse('你好世界，abc 123。')
+    expect(result.totalCount).toBeGreaterThan(result.hanCount)
+    expect(result.totalCount).toBe(12)
+    expect(result.hanCount).toBe(4)
+    expect(result.counts.totalCount).toBe(12)
   })
 
   it('识别禁用冒号（非引语）', () => {
@@ -79,6 +94,8 @@ describe('checkProse 硬禁令检查', () => {
   it('空文本返回无汉字', () => {
     const result = checkProse('')
     expect(result.hanCount).toBe(0)
+    expect(result.totalCount).toBe(0)
+    expect(result.counts.totalCount).toBe(0)
   })
 })
 
