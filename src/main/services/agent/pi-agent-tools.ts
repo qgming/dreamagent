@@ -92,12 +92,22 @@ const writeParams = Type.Object({
     Type.String({ description: '有则全量覆盖该对象，如 beats/{id}' })
   ),
   type: Type.Optional(
-    Type.Union([Type.Literal('beat'), Type.Literal('entity'), Type.Literal('chapter')], {
-      description: '创建时必填'
-    })
+    Type.Union(
+      [
+        Type.Literal('beat'),
+        Type.Literal('entity'),
+        Type.Literal('chapter'),
+        Type.Literal('folder')
+      ],
+      {
+        description: '创建时必填；folder=文章文件夹'
+      }
+    )
   ),
   title: Type.Optional(Type.String()),
-  name: Type.Optional(Type.String({ description: '实体名称' })),
+  name: Type.Optional(
+    Type.String({ description: '实体名称，或文件夹名称（type=folder 时用 name 或 title）' })
+  ),
   content: Type.Optional(
     Type.String({
       description:
@@ -220,7 +230,7 @@ export function buildDreamAgentTools(): AnyHarnessTool[] {
       name: 'write',
       label: 'write',
       description:
-        '创建或全量覆盖。项目名称/梗概用 write({ path:"project", title?, summary? })；其他对象创建用 type+title/name+content，覆盖用 path。beat/entity 双链自动同步 refs；chapter 禁止双链。返回完整对象。',
+        '创建或全量覆盖。项目名称/梗概用 write({ path:"project", title?, summary? })；其他对象创建用 type+title/name+content，覆盖用 path。folder 用 write({ type:"folder", name, parentId? })；chapter 可带 folderId 进夹。beat/entity 双链自动同步 refs；chapter 禁止双链。返回完整对象。',
       parameters: writeParams,
       executionMode: 'sequential',
       execute: async (_id, params, _signal, _onUpdate, ctx) =>

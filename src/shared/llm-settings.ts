@@ -69,6 +69,9 @@ export interface LlmProvidersPublic {
   providers: LlmProviderPublic[]
   defaultProviderId: string
   defaultModelId: string
+  /** 多模态桥接：主模型不支持图片时用它理解图片 */
+  multimodalProviderId: string
+  multimodalModelId: string
   defaultThinkingLevel: LlmThinkingLevel
 }
 
@@ -105,6 +108,9 @@ export interface LlmStoredSettings {
   providers: LlmProviderStored[]
   defaultProviderId: string
   defaultModelId: string
+  /** 多模态桥接：主模型不支持图片时用它理解图片 */
+  multimodalProviderId: string
+  multimodalModelId: string
   defaultThinkingLevel: LlmThinkingLevel
 }
 
@@ -193,7 +199,16 @@ export const DEFAULT_LLM_PROVIDERS_PUBLIC: LlmProvidersPublic = {
   providers: [],
   defaultProviderId: '',
   defaultModelId: '',
+  multimodalProviderId: '',
+  multimodalModelId: '',
   defaultThinkingLevel: DEFAULT_THINKING_LEVEL
+}
+
+/** 模型输入是否支持图片（多模态视觉） */
+export function modelSupportsImageInput(
+  modalities?: readonly LlmModelModality[] | null
+): boolean {
+  return Array.isArray(modalities) && modalities.includes('image')
 }
 
 /** 编码选择器 key */

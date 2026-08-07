@@ -51,7 +51,7 @@ import type {
   LlmRemoteModelInfo,
   LlmThinkingLevel
 } from '@shared/llm-settings'
-import { encodeModelKey } from '@shared/llm-settings'
+import { encodeModelKey, modelSupportsImageInput } from '@shared/llm-settings'
 
 const API_TYPE_OPTIONS: Array<{ value: LlmProviderApiType; label: string }> = [
   { value: 'openai-completions', label: 'OpenAI Completions' },
@@ -197,6 +197,30 @@ export function ModelPanel(): React.JSX.Element {
     return list
   }, [cfg])
 
+  
+  /** 仅支持图片输入的模型，供多模态桥接选择 */
+  const multimodalOptions = useMemo(() => {
+    if (!cfg) return []
+    const list: Array<{ value: string; label: string }> = [
+      { value: '', label: '未设置' }
+    ]
+    for (const p of cfg.providers) {
+      for (const m of p.models) {
+        if (!modelSupportsImageInput(m.inputModalities)) continue
+        list.push({
+          value: encodeModelKey(p.id, m.id),
+          label: `${p.name} · ${m.name || m.id}`
+        })
+      }
+    }
+    return list
+  }, [cfg])
+
+  const currentMultimodal =
+    cfg?.multimodalProviderId && cfg.multimodalModelId
+      ? encodeModelKey(cfg.multimodalProviderId, cfg.multimodalModelId)
+      : ''
+
   const currentDefault =
     cfg?.defaultProviderId && cfg.defaultModelId
       ? encodeModelKey(cfg.defaultProviderId, cfg.defaultModelId)
@@ -319,6 +343,45 @@ export function ModelPanel(): React.JSX.Element {
             ) : (
               <span className="text-xs text-muted-foreground">
                 {defaultModel ? '不支持推理' : '—'}
+              </span>
+            )
+          }
+        />
+        <SettingRow
+          title="多模态桥接"
+          description="主模型不支持图片时，后台用此模型理解图片后再转发。"
+          control={
+            multimodalOptions.length > 1 ? (
+              <SettingDropdown
+                value={currentMultimodal}
+                placeholder="未设置"
+                options={multimodalOptions}
+                onChange={(value) => {
+                  if (!value) {
+                    void window.api.settings
+                      .setMultimodalModel('', '')
+                      .then(setCfg)
+                      .catch((e) =>
+                        setError(e instanceof Error ? e.message : String(e))
+                      )
+                    return
+                  }
+                  const idx = value.indexOf('::')
+                  if (idx <= 0) return
+                  void window.api.settings
+                    .setMultimodalModel(
+                      value.slice(0, idx),
+                      value.slice(idx + 2)
+                    )
+                    .then(setCfg)
+                    .catch((e) =>
+                      setError(e instanceof Error ? e.message : String(e))
+                    )
+                }}
+              />
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                请先添加支持图片的模型
               </span>
             )
           }

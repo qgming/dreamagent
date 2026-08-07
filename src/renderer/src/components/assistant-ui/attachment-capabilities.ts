@@ -58,10 +58,28 @@ export interface ModelAttachmentCapabilities {
   accept: string
 }
 
+export interface AttachmentCapabilityOptions {
+  /**
+   * 已配置多模态桥接时，即使主模型不支持 image，
+   * 也允许贴图（由主进程后台桥接处理）。
+   */
+  hasMultimodalBridge?: boolean
+}
+
 export function getModelAttachmentCapabilities(
-  model: Pick<LlmSelectableModel, 'attachment' | 'inputModalities'> | null | undefined
+  model: Pick<LlmSelectableModel, 'attachment' | 'inputModalities'> | null | undefined,
+  options?: AttachmentCapabilityOptions
 ): ModelAttachmentCapabilities {
+  // 主模型无附件能力时：若有视觉桥接仍可允许图片
   if (!model?.attachment) {
+    if (options?.hasMultimodalBridge) {
+      return {
+        canAttach: true,
+        canAttachText: false,
+        canAttachImage: true,
+        accept: 'image/*'
+      }
+    }
     return {
       canAttach: false,
       canAttachText: false,
@@ -74,7 +92,8 @@ export function getModelAttachmentCapabilities(
     model.inputModalities.length > 0 ? model.inputModalities : ['text']
   )
   const canAttachText = modalities.has('text')
-  const canAttachImage = modalities.has('image')
+  const canAttachImage =
+    modalities.has('image') || Boolean(options?.hasMultimodalBridge)
   const accepts = [
     canAttachText ? TEXT_ATTACHMENT_ACCEPT : '',
     canAttachImage ? 'image/*' : ''
@@ -89,9 +108,10 @@ export function getModelAttachmentCapabilities(
 }
 
 export function createAttachmentAdapter(
-  model: Pick<LlmSelectableModel, 'attachment' | 'inputModalities'> | null | undefined
+  model: Pick<LlmSelectableModel, 'attachment' | 'inputModalities'> | null | undefined,
+  options?: AttachmentCapabilityOptions
 ): AttachmentAdapter | undefined {
-  const capabilities = getModelAttachmentCapabilities(model)
+  const capabilities = getModelAttachmentCapabilities(model, options)
   if (!capabilities.canAttach) return undefined
 
   const adapters: AttachmentAdapter[] = []

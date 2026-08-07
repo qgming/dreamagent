@@ -23,7 +23,8 @@ import type {
 import {
   DEFAULT_THINKING_LEVEL,
   encodeModelKey,
-  LLM_THINKING_LEVELS
+  LLM_THINKING_LEVELS,
+  modelSupportsImageInput
 } from '../../../shared/llm-settings'
 import { ensureDir, pathExists, readJsonFile, writeJsonAtomic } from '../utils/fs-utils'
 import { cacheModelLogo, resolveModelInfo } from './model-catalog'
@@ -204,6 +205,8 @@ export class LlmSettingsService {
       providers: [provider],
       defaultProviderId: providerId,
       defaultModelId: modelId,
+      multimodalProviderId: '',
+      multimodalModelId: '',
       defaultThinkingLevel: DEFAULT_THINKING_LEVEL
     }
   }
@@ -214,8 +217,33 @@ export class LlmSettingsService {
       providers: [],
       defaultProviderId: '',
       defaultModelId: '',
+      multimodalProviderId: '',
+      multimodalModelId: '',
       defaultThinkingLevel: DEFAULT_THINKING_LEVEL
     }
+  }
+
+  /**
+   * 校验多模态桥接模型仍存在且支持图片输入；否则清空。
+   */
+  private sanitizeMultimodalSelection(
+    providers: LlmProviderStored[],
+    providerId: string,
+    modelId: string
+  ): { multimodalProviderId: string; multimodalModelId: string } {
+    if (!providerId || !modelId) {
+      return { multimodalProviderId: '', multimodalModelId: '' }
+    }
+    const provider = providers.find((p) => p.id === providerId)
+    const model = provider?.models.find((m) => m.id === modelId)
+    if (!model) {
+      return { multimodalProviderId: '', multimodalModelId: '' }
+    }
+    const enriched = enrichModel(model)
+    if (!modelSupportsImageInput(enriched.inputModalities)) {
+      return { multimodalProviderId: '', multimodalModelId: '' }
+    }
+    return { multimodalProviderId: providerId, multimodalModelId: modelId }
   }
 
   private normalizeStored(raw: Record<string, unknown>): LlmStoredSettings {
@@ -255,11 +283,19 @@ export class LlmSettingsService {
         defaultModelId = defProv.models[0]?.id ?? ''
       }
 
+      const multimodal = this.sanitizeMultimodalSelection(
+        providers,
+        typeof raw.multimodalProviderId === 'string' ? raw.multimodalProviderId : '',
+        typeof raw.multimodalModelId === 'string' ? raw.multimodalModelId : ''
+      )
+
       return {
         version: 2,
         providers,
         defaultProviderId,
         defaultModelId,
+        multimodalProviderId: multimodal.multimodalProviderId,
+        multimodalModelId: multimodal.multimodalModelId,
         defaultThinkingLevel: normalizeThinkingLevel(raw.defaultThinkingLevel)
       }
     }
@@ -315,6 +351,8 @@ export class LlmSettingsService {
       providers,
       defaultProviderId: stored.defaultProviderId,
       defaultModelId: stored.defaultModelId,
+      multimodalProviderId: stored.multimodalProviderId,
+      multimodalModelId: stored.multimodalModelId,
       defaultThinkingLevel: stored.defaultThinkingLevel
     }
   }
@@ -402,11 +440,19 @@ export class LlmSettingsService {
       }
     }
 
+    const multimodal = this.sanitizeMultimodalSelection(
+      providers,
+      stored.multimodalProviderId,
+      stored.multimodalModelId
+    )
+
     const next: LlmStoredSettings = {
       ...stored,
       providers,
       defaultProviderId,
-      defaultModelId
+      defaultModelId,
+      multimodalProviderId: multimodal.multimodalProviderId,
+      multimodalModelId: multimodal.multimodalModelId
     }
     await this.save(next)
     return this.toPublic(next)
@@ -420,11 +466,19 @@ export class LlmSettingsService {
       defaultProviderId = providers[0]?.id ?? ''
       defaultModelId = providers[0]?.models[0]?.id ?? ''
     }
+    const multimodal = this.sanitizeMultimodalSelection(
+      providers,
+      stored.multimodalProviderId,
+      stored.multimodalModelId
+    )
+
     const next: LlmStoredSettings = {
       ...stored,
       providers,
       defaultProviderId,
-      defaultModelId
+      defaultModelId,
+      multimodalProviderId: multimodal.multimodalProviderId,
+      multimodalModelId: multimodal.multimodalModelId
     }
     await this.save(next)
     return this.toPublic(next)
@@ -455,6 +509,36 @@ export class LlmSettingsService {
       ...stored,
       defaultThinkingLevel: normalizeThinkingLevel(level)
     }
+    await this.save(next)
+    return this.toPublic(next)
+  }
+
+  /** 设置多模态桥接模型。传空值清空。 */
+  async setMultimodalModel(
+    providerId: string,
+    modelId: string
+  ): Promise<LlmProvidersPublic> {
+    const stored = await this.load()
+    const next: LlmStoredSettings = { ...stored }
+
+    if (!providerId || !modelId) {
+      next.multimodalProviderId = ''
+      next.multimodalModelId = ''
+    } else {
+      const provider = stored.providers.find((p) => p.id === providerId)
+      if (!provider) throw new Error(`供应商不存在: ${providerId}`)
+      const model = provider.models.find((m) => m.id === modelId)
+      if (!model) throw new Error(`模型不存在: ${modelId}`)
+      const enriched = enrichModel(model)
+      if (!modelSupportsImageInput(enriched.inputModalities)) {
+        throw new Error(
+          `模型 ${modelId} 不支持图片输入，不能作为多模态桥接`
+        )
+      }
+      next.multimodalProviderId = providerId
+      next.multimodalModelId = modelId
+    }
+
     await this.save(next)
     return this.toPublic(next)
   }

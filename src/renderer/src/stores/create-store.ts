@@ -75,6 +75,8 @@ interface CreateState {
   selectedModelKey: string | null
   thinkingLevel: LlmThinkingLevel
   selectableModels: LlmSelectableModel[]
+  /** 多模态桥接模型 key；空表示未设置 */
+  multimodalModelKey: string | null
   /** followUp 队列预览 */
   followUpCount: number
   followUpPreview: string | null
@@ -139,6 +141,7 @@ const initialState = {
   selectedModelKey: null as string | null,
   thinkingLevel: DEFAULT_THINKING_LEVEL as LlmThinkingLevel,
   selectableModels: [] as LlmSelectableModel[],
+  multimodalModelKey: null as string | null,
   followUpCount: 0,
   followUpPreview: null as string | null,
   retryMessage: null as string | null
@@ -860,8 +863,10 @@ export const useCreateStore = create<CreateState>((set, get) => ({
       const state = get()
       let selectedModelKey = state.selectedModelKey
       let thinkingLevel = state.thinkingLevel
+      let llmPublic: Awaited<ReturnType<typeof window.api.settings.getLlm>> | null = null
       try {
         const llm = await window.api.settings.getLlm()
+        llmPublic = llm
         // 无历史选择（新对话/首次进入）时，始终以设置里的默认模型为准
         const defaultKey =
           llm.defaultProviderId && llm.defaultModelId
@@ -896,7 +901,16 @@ export const useCreateStore = create<CreateState>((set, get) => ({
       } catch {
         // ignore
       }
-      set({ selectableModels: models, selectedModelKey, thinkingLevel })
+      const multimodalModelKey =
+        llmPublic?.multimodalProviderId && llmPublic.multimodalModelId
+          ? encodeModelKey(llmPublic.multimodalProviderId, llmPublic.multimodalModelId)
+          : null
+      set({
+        selectableModels: models,
+        selectedModelKey,
+        thinkingLevel,
+        multimodalModelKey
+      })
       // 刷新当前会话上下文展示的模型信息
       applySelectedModelToSessionUsage(get, set, selectedModelKey)
     } catch (error) {

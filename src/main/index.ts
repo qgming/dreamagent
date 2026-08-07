@@ -8,6 +8,7 @@ import { SessionTitleService } from './services/session/session-title-service'
 import { PiSessionService } from './services/session/pi-session-service'
 import { HarnessManager } from './services/agent/harness-manager'
 import { AgentRunner } from './services/agent/agent-runner'
+import { MultimodalBridgeService } from './services/llm/multimodal-bridge'
 import { SkillService } from './services/skill/skill-service'
 import { TodoService } from './services/todo/todo-service'
 import { registerProjectIpc } from './ipc/project-ipc'
@@ -173,11 +174,13 @@ app.whenReady().then(async () => {
     skillService,
     todoService
   )
+  const multimodalBridge = new MultimodalBridgeService(llmSettings, piModels)
   const agentRunner = new AgentRunner(
     projectService,
     sessionService,
     llmSettings,
-    harnessManager
+    harnessManager,
+    multimodalBridge
   )
 
   const legacyMigrator = new LegacyConversationMigrator(projectService, sessionService)

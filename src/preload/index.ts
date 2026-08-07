@@ -292,6 +292,11 @@ const settingsApi = {
     ipcRenderer.invoke('settings:setDefaultModel', providerId, modelId),
   setThinkingLevel: (level: LlmThinkingLevel): Promise<LlmProvidersPublic> =>
     ipcRenderer.invoke('settings:setThinkingLevel', level),
+  setMultimodalModel: (
+    providerId: string,
+    modelId: string
+  ): Promise<LlmProvidersPublic> =>
+    ipcRenderer.invoke('settings:setMultimodalModel', providerId, modelId),
   listSelectableModels: (): Promise<LlmSelectableModel[]> =>
     ipcRenderer.invoke('settings:listSelectableModels'),
   listRemoteModels: (input: {

@@ -78,6 +78,16 @@ export function registerSettingsIpc(
     })
   )
 
+  ipcMain.handle(
+    'settings:setMultimodalModel',
+    (_e, providerId: string, modelId: string) =>
+      handle(async () => {
+        const result = await llm.setMultimodalModel(providerId, modelId)
+        notify()
+        return result
+      })
+  )
+
   ipcMain.handle('settings:listSelectableModels', () =>
     handle(() => llm.listSelectableModels())
   )

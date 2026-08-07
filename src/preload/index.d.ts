@@ -211,6 +211,10 @@ export interface SettingsApi {
     modelId: string
   ) => Promise<LlmProvidersPublic>
   setThinkingLevel: (level: LlmThinkingLevel) => Promise<LlmProvidersPublic>
+  setMultimodalModel: (
+    providerId: string,
+    modelId: string
+  ) => Promise<LlmProvidersPublic>
   listSelectableModels: () => Promise<LlmSelectableModel[]>
   listRemoteModels: (input: {
     providerId?: string

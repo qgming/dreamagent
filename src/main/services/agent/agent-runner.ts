@@ -22,6 +22,7 @@ import type { ProjectSnapshot } from '../../../shared/project-types'
 import type { ProjectService } from '../project/project-service'
 import type { PiSessionService } from '../session/pi-session-service'
 import type { LlmSettingsService } from '../llm/llm-settings-service'
+import type { MultimodalBridgeService } from '../llm/multimodal-bridge'
 import type { GoalAuditHarness, HarnessManager, HarnessSelection } from './harness-manager'
 import type { AgentHarness } from '@earendil-works/pi-agent-core'
 import type { ImageContent } from '@earendil-works/pi-ai'
@@ -144,7 +145,8 @@ export class AgentRunner {
     private readonly projects: ProjectService,
     private readonly sessions: PiSessionService,
     private readonly llm: LlmSettingsService,
-    private readonly harnesses: HarnessManager
+    private readonly harnesses: HarnessManager,
+    private readonly multimodalBridge: MultimodalBridgeService
   ) {}
 
   private sessionKey(projectId: string, sessionId: string): string {
@@ -343,7 +345,25 @@ export class AgentRunner {
       input.sessionId,
       run.selection
     )
-    await harness.steer(text, { images: toImageContent(input.images) })
+
+    // 插话同样走视觉桥接（UI 仍展示原图）
+    let steerText = text
+    let steerImages = toImageContent(input.images)
+    if (steerImages?.length) {
+      const bridged = await this.multimodalBridge.prepare({
+        userText: text,
+        images: steerImages,
+        mainProviderId: run.selection?.providerId,
+        mainModelId: run.selection?.modelId
+      })
+      steerText = bridged.userText
+      steerImages = bridged.images
+    }
+
+    await harness.steer(
+      steerText,
+      steerImages?.length ? { images: steerImages } : undefined
+    )
     run.steerCount += 1
     this.emit({
       type: 'queue_update',
@@ -387,7 +407,25 @@ export class AgentRunner {
       input.sessionId,
       run.selection
     )
-    await harness.followUp(text, { images: toImageContent(input.images) })
+
+    // 排队消息同样走视觉桥接（UI 仍展示原图）
+    let followText = text
+    let followImages = toImageContent(input.images)
+    if (followImages?.length) {
+      const bridged = await this.multimodalBridge.prepare({
+        userText: text,
+        images: followImages,
+        mainProviderId: run.selection?.providerId,
+        mainModelId: run.selection?.modelId
+      })
+      followText = bridged.userText
+      followImages = bridged.images
+    }
+
+    await harness.followUp(
+      followText,
+      followImages?.length ? { images: followImages } : undefined
+    )
     run.followUpCount += 1
     run.followUpPreview = text.slice(0, 80)
     this.emit({
@@ -587,7 +625,7 @@ export class AgentRunner {
       this.emit({ type: 'turn_start', projectId, sessionId, runId })
     }
 
-    // 乐观用户消息（真实落盘由 harness.prompt 完成）
+    // 乐观用户消息（真实落盘由 harness.prompt 完成）——始终展示用户原文本与原图
     if (!options?.skipOptimisticUser) {
       const userMsg: UiChatMessage = {
         id: createId('msg'),
@@ -608,6 +646,20 @@ export class AgentRunner {
       })
     }
 
+    // 主模型不支持图片时，先由多模态桥接模型把图片转成文字描述
+    let resolvedImages = options?.images
+    let resolvedUserText = userText
+    if (options?.images?.length) {
+      const bridged = await this.multimodalBridge.prepare({
+        userText,
+        images: options.images,
+        mainProviderId: run.selection?.providerId,
+        mainModelId: run.selection?.modelId
+      })
+      resolvedUserText = bridged.userText
+      resolvedImages = bridged.images
+    }
+
     // 每次 getOrCreate（按 skills 签名缓存），并应用模型/思考
     const harness =
       options?.harnessAlreadyCreated && options.harness
@@ -617,7 +669,7 @@ export class AgentRunner {
     // P0/P2：记录本轮请求上下文（runId + 显式引用），供每轮 systemPrompt 读取
     this.harnesses.beginRequest(projectId, sessionId, {
       runId,
-      userMessage: userText,
+      userMessage: resolvedUserText,
       contextRefs: run.contextRefs ?? [],
       activeDocument: run.activeDocument
     })
@@ -628,7 +680,7 @@ export class AgentRunner {
         projectId,
         sessionId,
         run.selection,
-        userText,
+        resolvedUserText,
         run.contextRefs,
         run.activeDocument
       )
@@ -869,8 +921,8 @@ export class AgentRunner {
     try {
       // prompt 返回最终 AssistantMessage；失败时 stopReason=error/aborted 且可能不 throw
       const finalMessage = (await harness.prompt(
-        userText,
-        options?.images ? { images: options.images } : undefined
+        resolvedUserText,
+        resolvedImages?.length ? { images: resolvedImages } : undefined
       )) as {
         stopReason?: string
         errorMessage?: string

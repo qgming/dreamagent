@@ -31,10 +31,14 @@ export function CreateRuntimeProvider({
   const setMessages = useCreateStore((s) => s.setMessages)
   const selectedModelKey = useCreateStore((s) => s.selectedModelKey)
   const selectableModels = useCreateStore((s) => s.selectableModels)
+  const multimodalModelKey = useCreateStore((s) => s.multimodalModelKey)
   const selectedModel = selectableModels.find((model) => model.key === selectedModelKey)
   const attachmentAdapter = useMemo(
-    () => createAttachmentAdapter(selectedModel),
-    [selectedModel]
+    () =>
+      createAttachmentAdapter(selectedModel, {
+        hasMultimodalBridge: Boolean(multimodalModelKey)
+      }),
+    [selectedModel, multimodalModelKey]
   )
 
   const onNew = useCallback(

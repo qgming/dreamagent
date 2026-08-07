@@ -100,6 +100,7 @@ export function CreateComposer({
   const queueFollowUp = useCreateStore((s) => s.queueFollowUp)
   const selectableModels = useCreateStore((s) => s.selectableModels)
   const selectedModelKey = useCreateStore((s) => s.selectedModelKey)
+  const multimodalModelKey = useCreateStore((s) => s.multimodalModelKey)
   const thinkingLevel = useCreateStore((s) => s.thinkingLevel)
   const setSelectedModelKey = useCreateStore((s) => s.setSelectedModelKey)
   const setThinkingLevel = useCreateStore((s) => s.setThinkingLevel)
@@ -164,8 +165,11 @@ export function CreateComposer({
     [selectableModels, selectedModelKey]
   )
   const attachmentCapabilities = useMemo(
-    () => getModelAttachmentCapabilities(selectedModel),
-    [selectedModel]
+    () =>
+      getModelAttachmentCapabilities(selectedModel, {
+        hasMultimodalBridge: Boolean(multimodalModelKey)
+      }),
+    [selectedModel, multimodalModelKey]
   )
 
   useEffect(() => {
