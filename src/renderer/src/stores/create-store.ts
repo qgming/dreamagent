@@ -859,23 +859,24 @@ export const useCreateStore = create<CreateState>((set, get) => ({
       const models = await window.api.settings.listSelectableModels()
       const state = get()
       let selectedModelKey = state.selectedModelKey
-      // 若当前选择无效，回落到第一个可用模型
-      if (
-        !selectedModelKey ||
-        !models.some((m) => m.key === selectedModelKey && !m.disabled)
-      ) {
-        selectedModelKey =
-          models.find((m) => !m.disabled)?.key ?? models[0]?.key ?? null
-      }
       let thinkingLevel = state.thinkingLevel
       try {
         const llm = await window.api.settings.getLlm()
-        // 若无选中，用全局默认模型
-        if (!selectedModelKey && llm.defaultProviderId && llm.defaultModelId) {
-          const key = encodeModelKey(llm.defaultProviderId, llm.defaultModelId)
-          if (models.some((m) => m.key === key)) selectedModelKey = key
+        // 无历史选择（新对话/首次进入）时，始终以设置里的默认模型为准
+        const defaultKey =
+          llm.defaultProviderId && llm.defaultModelId
+            ? encodeModelKey(llm.defaultProviderId, llm.defaultModelId)
+            : null
+        if (
+          !selectedModelKey ||
+          !models.some((m) => m.key === selectedModelKey && !m.disabled)
+        ) {
+          selectedModelKey =
+            defaultKey && models.some((m) => m.key === defaultKey && !m.disabled)
+              ? defaultKey
+              : models.find((m) => !m.disabled)?.key ?? models[0]?.key ?? null
         }
-        // 思考档：优先该模型能力，再回落全局默认
+        // 思考档：优先设置里的默认思考强度，再按当前模型能力纠正
         const selected = models.find((m) => m.key === selectedModelKey)
         if (selected?.reasoning) {
           const levels =
@@ -927,6 +928,8 @@ export const useCreateStore = create<CreateState>((set, get) => ({
     set({ thinkingLevel: level })
     // 同步写回全局默认（不阻塞 UI）
     void window.api.settings.setThinkingLevel(level).catch(() => undefined)
+    // 顶部上下文展示同步思考档
+    applySelectedModelToSessionUsage(get, set)
   },
 
   setGoalArmed: (armed) => set({ goalArmed: armed }),
