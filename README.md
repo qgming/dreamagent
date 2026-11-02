@@ -3,85 +3,104 @@
 
 # 造梦师 DreamAgent
 
-**本地优先的 AI 文章创作工作台**
+**本地优先的 AI 长篇创作工作台**
 
-把故事规划、人物设定、正文创作、项目知识和 AI 协作放进同一个桌面应用。
+大纲、设定、正文与 AI 协作，都在同一个桌面应用里。
 
   <p>
+    <img alt="Release" src="https://github.com/qgming/dreamagent/actions/workflows/release.yml/badge.svg?branch=main" />
+    <img alt="Version" src="https://img.shields.io/badge/version-0.1.7-111111?style=flat-square" />
     <img alt="Electron" src="https://img.shields.io/badge/Electron-37-47848F?style=flat-square&logo=electron&logoColor=white" />
     <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=111" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" />
-    <img alt="Local First" src="https://img.shields.io/badge/Local--First-Yes-16A34A?style=flat-square" />
+    <img alt="Vite" src="https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white" />
+    <img alt="Tailwind" src="https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" />
+    <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-16A34A?style=flat-square" />
+    <img alt="License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" />
+  </p>
+
+  <p>
+    <a href="#为什么是造梦师">为什么是造梦师</a> ·
+    <a href="#核心能力">核心能力</a> ·
+    <a href="#架构">架构</a> ·
+    <a href="#下载与安装">下载安装</a> ·
+    <a href="#本地开发">本地开发</a> ·
+    <a href="#数据目录">数据目录</a> ·
+    <a href="#内置技能">内置技能</a> ·
+    <a href="changelogs/v0.1.7.md">更新日志</a>
   </p>
 </div>
 
 ---
 
-## 产品定位
+DreamAgent（造梦师）是一个围绕真实创作项目组织 AI 的桌面工作台。它基于 Electron、React 19 与 Pi Agent 运行时（`pi-agent-core` / `pi-ai`）构建：主题、卷纲、章纲和场景放在节点里，人物、地点、势力与世界观放在实体里，最终正文放在文章中。AI 通过项目工具读取上下文、维护双链，并直接落笔修改项目。
 
-DreamAgent 面向小说、剧本和系列内容创作者。它不是一个独立的聊天窗口，而是围绕真实创作项目组织 AI：大纲放在节点中，人物与世界观放在实体中，最终正文放在文章中，AI 则通过项目工具读取和维护这些内容。
+项目资料、会话与配置保存在本机；模型请求只发往你主动配置的 OpenAI 兼容服务。
 
-| 创作环节 | DreamAgent 提供的能力                               |
-| -------- | --------------------------------------------------- |
-| 前期规划 | 用树状节点组织主题、卷纲、章纲、场景和待办          |
-| 设定管理 | 管理人物、地点、势力、物件和世界观条目              |
-| 关系梳理 | 在节点与实体之间建立双向链接，追踪引用关系          |
-| 正文创作 | 按文件夹组织文章，在独立编辑区完成内容              |
-| AI 协作  | 让 Agent 读取项目上下文、调用创作工具并持续修改项目 |
-| 创作复盘 | 查看近期项目、文字产出和 Token 消耗热力图           |
+## 为什么是造梦师
+
+- **项目化，而不是聊天窗口** —— 大纲、设定、正文各有明确位置，AI 的每次读写都落在项目结构里，而不是散落在对话记录中。
+- **本地文件为准** —— 项目就是一组普通目录与 JSON 文件，可以备份、迁移，也可以直接纳入 Git 管理。
+- **可执行的创作工具** —— Agent 不只聊天，它用 `list` / `read` / `write` / `edit` / `check_prose` 等工具真正创建和修改内容。
+- **克制的数据面** —— API Key 由主进程管理，渲染进程启用上下文隔离，只通过受控 IPC 使用本地能力。
 
 ## 核心能力
 
-### 项目化创作
+| 分区 | 能力 |
+| --- | --- |
+| 📋 大纲与节点 | 用多级树形节点组织主题、卷纲、章纲、场景和待办，支持状态流转 |
+| 🧑‍🤝‍🧑 设定与实体 | 管理人物、地点、势力、物件和世界观条目，支持多级分类 |
+| 🔗 双链与引用 | 节点、实体和文章之间通过 `@` 提及建立双向链接，追踪出入链 |
+| ✍️ 正文创作 | 用文件夹组织文章，在独立编辑区完成正文，并关联来源节点与设定 |
+| 💬 AI 协作 | 多轮创作会话、流式输出、历史会话、重新生成、追问、插话、排队与中止 |
+| 🧰 创作工具 | `list` / `read` / `write` / `edit` / `delete` / `check_prose`，以及待办、技能、联网和 MCP 工具 |
+| 🧩 模型与扩展 | 多个 OpenAI 兼容供应商、默认模型与思考等级、远程模型列表、多模态桥接 |
+| 🌐 搜索与 MCP | Tavily、Exa、Serper、Brave、SearXNG，MCP Server 接入与单工具开关 |
+| 📊 创作复盘 | 文字产出与 Token 消耗热力图、最近项目和会话入口 |
+| 🎨 界面 | 无边框窗口、浅色 / 深色 / 跟随系统主题 |
 
-- 每个项目拥有独立的元数据、节点、实体、文章和会话。
-- 支持自定义项目库目录，项目内容以本地文件为准。
-- 首页集中显示最近项目、文字产出和模型 Token 消耗。
-- 节点、实体和文章均有明确状态，便于从想法推进到成稿。
+## 架构
 
-### 节点、实体与双链
+```mermaid
+flowchart TB
+  subgraph Renderer["渲染进程 · React 19"]
+    UI["React 19 + assistant-ui<br/>zustand · Tailwind"]
+  end
 
-- 节点用于大纲、情节、任务和结构规划，支持多级树形组织。
-- 实体用于人物、地点、组织、物件和设定，支持多级分类。
-- 节点和实体内容可通过 `@` 提及建立双向链接。
-- 引用关系与父子结构相互独立，既能看层级，也能追踪关联。
-- 删除或移动父级时保留子项，减少结构调整造成的内容损失。
+  subgraph Bridge["Preload · contextBridge 白名单"]
+    API["window.api<br/>类型化 IPC"]
+  end
 
-### AI 创作工作区
+  subgraph Main["主进程 · 唯一特权进程"]
+    Runner["AgentRunner / HarnessManager"]
+    Pi["Pi Agent 运行时<br/>pi-agent-core · pi-ai"]
+    Tools["创作工具层<br/>list · read · write · edit · check_prose"]
+    Project[("项目目录<br/>project.json · beats · entities · chapters")]
+    Sessions[("Pi 会话<br/>sessions/*.jsonl")]
+  end
 
-- 在项目内维护多轮创作会话，支持流式输出和历史会话。
-- Agent 可读取、创建、修改和整理节点、实体、文章及文件夹。
-- 支持项目上下文、相关链接、待办状态和上下文用量展示。
-- 支持重新生成、追问、引导进行中的回复以及中止任务。
-- Markdown、代码块、引用、列表等内容可直接渲染。
+  UI <-->|"受控 IPC"| API
+  API <--> Runner
+  Runner --> Pi
+  Runner --> Tools
+  Tools --> Project
+  Runner --> Sessions
+  Tools --> Web["联网搜索"]
+  Tools --> MCP["MCP Servers"]
+  Runner --> LLM["OpenAI 兼容模型服务"]
+```
 
-### 模型、搜索与扩展
-
-- 支持配置多个 OpenAI 兼容模型供应商，并切换默认模型。
-- 支持不同思考等级和远程模型列表读取。
-- 联网搜索可配置 Tavily、Exa、Serper、Brave 或 SearXNG。
-- 内置长篇、短篇、文风优化、连续性审计等创作技能。
-- 支持导入自定义技能，也可在应用内创建和维护技能文件。
-- 支持配置 MCP Server、发现远程工具并控制单个工具开关。
-
-## 本地优先
-
-- 项目资料、创作正文、会话与应用配置保存在本机。
-- API Key 由桌面主进程管理，不暴露给普通网页环境。
-- 模型请求只发送到用户主动配置的模型服务。
-- Electron 渲染进程启用上下文隔离，通过受控 IPC 使用本地能力。
-
-请注意：启用模型、联网搜索或 MCP 服务后，相应请求会发送给所配置的第三方服务，具体数据策略取决于服务提供方。
+关键设计：主进程独占 Agent 运行时与本地文件访问，渲染进程只通过 `contextBridge` 暴露的类型化 API 消费能力；模型配置、搜索配置和 MCP 配置同样由主进程管理。
 
 ## 下载与安装
 
 前往 [GitHub Releases](https://github.com/qgming/dreamagent/releases) 下载最新版本。
 
-| 平台                | 发布产物             |
-| ------------------- | -------------------- |
-| Windows x64         | NSIS 安装程序 `.exe` |
-| macOS Apple Silicon | 磁盘镜像 `.dmg`      |
-| Linux x64           | `.AppImage`、`.deb`  |
+| 平台                | 发布产物                 |
+| ------------------- | ------------------------ |
+| Windows x64         | NSIS 安装程序 `.exe`     |
+| macOS Apple Silicon | 磁盘镜像 `.dmg`、`.zip`  |
+| Linux x64           | `.AppImage`、`.deb`      |
 
 应用启动后会定期检查 GitHub Releases。也可以打开「设置 -> 关于」手动检查；发现版本后可在应用内下载，并在下载完成后重启安装。
 
@@ -98,6 +117,8 @@ DreamAgent 面向小说、剧本和系列内容创作者。它不是一个独立
 ### 启动项目
 
 ```bash
+git clone https://github.com/qgming/dreamagent.git
+cd dreamagent
 npm install
 npm run dev
 ```
@@ -112,6 +133,8 @@ npm run dev
 | `npm run typecheck`  | 检查主进程、preload 和渲染进程类型 |
 | `npm run build`      | 类型检查并构建到 `out/`            |
 | `npm run preview`    | 运行构建后的应用                   |
+| `npm test`           | 运行 Vitest 测试集                 |
+| `npm run test:watch` | 以监听模式运行测试                 |
 | `npm run dist`       | 构建当前平台安装包                 |
 | `npm run dist:win`   | 构建 Windows 安装包                |
 | `npm run dist:mac`   | 构建 macOS 安装包                  |
@@ -125,6 +148,63 @@ npm run dev
 4. 按需配置联网搜索、技能和 MCP Server。
 5. 返回首页创建项目，从节点、实体或创作工作区开始。
 
+如果主模型不支持图片输入，可以在「模型」设置中指定一个视觉模型作为多模态桥接；图片会先转成中文描述，再随文本发送给主模型。
+
+## 数据目录
+
+项目默认保存在系统文档目录下的 `造梦师/projects`，可在应用内更改项目库根目录。应用配置保存在 Electron `userData` 目录，开发模式下以 Electron 实际应用名为准。
+
+```text
+<项目库>/
+└── <项目>/
+    ├── project.json           # 项目元数据与梗概
+    ├── index.json             # 节点 / 实体 / 文章索引
+    ├── activity.json          # 文字产出与 Token 用量台账
+    ├── beats/                 # 节点
+    ├── entities/              # 实体
+    ├── documents/chapters/    # 文章（支持文件夹层级）
+    └── sessions/              # Pi 会话（JSONL）
+```
+
+```text
+应用配置（userData）
+├── library.json               # 项目库根目录
+├── llm-settings.json          # 模型服务、默认模型、思考等级与多模态桥接
+├── web-search-settings.json   # 联网搜索配置
+├── mcp-servers.json           # MCP Server 配置
+├── skills/                    # 内置与自定义技能
+└── cache/model-logos/         # 模型图标缓存
+```
+
+请注意：启用模型、联网搜索或 MCP 服务后，相应请求会发送给所配置的第三方服务，具体数据策略取决于服务提供方。
+
+## 内置技能
+
+应用随包分发以下 `SKILL.md` 技能，可在「技能」页启用或查看：
+
+| 技能 | 用途 |
+| --- | --- |
+| `long-write` 长篇写作 | 卷纲、章纲、人物设定与正文续写的主路径 |
+| `short-write` 短篇写作 | 短篇构思、反转设计与一篇完结 |
+| `prose-craft` 正文笔法 | 视角、动作、对白、信息边界与章末钩 |
+| `human-writing` 活人感写作 | 通用中文创作与改稿，按材料与语气组织内容 |
+| `story-humanizer` 故事人味化 | 网络小说口语化、听读化复核与安全改写 |
+| `continuity-audit` 连续性审稿 | 查因果、人设、伏笔、时间线与信息边界 |
+| `title-blurb` 起名简介 | 书名、简介、标签与上架包装 |
+| `dreamagent-guide` 使用指南 | 三类对象、双链语法与工具调用顺序 |
+| `skill-creator` 技能制作 | 制作可导入造梦师的 `SKILL.md` 技能包 |
+
+## 快捷键
+
+| 快捷键 | 动作 |
+| --- | --- |
+| `Enter` | 发送消息 |
+| `Shift + Enter` | 换行 |
+| 运行中 `Enter` | 插话，立刻引导当前回复 |
+| 运行中 `Alt + Enter` | 排队，等当前回合结束后发送 |
+
+在创作工作区输入 `@` 可以引用节点或实体，建立双链。
+
 ## 项目结构
 
 ```text
@@ -132,13 +212,16 @@ dreamagent/
 ├── .github/workflows/       # GitHub Actions 云端发布
 ├── build/                   # 应用图标与打包资源
 ├── changelogs/              # 各版本 GitHub Release 更新日志
-├── resources/skills/        # 随应用分发的内置技能
+├── resources/
+│   ├── prompts/             # 内置提示词分类
+│   └── skills/              # 随应用分发的内置技能
 ├── scripts/                 # 开发与资源维护脚本
 ├── src/
 │   ├── main/                # Electron 主进程、服务和 IPC
 │   ├── preload/             # 安全的渲染进程 API 桥接
 │   ├── renderer/            # React 页面、组件和状态管理
 │   └── shared/              # 主进程与渲染进程共享类型
+├── tests/                   # Vitest 测试
 ├── electron-builder.yml     # 跨平台安装包与更新源配置
 ├── electron.vite.config.ts  # Electron Vite 构建配置
 └── package.json
@@ -181,4 +264,4 @@ git push origin main --tags
 
 ## 许可证
 
-项目以 MIT License 发布。
+项目以 [MIT License](LICENSE) 发布。
